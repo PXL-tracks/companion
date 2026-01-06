@@ -59,6 +59,8 @@
     "@napi-rs/canvas": "0.1.81",
     "@sentry/node": "^10.22.0",
     "@trpc/server": "^11.7.1",
+    "@types/on-headers": "^1.0.4",
+    "@types/yazl": "^3.3.0",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.4.1",
     "bufferutil": "^4.0.9",
@@ -108,6 +110,7 @@
     "ws": "^8.18.3",
     "xkeys": "^3.3.0",
     "yaml": "^2.8.1",
+    "yazl": "^3.3.1",
     "zod": "^4.1.12"
   }
 }

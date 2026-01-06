@@ -83,31 +83,31 @@
     "zx": "^8.8.5"
   },
   "dependenciesMeta": {
-    "better-sqlite3": {
-      "built": true
-    },
     "@julusian/jpeg-turbo": {
       "built": true
     },
     "@julusian/segfault-raub": {
       "built": true
     },
+    "@parcel/watcher": {
+      "built": true
+    },
     "@serialport/bindings-cpp": {
       "built": true
     },
+    "better-sqlite3": {
+      "built": true
+    },
     "bufferutil": {
+      "built": true
+    },
+    "esbuild": {
       "built": true
     },
     "node-hid": {
       "built": true
     },
     "usb": {
-      "built": true
-    },
-    "esbuild": {
-      "built": true
-    },
-    "@parcel/watcher": {
       "built": true
     }
   },
