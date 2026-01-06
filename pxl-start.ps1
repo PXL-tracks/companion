@@ -8,11 +8,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoDir = Join-Path $ScriptDir "companion"
+
+# Detect if we're inside the repo or outside
+if (Test-Path "$ScriptDir\package.json") {
+    # Script is in repo root (C:\PXL\Tracks\companion)
+    $RepoDir = $ScriptDir
+} elseif (Test-Path "$ScriptDir\companion\package.json") {
+    # Script is outside repo (C:\PXL\Tracks)
+    $RepoDir = Join-Path $ScriptDir "companion"
+} else {
+    # Repo doesn't exist yet, will be cloned
+    $RepoDir = Join-Path $ScriptDir "companion"
+}
 
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host "       PXL TRACKS LAUNCHER            " -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "Repo: $RepoDir" -ForegroundColor Gray
 
 # Step 1: Clone if needed
 Write-Host ""
@@ -52,12 +64,13 @@ if (-not $SkipBuild) {
     # Step 4: Build
     Write-Host ""
     Write-Host "[4/6] Building..." -ForegroundColor Yellow
-    if (-not (Test-Path "$RepoDir\companion\dist\main.js")) {
-        Write-Host "  Building TypeScript..." -ForegroundColor Gray
-        yarn build:ts
+    $MainJs = Join-Path $RepoDir "companion\dist\main.js"
+    if (-not (Test-Path $MainJs)) {
+        Write-Host "  Building shared-lib..." -ForegroundColor Gray
+        yarn workspace @companion-app/shared build
 
-        Write-Host "  Building companion..." -ForegroundColor Gray
-        Push-Location "$RepoDir\companion"
+        Write-Host "  Building companion TypeScript..." -ForegroundColor Gray
+        Push-Location (Join-Path $RepoDir "companion")
         npx tsc --skipLibCheck 2>$null
         Pop-Location
 
