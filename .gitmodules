@@ -1,0 +1,3 @@
+[submodule "module-local-dev/PXL-timeline-sequencer"]
+	path = module-local-dev/PXL-timeline-sequencer
+	url = https://github.com/PXL-tracks/timeline-sequencer.git
