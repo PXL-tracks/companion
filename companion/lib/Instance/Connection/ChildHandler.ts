@@ -172,7 +172,7 @@ export class ConnectionChildHandler implements ChildProcessHandlerBase {
 
 		const messageHandler = (msg: any) => {
 			// Intercepter SEULEMENT les batch d'actions (nouveau système ultra-rapide)
-			if (msg && msg._type === 'timeline-sequencer-call') {
+			if (msg && msg._type === 'pxl-call') {
 				if (msg.actions && Array.isArray(msg.actions)) {
 					// Nouveau format batch → Ultra-rapide
 					this.#handleTimelineSequencerCall(msg, monitor).catch((err) => {
@@ -1069,14 +1069,14 @@ export class ConnectionChildHandler implements ChildProcessHandlerBase {
 	 */
 	async #handleTimelineSequencerCall(msg: any, monitor: RespawnMonitor): Promise<void> {
 		// Check if global executor is registered
-		if (!(global as any).pxlTimelineExecutor) {
+		if (!(global as any).pxlCore) {
 			throw new Error('PXL Timeline Executor not registered')
 		}
 
 		const { actions, _id } = msg
 
 		// Execute actions via global executor
-		const result = await (global as any).pxlTimelineExecutor.executeActions(actions)
+		const result = await (global as any).pxlCore.executeActions(actions)
 
 		// Send response if ID present
 		if (_id && monitor?.child) {

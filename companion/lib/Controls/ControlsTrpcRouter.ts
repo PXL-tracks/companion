@@ -300,7 +300,7 @@ export function createControlsTrpcRouter(
 			}),
 
 
-		executeActionDirect: publicProcedure
+		pxlFire: publicProcedure
 			.input(
 				z.object({
 					actions: z.array(
@@ -313,7 +313,7 @@ export function createControlsTrpcRouter(
 				})
 			)
 			.mutation(async ({ input }) => {
-				logger.silly(`executeActionDirect: ${input.actions.length} actions`)
+				logger.silly(`pxlFire: ${input.actions.length} actions`)
 				
 				const results = []
 				
@@ -354,7 +354,7 @@ export function createControlsTrpcRouter(
 				return results
 			}),
 
-		getActionCurrentValue: publicProcedure
+		pxlSniff: publicProcedure
 			.input(
 				z.object({
 					queries: z.array(
@@ -367,7 +367,7 @@ export function createControlsTrpcRouter(
 				})
 			)
 			.query(async ({ input }) => {
-				logger.silly(`getActionCurrentValue: ${input.queries.length} queries`)
+				logger.silly(`pxlSniff: ${input.queries.length} queries`)
 				
 				const results = []
 				
@@ -400,7 +400,7 @@ export function createControlsTrpcRouter(
 				return results
 			}),
 
-		getActionMetadata: publicProcedure
+		pxlPeek: publicProcedure
 			.input(
 				z.object({
 					queries: z.array(
@@ -412,7 +412,7 @@ export function createControlsTrpcRouter(
 				})
 			)
 			.query(async ({ input }) => {
-				logger.silly(`getActionMetadata: ${input.queries.length} queries`)
+				logger.silly(`pxlPeek: ${input.queries.length} queries`)
 				
 				const results = []
 				

@@ -35,14 +35,14 @@ export class TimelineExecutor {
 		this.#instanceController = instanceController
 		
 		// Register global executor for IPC access
-		;(global as any).pxlTimelineExecutor = {
+		;(global as any).pxlCore = {
 			executeActions: this.executeActions.bind(this)
 		}
 		
 		// Cleanup on exit
 		const cleanup = () => {
-			if ((global as any).pxlTimelineExecutor) {
-				delete (global as any).pxlTimelineExecutor
+			if ((global as any).pxlCore) {
+				delete (global as any).pxlCore
 				this.#logger.info('🧹 PXL Timeline Direct Executor - Cleaned up')
 			}
 		}
@@ -120,7 +120,7 @@ export class TimelineExecutor {
 	getStatus(): { ready: boolean; registered: boolean; method: string } {
 		return {
 			ready: true,
-			registered: !!(global as any).pxlTimelineExecutor,
+			registered: !!(global as any).pxlCore,
 			method: 'direct-processManager'
 		}
 	}
