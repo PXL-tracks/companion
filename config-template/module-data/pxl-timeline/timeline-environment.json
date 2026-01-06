@@ -1,0 +1,3974 @@
+{
+	"version": "1.0",
+	"type": "pxl-environment",
+	"exportDate": "2025-12-14T05:25:00.000Z",
+	"environment": {
+		"name": "PXL Environment",
+		"moduleVersion": "0.581",
+		"companionVersion": "3.4.0+",
+		"instanceVersions": {},
+		"presets": [],
+		"activePresetId": null
+	},
+	"knobPanel": {
+		"knob-4": {
+			"color": "#ffff00",
+			"position": {
+				"x": 520,
+				"y": 0
+			},
+			"minimized": false
+		},
+		"knob-6": {
+			"color": "#ff0044",
+			"position": {
+				"x": 560,
+				"y": 1000
+			}
+		},
+		"knob-1": {
+			"color": "#00ff41",
+			"position": {
+				"x": 820,
+				"y": 0
+			}
+		},
+		"knob-2": {
+			"color": "#00ffff",
+			"position": {
+				"x": 560,
+				"y": 500
+			}
+		},
+		"knob-3": {
+			"color": "#ff00ff",
+			"position": {
+				"x": 560,
+				"y": 0
+			}
+		},
+		"knob-5": {
+			"color": "#0088ff",
+			"position": {
+				"x": 560,
+				"y": 500
+			}
+		},
+		"knob-7": {
+			"color": "#ff8800",
+			"position": {
+				"x": 820,
+				"y": 500
+			}
+		},
+		"knob-8": {
+			"color": "#00ff88",
+			"position": {
+				"x": 300,
+				"y": 1060
+			}
+		},
+		"knob-9": {
+			"color": "#8800ff",
+			"position": {
+				"x": 580,
+				"y": 1060
+			}
+		},
+		"_environmentMigrated": true,
+		"xyz-1": {
+			"position": {
+				"x": 560,
+				"y": 1000
+			},
+			"color": "#00ff00",
+			"minimized": false
+		},
+		"xyz-2": {
+			"position": {
+				"x": 0,
+				"y": 1000
+			},
+			"color": "#00ff00",
+			"minimized": false
+		},
+		"xyz-3": {
+			"position": {
+				"x": 0,
+				"y": 500
+			},
+			"color": "#00ff00",
+			"minimized": false
+		},
+		"xyz-4": {
+			"position": {
+				"x": 0,
+				"y": 0
+			},
+			"color": "#00ff00",
+			"minimized": false
+		}
+	},
+	"name": "PXL Environment",
+	"presets": [
+		{
+			"id": "preset-1767470096249-6zui3zfh3",
+			"name": "ColorCurve",
+			"position": 3,
+			"fps": 60,
+			"duration": 480,
+			"timeline": {
+				"groups": [
+					{
+						"id": "group-1765688260774-nnycta",
+						"name": "OBSBlock1",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Current Scene",
+								"source": "Block1",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-nnycta-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.132Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-nnycta-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block1",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block1"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.136Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-nnycta-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 1532,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.139Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobPrecision": 0,
+								"pendingUpdate": false,
+								"knobMin": 0,
+								"knobMax": 1530
+							},
+							{
+								"id": "group-1765688260774-nnycta-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 865,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 865,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 865,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.143Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 865,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-nnycta-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.149Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobPrecision": 3,
+								"pendingUpdate": false,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-nnycta-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.152Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobPrecision": 3,
+								"pendingUpdate": false,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-nnycta-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "0",
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "0"
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.155Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 2,
+								"knobMin": -360,
+								"knobMax": 360
+							}
+						],
+						"knobAssignments": {
+							"xyz-1": {
+								"tracksX": ["OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"xyz-2": {
+								"tracksX": ["OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"xyz-3": {
+								"tracksX": ["OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"xyz-4": {
+								"tracksX": ["OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"knob-3": {
+								"tracks": ["OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							},
+							"knob-2": {
+								"tracks": ["OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							},
+							"knob-7": {
+								"tracks": ["OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							},
+							"knob-1": {
+								"tracks": ["OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							}
+						},
+						"_knobAssignmentsMigrated": true,
+						"masterFrame": 58
+					},
+					{
+						"id": "group-1765688260774-kyi26n",
+						"name": "OBSBlock2",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Scene 3",
+								"source": "Block2",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-kyi26n-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.164Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-kyi26n-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block2",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block2"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.167Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-kyi26n-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 1373,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.170Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 1530
+							},
+							{
+								"id": "group-1765688260774-kyi26n-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 870,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 762,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 870,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.173Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 870
+							},
+							{
+								"id": "group-1765688260774-kyi26n-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.29,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.29
+									},
+									{
+										"frame": 240,
+										"value": 0.29
+									},
+									{
+										"frame": 360,
+										"value": 0.29
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.177Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 3,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-kyi26n-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.29,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.29
+									},
+									{
+										"frame": 240,
+										"value": 0.29
+									},
+									{
+										"frame": 360,
+										"value": 0.29
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.182Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 3,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-kyi26n-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "0",
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "0"
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.185Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 2,
+								"knobMin": -360,
+								"knobMax": 360
+							}
+						],
+						"masterFrame": 58
+					},
+					{
+						"id": "group-1765688260774-857mll",
+						"name": "OBSBlock4",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Scene 3",
+								"source": "Block4",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-857mll-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.191Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block4",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block4"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.195Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 1515,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 1515,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 1515,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.199Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 1515,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 8,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 861,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 8,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 871,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 861,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.202Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 864,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.212,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.212
+									},
+									{
+										"frame": 240,
+										"value": 0.212
+									},
+									{
+										"frame": 360,
+										"value": 0.212
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.205Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": -2,
+								"knobMax": 2,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.212,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.212
+									},
+									{
+										"frame": 240,
+										"value": 0.212
+									},
+									{
+										"frame": 360,
+										"value": 0.212
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.208Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 10,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "0",
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "0"
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.214Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -360,
+								"knobMax": 360,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							}
+						],
+						"masterFrame": 58
+					},
+					{
+						"id": "group-1765688260774-5u7sds",
+						"name": "OBSBlock3",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Scene 3",
+								"source": "Block3",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-5u7sds-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.224Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block3",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.227Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 1537,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 1534,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 1537,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.230Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 1537,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 864,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 1,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 864,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 864,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.236Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 864,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.239Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 2,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 190,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.243Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 240,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 1,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:27.246Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -360,
+								"knobMax": 360,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							}
+						],
+						"masterFrame": 58
+					},
+					{
+						"id": "group-1765688260774-us5m6i",
+						"name": "Variables Custom",
+						"type": "classic",
+						"expanded": true,
+						"armed": false,
+						"tracks": [
+							{
+								"id": "group-1765688260774-us5m6i-0",
+								"name": "testX",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 186,
+								"startFrame": 240,
+								"currentValue": -585.4028436018957,
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testX",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testX"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0
+									},
+									{
+										"frame": 149,
+										"value": -271
+									},
+									{
+										"frame": 360,
+										"value": -1000
+									}
+								],
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.246Z",
+									"issues": []
+								},
+								"isPlaying": true,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -1000,
+								"knobMax": 1000,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-us5m6i-1",
+								"name": "testY",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 186,
+								"startFrame": 240,
+								"currentValue": -386.66666666666674,
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testY",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testY"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 676
+									},
+									{
+										"frame": 51,
+										"value": 750
+									},
+									{
+										"frame": 102,
+										"value": 874
+									},
+									{
+										"frame": 156,
+										"value": 653
+									},
+									{
+										"frame": 217,
+										"value": -1000
+									},
+									{
+										"frame": 292,
+										"value": 1000
+									},
+									{
+										"frame": 360,
+										"value": 666
+									}
+								],
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.246Z",
+									"issues": []
+								},
+								"isPlaying": true,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -1000,
+								"knobMax": 1000,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-us5m6i-2",
+								"name": "testA",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 186,
+								"startFrame": 240,
+								"currentValue": "Eliott",
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testA",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testA"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Arthur"
+									},
+									{
+										"frame": 120,
+										"value": "Jean"
+									},
+									{
+										"frame": 240,
+										"value": "Eliott"
+									},
+									{
+										"frame": 360,
+										"value": "Arthur"
+									}
+								],
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.246Z",
+									"issues": []
+								},
+								"isPlaying": true,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-us5m6i-3",
+								"name": "testZ",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 178,
+								"startFrame": 240,
+								"currentValue": 0,
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testZ",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testZ"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0
+									},
+									{
+										"frame": 62,
+										"value": 1
+									},
+									{
+										"frame": 90,
+										"value": 0
+									},
+									{
+										"frame": 90,
+										"value": 1
+									},
+									{
+										"frame": 240,
+										"value": 0
+									}
+								],
+								"isPlaying": true,
+								"_justLooped": false,
+								"interpolationMode": "jump",
+								"referenceFrame": null,
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:27.246Z",
+									"issues": []
+								},
+								"pendingUpdate": false
+							}
+						]
+					}
+				]
+			},
+			"created": 1767470096249,
+			"modified": 1767481264396,
+			"lastSelection": null
+		},
+		{
+			"id": "preset-1767485276759-0hxi93ud3",
+			"name": "ColorCurve30p",
+			"position": 4,
+			"fps": 30,
+			"duration": 480,
+			"timeline": {
+				"groups": [
+					{
+						"id": "group-1765688260774-nnycta",
+						"name": "OBSBlock1",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Current Scene",
+								"source": "Block1",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-nnycta-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.890Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-nnycta-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block1",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block1"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.896Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-nnycta-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 1532,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.901Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobPrecision": 0,
+								"pendingUpdate": false,
+								"knobMin": 0,
+								"knobMax": 1530
+							},
+							{
+								"id": "group-1765688260774-nnycta-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 865,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 865,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 865,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.905Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 865,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-nnycta-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.910Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobPrecision": 3,
+								"pendingUpdate": false,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-nnycta-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.913Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobPrecision": 3,
+								"pendingUpdate": false,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-nnycta-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "0",
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "0"
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.917Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 2,
+								"knobMin": -360,
+								"knobMax": 360
+							}
+						],
+						"knobAssignments": {
+							"xyz-1": {
+								"tracksX": ["OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"xyz-2": {
+								"tracksX": ["OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"xyz-3": {
+								"tracksX": ["OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"xyz-4": {
+								"tracksX": ["OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:positionX"],
+								"tracksY": ["OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:positionY"],
+								"tracksZ": [
+									"OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:scaleX",
+									"OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:scaleY"
+								]
+							},
+							"knob-3": {
+								"tracks": ["OBSBlock1|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							},
+							"knob-2": {
+								"tracks": ["OBSBlock2|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							},
+							"knob-7": {
+								"tracks": ["OBSBlock4|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							},
+							"knob-1": {
+								"tracks": ["OBSBlock3|o46saQttCKNNIK2aOIQNo:source_properties:rotation"]
+							}
+						},
+						"_knobAssignmentsMigrated": true,
+						"masterFrame": 80
+					},
+					{
+						"id": "group-1765688260774-kyi26n",
+						"name": "OBSBlock2",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Scene 3",
+								"source": "Block2",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-kyi26n-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.925Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-kyi26n-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block2",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block2"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.928Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-kyi26n-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 1373,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 1530,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.931Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 1530
+							},
+							{
+								"id": "group-1765688260774-kyi26n-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 870,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 762,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 870,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.935Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 870
+							},
+							{
+								"id": "group-1765688260774-kyi26n-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.29,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.29
+									},
+									{
+										"frame": 240,
+										"value": 0.29
+									},
+									{
+										"frame": 360,
+										"value": 0.29
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.938Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 3,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-kyi26n-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.29,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.29
+									},
+									{
+										"frame": 240,
+										"value": 0.29
+									},
+									{
+										"frame": 360,
+										"value": 0.29
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.942Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 3,
+								"knobMin": -2,
+								"knobMax": 2
+							},
+							{
+								"id": "group-1765688260774-kyi26n-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "0",
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "0"
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.945Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false,
+								"knobPrecision": 2,
+								"knobMin": -360,
+								"knobMax": 360
+							}
+						],
+						"masterFrame": 80
+					},
+					{
+						"id": "group-1765688260774-857mll",
+						"name": "OBSBlock4",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Scene 3",
+								"source": "Block4",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-857mll-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.952Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block4",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block4"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.957Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 1515,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 1515,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 1515,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.960Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 1515,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 8,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 861,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 8,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 871,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 861,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.963Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobPrecision": 0,
+								"knobMin": 0,
+								"knobMax": 864,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.21,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.212
+									},
+									{
+										"frame": 240,
+										"value": 0.212
+									},
+									{
+										"frame": 360,
+										"value": 0.212
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.966Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": -2,
+								"knobMax": 2,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.21,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.212
+									},
+									{
+										"frame": 240,
+										"value": 0.212
+									},
+									{
+										"frame": 360,
+										"value": 0.212
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.970Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 10,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-857mll-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "0",
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "0"
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.972Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -360,
+								"knobMax": 360,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							}
+						],
+						"masterFrame": 80
+					},
+					{
+						"id": "group-1765688260774-5u7sds",
+						"name": "OBSBlock3",
+						"type": "action-multi",
+						"expanded": true,
+						"armed": false,
+						"companionAction": {
+							"connectionId": "o46saQttCKNNIK2aOIQNo",
+							"actionId": "source_properties",
+							"options": {
+								"scene": "Scene 3",
+								"source": "Block3",
+								"positionX": "",
+								"positionY": "",
+								"scaleX": "",
+								"scaleY": "",
+								"rotation": ""
+							}
+						},
+						"tracks": [
+							{
+								"id": "group-1765688260774-5u7sds-0",
+								"name": "Scene (optional, defaults to current scene)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Scene 3",
+								"locked": true,
+								"companionParam": {
+									"id": "scene",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Current Scene",
+											"label": "Current Scene"
+										},
+										{
+											"id": "Preview Scene",
+											"label": "Preview Scene"
+										},
+										{
+											"id": "Scene 2",
+											"label": "Scene 2"
+										},
+										{
+											"id": "Scene 3",
+											"label": "Scene 3"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Scene 3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.978Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-1",
+								"name": "Source",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": "Block3",
+								"locked": true,
+								"companionParam": {
+									"id": "source",
+									"type": "dropdown",
+									"choices": [
+										{
+											"id": "Block1",
+											"label": "Block1"
+										},
+										{
+											"id": "Block2",
+											"label": "Block2"
+										},
+										{
+											"id": "Block3",
+											"label": "Block3"
+										},
+										{
+											"id": "Block4",
+											"label": "Block4"
+										},
+										{
+											"id": "Video Capture Device",
+											"label": "Video Capture Device"
+										}
+									]
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Block3"
+									}
+								],
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.982Z",
+									"issues": []
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-2",
+								"name": "Position - X (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 1537,
+								"locked": false,
+								"companionParam": {
+									"id": "positionX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 1534,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 1537,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.985Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 1537,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-3",
+								"name": "Position - Y (pixels)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 864,
+								"locked": false,
+								"companionParam": {
+									"id": "positionY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 120,
+										"value": 1,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 240,
+										"value": 864,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 360,
+										"value": 864,
+										"curve": "smooth",
+										"curvePower": 1
+									},
+									{
+										"frame": 480,
+										"value": 0,
+										"curve": "smooth",
+										"curvePower": 1
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.990Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 864,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-4",
+								"name": "Scale - X (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleX",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.993Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 2,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-5",
+								"name": "Scale - Y (multiplier, 1 is 100%)",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 442,
+								"startFrame": 240,
+								"currentValue": 0.2,
+								"locked": false,
+								"companionParam": {
+									"id": "scaleY",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0.2
+									},
+									{
+										"frame": 120,
+										"value": 0.2
+									},
+									{
+										"frame": 240,
+										"value": 0.2
+									},
+									{
+										"frame": 360,
+										"value": 0.2
+									},
+									{
+										"frame": 480,
+										"value": 0.2
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.996Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": true,
+								"referenceFrame": 183,
+								"_justLooped": false,
+								"knobMin": 0,
+								"knobMax": 1,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-5u7sds-6",
+								"name": "Rotation",
+								"color": "#FF9800",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 240,
+								"startFrame": 240,
+								"currentValue": 0,
+								"locked": false,
+								"companionParam": {
+									"id": "rotation",
+									"type": "text"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0
+									}
+								],
+								"validationStatus": {
+									"status": "warning",
+									"checkedAt": "2026-01-04T00:08:30.999Z",
+									"issues": ["Parameter type mismatch: expected text, got textinput"]
+								},
+								"_relinkFailed": false,
+								"isPlaying": false,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -360,
+								"knobMax": 360,
+								"knobPrecision": 2,
+								"pendingUpdate": false
+							}
+						],
+						"masterFrame": 80
+					},
+					{
+						"id": "group-1765688260774-us5m6i",
+						"name": "Variables Custom",
+						"type": "classic",
+						"expanded": true,
+						"armed": false,
+						"tracks": [
+							{
+								"id": "group-1765688260774-us5m6i-0",
+								"name": "testX",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 82,
+								"startFrame": 240,
+								"currentValue": -585,
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testX",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testX"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0
+									},
+									{
+										"frame": 149,
+										"value": -271
+									},
+									{
+										"frame": 360,
+										"value": -1000
+									}
+								],
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.999Z",
+									"issues": []
+								},
+								"isPlaying": true,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -1000,
+								"knobMax": 1000,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-us5m6i-1",
+								"name": "testY",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 82,
+								"startFrame": 240,
+								"currentValue": -387,
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testY",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testY"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 676
+									},
+									{
+										"frame": 51,
+										"value": 750
+									},
+									{
+										"frame": 102,
+										"value": 874
+									},
+									{
+										"frame": 156,
+										"value": 653
+									},
+									{
+										"frame": 217,
+										"value": -1000
+									},
+									{
+										"frame": 292,
+										"value": 1000
+									},
+									{
+										"frame": 360,
+										"value": 666
+									}
+								],
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:30.999Z",
+									"issues": []
+								},
+								"isPlaying": true,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"knobMin": -1000,
+								"knobMax": 1000,
+								"knobPrecision": 0,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-us5m6i-2",
+								"name": "testA",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 82,
+								"startFrame": 240,
+								"currentValue": "Eliott",
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testA",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testA"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": "Arthur"
+									},
+									{
+										"frame": 120,
+										"value": "Jean"
+									},
+									{
+										"frame": 240,
+										"value": "Eliott"
+									},
+									{
+										"frame": 360,
+										"value": "Arthur"
+									}
+								],
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:31.000Z",
+									"issues": []
+								},
+								"isPlaying": true,
+								"referenceFrame": null,
+								"_justLooped": false,
+								"pendingUpdate": false
+							},
+							{
+								"id": "group-1765688260774-us5m6i-3",
+								"name": "testZ",
+								"color": "#2196F3",
+								"enabled": true,
+								"loop": true,
+								"reverse": false,
+								"mode": "PLAY",
+								"armed": false,
+								"collapsed": true,
+								"currentFrame": 202,
+								"startFrame": 240,
+								"currentValue": 0,
+								"connection": {
+									"connectionId": "internal",
+									"actionId": "custom_variable_set",
+									"options": {
+										"name": "testZ",
+										"value": "0.0"
+									}
+								},
+								"actionOptions": {
+									"name": "testZ"
+								},
+								"keyframes": [
+									{
+										"frame": 0,
+										"value": 0
+									},
+									{
+										"frame": 62,
+										"value": 1
+									},
+									{
+										"frame": 90,
+										"value": 0
+									},
+									{
+										"frame": 90,
+										"value": 1
+									},
+									{
+										"frame": 240,
+										"value": 0
+									}
+								],
+								"isPlaying": true,
+								"_justLooped": false,
+								"interpolationMode": "jump",
+								"referenceFrame": null,
+								"_relinkFailed": false,
+								"validationStatus": {
+									"status": "valid",
+									"checkedAt": "2026-01-04T00:08:31.000Z",
+									"issues": []
+								},
+								"pendingUpdate": false
+							}
+						]
+					}
+				]
+			},
+			"created": 1767485276759,
+			"modified": 1767485304387,
+			"lastSelection": null
+		}
+	],
+	"activePresetId": "preset-1767485276759-0hxi93ud3"
+}
