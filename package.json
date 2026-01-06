@@ -82,6 +82,35 @@
     "yaml": "^2.8.1",
     "zx": "^8.8.5"
   },
+  "dependenciesMeta": {
+    "better-sqlite3": {
+      "built": true
+    },
+    "@julusian/jpeg-turbo": {
+      "built": true
+    },
+    "@julusian/segfault-raub": {
+      "built": true
+    },
+    "@serialport/bindings-cpp": {
+      "built": true
+    },
+    "bufferutil": {
+      "built": true
+    },
+    "node-hid": {
+      "built": true
+    },
+    "usb": {
+      "built": true
+    },
+    "esbuild": {
+      "built": true
+    },
+    "@parcel/watcher": {
+      "built": true
+    }
+  },
   "resolutions": {
     "node-gyp-build": "github:julusian/node-gyp-build#cross-install-support",
     "osc/serialport": "npm:empty-npm-package@1.0.0",
