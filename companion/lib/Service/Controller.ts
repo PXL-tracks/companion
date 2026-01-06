@@ -10,6 +10,7 @@ import { ServiceRosstalk } from './Rosstalk.js'
 import { ServiceSatelliteTcp } from './SatelliteTcp.js'
 import { ServiceSurfaceDiscovery } from './SurfaceDiscovery.js'
 import { ServiceTcp } from './Tcp.js'
+import { ServiceTimeline } from './Timeline/Controller.js'
 import { ServiceUdp } from './Udp.js'
 import { ServiceVideohubPanel } from './VideohubPanel.js'
 import type { UIHandler } from '../UI/Handler.js'
@@ -54,6 +55,7 @@ export class ServiceController {
 	readonly videohubPanel: ServiceVideohubPanel
 	readonly bonjourDiscovery: ServiceBonjourDiscovery
 	readonly surfaceDiscovery: ServiceSurfaceDiscovery
+	readonly timeline: ServiceTimeline
 
 	constructor(
 		serviceApi: ServiceApi,
@@ -80,6 +82,7 @@ export class ServiceController {
 		this.videohubPanel = new ServiceVideohubPanel(surfaceController, userconfig)
 		this.bonjourDiscovery = new ServiceBonjourDiscovery(userconfig, instanceController)
 		this.surfaceDiscovery = new ServiceSurfaceDiscovery(userconfig)
+		this.timeline = new ServiceTimeline(instanceController)
 	}
 
 	onButtonDrawn(location: ControlLocation, render: ImageResult): void {

@@ -10,7 +10,7 @@ import { nanoid } from 'nanoid'
 import type { Logger } from '../Log/Controller.js'
 import type { ControlCommonEvents } from './ControlDependencies.js'
 import type EventEmitter from 'node:events'
-import { EntityModelType, type ActionEntityModel, type FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import { EntityModelType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 import type { RunActionExtras } from '../Instance/Connection/ChildHandler.js'
 import type { InstanceProcessManager } from '../Instance/ProcessManager.js'
 
@@ -299,7 +299,6 @@ export function createControlsTrpcRouter(
 				}
 			}),
 
-		// ========== PXL Timeline Sequencer APIs ==========
 
 		executeActionDirect: publicProcedure
 			.input(
@@ -315,16 +314,16 @@ export function createControlsTrpcRouter(
 			)
 			.mutation(async ({ input }) => {
 				logger.silly(`executeActionDirect: ${input.actions.length} actions`)
-
+				
 				const results = []
-
+				
 				for (const actionInput of input.actions) {
 					const instance = processManager.getConnectionChild(actionInput.connectionId)
 					if (!instance) {
 						results.push({ success: false, error: `Connection "${actionInput.connectionId}" not found` })
 						continue
 					}
-
+					
 					const action: ActionEntityModel = {
 						type: EntityModelType.Action,
 						id: nanoid(),
@@ -334,7 +333,7 @@ export function createControlsTrpcRouter(
 						disabled: false,
 						upgradeIndex: undefined,
 					}
-
+					
 					const controller = new AbortController()
 					const extras: RunActionExtras = {
 						controlId: "timeline-direct",
@@ -343,7 +342,7 @@ export function createControlsTrpcRouter(
 						abortDelayed: controller.signal,
 						executionMode: "concurrent",
 					}
-
+					
 					try {
 						await instance.actionRun(action, extras)
 						results.push({ success: true })
@@ -351,7 +350,7 @@ export function createControlsTrpcRouter(
 						results.push({ success: false, error: error.message })
 					}
 				}
-
+				
 				return results
 			}),
 
@@ -369,17 +368,17 @@ export function createControlsTrpcRouter(
 			)
 			.query(async ({ input }) => {
 				logger.silly(`getActionCurrentValue: ${input.queries.length} queries`)
-
+				
 				const results = []
-
+				
 				for (const query of input.queries) {
 					const instance = processManager.getConnectionChild(query.connectionId)
 					if (!instance) {
 						results.push({ success: false, error: `Connection "${query.connectionId}" not found` })
 						continue
 					}
-
-					const feedbackEntity: FeedbackEntityModel = {
+					
+					const feedbackEntity = {
 						type: EntityModelType.Feedback,
 						id: nanoid(),
 						connectionId: query.connectionId,
@@ -389,7 +388,7 @@ export function createControlsTrpcRouter(
 						upgradeIndex: undefined,
 						isInverted: false,
 					}
-
+					
 					try {
 						const learnedOptions = await instance.entityLearnValues(feedbackEntity, "timeline-learn")
 						results.push({ success: true, value: learnedOptions })
@@ -397,7 +396,7 @@ export function createControlsTrpcRouter(
 						results.push({ success: false, error: error.message })
 					}
 				}
-
+				
 				return results
 			}),
 
@@ -414,24 +413,24 @@ export function createControlsTrpcRouter(
 			)
 			.query(async ({ input }) => {
 				logger.silly(`getActionMetadata: ${input.queries.length} queries`)
-
+				
 				const results = []
-
+				
 				for (const query of input.queries) {
 					const actionDef = instanceDefinitions.getEntityDefinition(
 						EntityModelType.Action,
 						query.connectionId,
 						query.actionId
 					)
-
+					
 					if (!actionDef) {
-						results.push({
-							success: false,
-							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"`
+						results.push({ 
+							success: false, 
+							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"` 
 						})
 						continue
 					}
-
+					
 					results.push({
 						success: true,
 						actionId: query.actionId,
@@ -452,7 +451,7 @@ export function createControlsTrpcRouter(
 						})),
 					})
 				}
-
+				
 				return results
 			}),
 	}
