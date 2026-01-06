@@ -1,3 +1,18 @@
+# PXL Tracks - Companion Fork
+
+## Quick Start (Windows)
+
+```powershell
+mkdir C:\PXL\Tracks
+cd C:\PXL\Tracks
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/PXL-tracks/companion/pxl-stable/pxl-start.ps1" -OutFile "pxl-start.ps1"
+.\pxl-start.ps1
+```
+
+This will automatically clone, build, and start everything!
+
+---
+
 # [Bitfocus Companion](https://bitfocus.io/companion)
 
 **Documentation**
