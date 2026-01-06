@@ -245,7 +245,8 @@ export class ControlsController {
 				this.#registry.page,
 				this.#registry.instance.definitions,
 				this.#controlEvents,
-				this
+				this,
+				this.#registry.instance.processManager
 			),
 
 			watchControl: publicProcedure

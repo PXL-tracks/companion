@@ -10,6 +10,9 @@ import { nanoid } from 'nanoid'
 import type { Logger } from '../Log/Controller.js'
 import type { ControlCommonEvents } from './ControlDependencies.js'
 import type EventEmitter from 'node:events'
+import { EntityModelType, type ActionEntityModel, type FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandler.js'
+import type { InstanceProcessManager } from '../Instance/ProcessManager.js'
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function createControlsTrpcRouter(
@@ -18,7 +21,8 @@ export function createControlsTrpcRouter(
 	pageController: PageController,
 	instanceDefinitions: InstanceDefinitions,
 	controlEvents: EventEmitter<ControlCommonEvents>,
-	controlsController: ControlsController
+	controlsController: ControlsController,
+	processManager: InstanceProcessManager
 ) {
 	return {
 		importPreset: publicProcedure
@@ -293,6 +297,163 @@ export function createControlsTrpcRouter(
 				} else {
 					throw new Error(`Control "${input.controlId}" does not support options`)
 				}
+			}),
+
+		// ========== PXL Timeline Sequencer APIs ==========
+
+		executeActionDirect: publicProcedure
+			.input(
+				z.object({
+					actions: z.array(
+						z.object({
+							connectionId: z.string(),
+							actionId: z.string(),
+							options: z.record(z.string(), z.any()),
+						})
+					),
+				})
+			)
+			.mutation(async ({ input }) => {
+				logger.silly(`executeActionDirect: ${input.actions.length} actions`)
+
+				const results = []
+
+				for (const actionInput of input.actions) {
+					const instance = processManager.getConnectionChild(actionInput.connectionId)
+					if (!instance) {
+						results.push({ success: false, error: `Connection "${actionInput.connectionId}" not found` })
+						continue
+					}
+
+					const action: ActionEntityModel = {
+						type: EntityModelType.Action,
+						id: nanoid(),
+						connectionId: actionInput.connectionId,
+						definitionId: actionInput.actionId,
+						options: actionInput.options,
+						disabled: false,
+						upgradeIndex: undefined,
+					}
+
+					const controller = new AbortController()
+					const extras: RunActionExtras = {
+						controlId: "timeline-direct",
+						surfaceId: "timeline",
+						location: undefined,
+						abortDelayed: controller.signal,
+						executionMode: "concurrent",
+					}
+
+					try {
+						await instance.actionRun(action, extras)
+						results.push({ success: true })
+					} catch (error: any) {
+						results.push({ success: false, error: error.message })
+					}
+				}
+
+				return results
+			}),
+
+		getActionCurrentValue: publicProcedure
+			.input(
+				z.object({
+					queries: z.array(
+						z.object({
+							connectionId: z.string(),
+							feedbackId: z.string(),
+							options: z.record(z.string(), z.any()).optional(),
+						})
+					),
+				})
+			)
+			.query(async ({ input }) => {
+				logger.silly(`getActionCurrentValue: ${input.queries.length} queries`)
+
+				const results = []
+
+				for (const query of input.queries) {
+					const instance = processManager.getConnectionChild(query.connectionId)
+					if (!instance) {
+						results.push({ success: false, error: `Connection "${query.connectionId}" not found` })
+						continue
+					}
+
+					const feedbackEntity: FeedbackEntityModel = {
+						type: EntityModelType.Feedback,
+						id: nanoid(),
+						connectionId: query.connectionId,
+						definitionId: query.feedbackId,
+						options: query.options || {},
+						disabled: false,
+						upgradeIndex: undefined,
+						isInverted: false,
+					}
+
+					try {
+						const learnedOptions = await instance.entityLearnValues(feedbackEntity, "timeline-learn")
+						results.push({ success: true, value: learnedOptions })
+					} catch (error: any) {
+						results.push({ success: false, error: error.message })
+					}
+				}
+
+				return results
+			}),
+
+		getActionMetadata: publicProcedure
+			.input(
+				z.object({
+					queries: z.array(
+						z.object({
+							connectionId: z.string(),
+							actionId: z.string(),
+						})
+					),
+				})
+			)
+			.query(async ({ input }) => {
+				logger.silly(`getActionMetadata: ${input.queries.length} queries`)
+
+				const results = []
+
+				for (const query of input.queries) {
+					const actionDef = instanceDefinitions.getEntityDefinition(
+						EntityModelType.Action,
+						query.connectionId,
+						query.actionId
+					)
+
+					if (!actionDef) {
+						results.push({
+							success: false,
+							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"`
+						})
+						continue
+					}
+
+					results.push({
+						success: true,
+						actionId: query.actionId,
+						label: actionDef.label,
+						description: actionDef.description,
+						hasLearn: !!actionDef.hasLearn,
+						learnTimeout: actionDef.learnTimeout,
+						options: actionDef.options.map((opt: any) => ({
+							id: opt.id,
+							label: opt.label,
+							type: opt.type,
+							min: opt.min,
+							max: opt.max,
+							step: opt.step,
+							default: opt.default,
+							choices: opt.choices,
+							tooltip: opt.tooltip,
+						})),
+					})
+				}
+
+				return results
 			}),
 	}
 }

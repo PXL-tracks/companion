@@ -178,6 +178,24 @@ export class ConnectionChildHandler implements ChildProcessHandlerBase {
 			: null
 
 		const messageHandler = (msg: any) => {
+			// Intercepter les messages custom du Timeline Sequencer
+			if (msg && msg._type === 'timeline-sequencer-call') {
+				this.#handleTimelineSequencerCall(msg, monitor).catch((err) => {
+					this.logger.error(`Timeline Sequencer call failed: ${err.message}`)
+
+					// Envoyer une réponse d'erreur si un ID est présent
+					if (msg._id && monitor.child) {
+						monitor.child.send({
+							_replyTo: msg._id,
+							success: false,
+							error: err.message
+						})
+					}
+				})
+				return
+			}
+
+			// Sinon, traiter normalement
 			this.#ipcWrapper.receivedMessage(msg)
 		}
 		monitor.on('message', messageHandler)
@@ -1043,6 +1061,253 @@ export class ConnectionChildHandler implements ChildProcessHandlerBase {
 	 */
 	async #handleSharedUdpSocketSend(msg: SharedUdpSocketMessageSend): Promise<void> {
 		this.#deps.sharedUdpManager.sendOnPort(this.connectionId, msg.handleId, msg.address, msg.port, msg.message)
+	}
+
+	/**
+	 * Gérer les appels IPC custom du Timeline Sequencer
+	 */
+	async #handleTimelineSequencerCall(msg: any, monitor: RespawnMonitor): Promise<void> {
+		const { method, params, _id } = msg
+
+		let result: any
+		let success = true
+		let error: string | undefined
+
+		try {
+			switch (method) {
+				case 'executeActionDirect':
+					result = await this.#executeActionDirectForTimeline(
+						params.connectionId,
+						params.actionId,
+						params.options
+					)
+					break
+
+				case 'getActionCurrentValue':
+					result = await this.#getActionCurrentValueForTimeline(
+						params.connectionId,
+						params.feedbackId,
+						params.options
+					)
+					break
+
+				case 'getActionMetadata':
+					result = await this.#getActionMetadataForTimeline(
+						params.connectionId,
+						params.actionId
+					)
+					break
+
+				case 'setCustomVariable':
+					result = await this.#setCustomVariableForTimeline(
+						params.name,
+						params.value
+					)
+					break
+
+				case 'getCustomVariable':
+					result = await this.#getCustomVariableForTimeline(
+						params.name
+					)
+					break
+
+				case 'deleteCustomVariable':
+					result = await this.#deleteCustomVariableForTimeline(
+						params.name
+					)
+					break
+
+				default:
+					throw new Error(`Unknown Timeline Sequencer method: ${method}`)
+			}
+		} catch (err: any) {
+			success = false
+			error = err.message
+			result = null
+		}
+
+		// Envoyer la réponse si un ID est présent
+		if (_id && monitor?.child) {
+			monitor.child.send({
+				_replyTo: _id,
+				success: success,
+				error: error,
+				result: result
+			})
+		}
+	}
+
+	/**
+	 * Exécuter une action directement (pour Timeline Sequencer)
+	 * Utilise actionRunner comme dans executeActionDirect du tRPC
+	 */
+	async #executeActionDirectForTimeline(
+		connectionId: string,
+		actionId: string,
+		options: any
+	): Promise<any> {
+		this.logger.debug(`Timeline: Execute action ${actionId} on ${connectionId}`)
+
+		// Créer l'action comme dans executeActionDirect
+		const actionModel: ActionEntityModel = {
+			type: EntityModelType.Action,
+			id: 'timeline-' + Date.now(),
+			connectionId: connectionId,
+			definitionId: actionId,
+			options: options,
+			disabled: false,
+			upgradeIndex: undefined
+		}
+
+		// Créer les extras
+		const controller = new AbortController()
+		const extras = {
+			controlId: 'timeline-sequencer',
+			surfaceId: 'timeline',
+			location: undefined,
+			abortDelayed: controller.signal,
+			executionMode: 'concurrent' as const
+		}
+
+		// Utiliser actionRunner via controls
+		// On crée un wrapper qui simule un ControlEntityInstance
+		const tempInstance = {
+			type: EntityModelType.Action,
+			connectionId: connectionId,
+			disabled: false,
+			asEntityModel: () => actionModel
+		}
+
+		await this.#deps.controls.actionRunner.runMultipleActions(
+			[tempInstance as any],
+			extras,
+			false
+		)
+
+		return { success: true }
+	}
+
+	/**
+	 * Obtenir la valeur actuelle d'une action (pour Timeline Sequencer)
+	 * Utilise entityLearnValues pour lire via feedback
+	 */
+	async #getActionCurrentValueForTimeline(
+		connectionId: string,
+		feedbackId: string,
+		_options?: any
+	): Promise<any> {
+		this.logger.debug(`Timeline: Get current value for ${feedbackId} on ${connectionId}`)
+
+		// Pour l'instant, on indique que le learn doit se faire via tRPC
+		// car on n'a pas accès direct au processManager ici
+		return {
+			value: null,
+			available: false,
+			message: 'Use tRPC getActionCurrentValue API for learning values. IPC version requires processManager access.'
+		}
+	}
+
+	/**
+	 * Obtenir les métadonnées d'une action (pour Timeline Sequencer)
+	 */
+	async #getActionMetadataForTimeline(
+		connectionId: string,
+		actionId: string
+	): Promise<any> {
+		this.logger.debug(`Timeline: Get metadata for ${actionId} on ${connectionId}`)
+
+		// Récupérer la définition de l'action
+		const actionDef = this.#deps.instanceDefinitions.getEntityDefinition(
+			EntityModelType.Action,
+			connectionId,
+			actionId
+		)
+
+		if (!actionDef) {
+			throw new Error(`Action ${actionId} not found in connection ${connectionId}`)
+		}
+
+		// Extraire les métadonnées des options
+		if (actionDef.options && Array.isArray(actionDef.options)) {
+			for (const option of actionDef.options) {
+				// Vérifier si c'est un champ numérique
+				if (option.type === 'number') {
+					// Cast vers le type qui a min/max
+					const numOption = option as any
+					if (numOption.min !== undefined && numOption.max !== undefined) {
+						return {
+							type: 'numeric',
+							min: numOption.min,
+							max: numOption.max,
+							default: numOption.default ?? numOption.min,
+							step: numOption.step ?? 1
+						}
+					}
+				}
+			}
+		}
+
+		// Par défaut, retourner des métadonnées trigger
+		return {
+			type: 'trigger',
+			min: 0,
+			max: 1
+		}
+	}
+
+	/**
+	 * Définir une variable custom (pour Timeline Sequencer)
+	 */
+	async #setCustomVariableForTimeline(
+		name: string,
+		value: any
+	): Promise<any> {
+		this.logger.debug(`Timeline: Set custom variable ${name} = ${value}`)
+
+		// 1. Définir la valeur par défaut (crée la variable si elle n'existe pas)
+		this.#deps.variables.custom.setVariableDefaultValue(name, value)
+
+		// 2. Définir la valeur actuelle (format: array de {id, value})
+		const variableValues = [
+			{
+				id: name,
+				value: value
+			}
+		]
+		this.#deps.variables.values.setVariableValues('custom', variableValues)
+
+		return { success: true }
+	}
+
+	/**
+	 * Obtenir la valeur d'une variable custom (pour Timeline Sequencer)
+	 */
+	async #getCustomVariableForTimeline(
+		name: string
+	): Promise<any> {
+		this.logger.debug(`Timeline: Get custom variable ${name}`)
+
+		// Lire via le contrôleur de valeurs
+		const value = this.#deps.variables.values.getCustomVariableValue(name)
+
+		return {
+			value: value !== undefined ? value : null,
+			exists: value !== undefined
+		}
+	}
+
+	/**
+	 * Supprimer une variable custom (pour Timeline Sequencer)
+	 */
+	async #deleteCustomVariableForTimeline(
+		name: string
+	): Promise<any> {
+		this.logger.debug(`Timeline: Delete custom variable ${name}`)
+
+		// Supprimer via le contrôleur custom
+		this.#deps.variables.custom.deleteVariable(name)
+
+		return { success: true }
 	}
 }
 
