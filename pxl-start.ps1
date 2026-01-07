@@ -6,18 +6,15 @@ param(
     [switch]$BuildOnly
 )
 
-$ErrorActionPreference = "Stop"
+# $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Detect if we're inside the repo or outside
 if (Test-Path "$ScriptDir\package.json") {
-    # Script is in repo root (C:\PXL\Tracks\companion)
     $RepoDir = $ScriptDir
 } elseif (Test-Path "$ScriptDir\companion\package.json") {
-    # Script is outside repo (C:\PXL\Tracks)
     $RepoDir = Join-Path $ScriptDir "companion"
 } else {
-    # Repo doesn't exist yet, will be cloned
     $RepoDir = Join-Path $ScriptDir "companion"
 }
 
@@ -50,23 +47,22 @@ if (-not (Test-Path "$ModuleDir\main.js")) {
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         Write-Host ""
-        Write-Host "  ██████╗ ██╗  ██╗██╗         ███╗   ███╗███████╗████████╗██████╗ ███████╗" -ForegroundColor Magenta
-        Write-Host "  ██╔══██╗╚██╗██╔╝██║         ████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██╔════╝" -ForegroundColor Magenta
-        Write-Host "  ██████╔╝ ╚███╔╝ ██║         ██╔████╔██║███████╗   ██║   ██████╔╝███████╗" -ForegroundColor Magenta
-        Write-Host "  ██╔═══╝  ██╔██╗ ██║         ██║╚██╔╝██║╚════██║   ██║   ██╔══██╗╚════██║" -ForegroundColor Magenta
-        Write-Host "  ██║     ██╔╝ ██╗███████╗    ██║ ╚═╝ ██║███████║   ██║   ██║  ██║███████║" -ForegroundColor Magenta
-        Write-Host "  ╚═╝     ╚═╝  ╚═╝╚══════╝    ╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝" -ForegroundColor Magenta
+        Write-Host "  ____  _  __ _       __  __ ____ _____ ____  ____  " -ForegroundColor Magenta
+        Write-Host " |  _ \\ \/ /| |     |  \/  / ___|_   _|  _ \/ ___| " -ForegroundColor Magenta
+        Write-Host " | |_) >  < | |     | |\/| \___ \ | | | |_) \___ \ " -ForegroundColor Magenta
+        Write-Host " |  __/ /\ \| |___  | |  | |___) || | |  _ < ___) |" -ForegroundColor Magenta
+        Write-Host " |_| /_/  \_\_____| |_|  |_|____/ |_| |_| \_\____/ " -ForegroundColor Magenta
         Write-Host ""
-        Write-Host "  ╔══════════════════════════════════════════════════════════════════════╗" -ForegroundColor Red
-        Write-Host "  ║                                                                      ║" -ForegroundColor Red
-        Write-Host "  ║   [!] ACCESS DENIED                                                  ║" -ForegroundColor Red
-        Write-Host "  ║                                                                      ║" -ForegroundColor Red
-        Write-Host "  ║   > Private repository authentication failed                         ║" -ForegroundColor DarkGray
-        Write-Host "  ║   > You need authorized access to PXL-tracks/timeline-sequencer      ║" -ForegroundColor DarkGray
-        Write-Host "  ║                                                                      ║" -ForegroundColor Red
-        Write-Host "  ║   Contact: Ifightfortheusers@pxlmasters.com                           ║" -ForegroundColor Cyan
-        Write-Host "  ║                                                                      ║" -ForegroundColor Red
-        Write-Host "  ╚══════════════════════════════════════════════════════════════════════╝" -ForegroundColor Red
+        Write-Host "  +======================================================================+" -ForegroundColor Red
+        Write-Host "  |                                                                      |" -ForegroundColor Red
+        Write-Host "  |   [!] ACCESS DENIED                                                  |" -ForegroundColor Red
+        Write-Host "  |                                                                      |" -ForegroundColor Red
+        Write-Host "  |   > Private repository authentication failed                         |" -ForegroundColor DarkGray
+        Write-Host "  |   > You need authorized access to PXL-tracks/timeline-sequencer      |" -ForegroundColor DarkGray
+        Write-Host "  |                                                                      |" -ForegroundColor Red
+        Write-Host "  |   Contact: Ifightfortheusers@pxlmasters.com                          |" -ForegroundColor Cyan
+        Write-Host "  |                                                                      |" -ForegroundColor Red
+        Write-Host "  +======================================================================+" -ForegroundColor Red
         Write-Host ""
         Write-Host "  Session terminated." -ForegroundColor DarkGray
         Write-Host ""
