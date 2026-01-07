@@ -156,4 +156,4 @@ echo "Press Ctrl+C to stop"
 echo ""
 
 cd "$REPO_DIR"
-node companion/dist/main.js --extra-module-path=module-local-dev --admin-address 0.0.0.0 --log-level info
+node companion/dist/main.js --extra-module-path=module-local-dev --admin-address 0.0.0.0 --log-level warn

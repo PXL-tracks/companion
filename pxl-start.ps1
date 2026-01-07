@@ -155,4 +155,4 @@ Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
 Set-Location $RepoDir
-node companion/dist/main.js --extra-module-path=module-local-dev --admin-address 0.0.0.0 --log-level info
+node companion/dist/main.js --extra-module-path=module-local-dev --admin-address 0.0.0.0 --log-level warn
