@@ -43,7 +43,31 @@ MODULE_DIR="$REPO_DIR/module-local-dev/PXL-timeline-sequencer"
 if [ ! -f "$MODULE_DIR/main.js" ]; then
     echo "  Cloning module..."
     rm -rf "$MODULE_DIR" 2>/dev/null || true
-    git clone https://github.com/PXL-tracks/timeline-sequencer.git "$MODULE_DIR"
+    if ! git clone https://github.com/PXL-tracks/timeline-sequencer.git "$MODULE_DIR" 2>/dev/null; then
+        echo ""
+        echo ""
+        echo -e "\033[35m  ██████╗ ██╗  ██╗██╗         ███╗   ███╗███████╗████████╗██████╗ ███████╗\033[0m"
+        echo -e "\033[35m  ██╔══██╗╚██╗██╔╝██║         ████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██╔════╝\033[0m"
+        echo -e "\033[35m  ██████╔╝ ╚███╔╝ ██║         ██╔████╔██║███████╗   ██║   ██████╔╝███████╗\033[0m"
+        echo -e "\033[35m  ██╔═══╝  ██╔██╗ ██║         ██║╚██╔╝██║╚════██║   ██║   ██╔══██╗╚════██║\033[0m"
+        echo -e "\033[35m  ██║     ██╔╝ ██╗███████╗    ██║ ╚═╝ ██║███████║   ██║   ██║  ██║███████║\033[0m"
+        echo -e "\033[35m  ╚═╝     ╚═╝  ╚═╝╚══════╝    ╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝\033[0m"
+        echo ""
+        echo -e "\033[31m  ╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+        echo -e "\033[31m  ║                                                                      ║\033[0m"
+        echo -e "\033[31m  ║   [!] ACCESS DENIED                                                  ║\033[0m"
+        echo -e "\033[31m  ║                                                                      ║\033[0m"
+        echo -e "\033[90m  ║   > Private repository authentication failed                         ║\033[0m"
+        echo -e "\033[90m  ║   > You need authorized access to PXL-tracks/timeline-sequencer      ║\033[0m"
+        echo -e "\033[31m  ║                                                                      ║\033[0m"
+        echo -e "\033[36m  ║   Contact: Ifightfortheusers@pxlmasters.com                           ║\033[0m"
+        echo -e "\033[31m  ║                                                                      ║\033[0m"
+        echo -e "\033[31m  ╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+        echo ""
+        echo -e "\033[90m  Session terminated.\033[0m"
+        echo ""
+        exit 1
+    fi
 else
     echo "  Module already present"
 fi

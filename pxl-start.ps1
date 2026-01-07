@@ -46,7 +46,32 @@ $ModuleDir = Join-Path $RepoDir "module-local-dev\PXL-timeline-sequencer"
 if (-not (Test-Path "$ModuleDir\main.js")) {
     Write-Host "  Cloning module..." -ForegroundColor Gray
     if (Test-Path $ModuleDir) { Remove-Item $ModuleDir -Recurse -Force }
-    git clone https://github.com/PXL-tracks/timeline-sequencer.git $ModuleDir
+    git clone https://github.com/PXL-tracks/timeline-sequencer.git $ModuleDir 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host ""
+        Write-Host "  ██████╗ ██╗  ██╗██╗         ███╗   ███╗███████╗████████╗██████╗ ███████╗" -ForegroundColor Magenta
+        Write-Host "  ██╔══██╗╚██╗██╔╝██║         ████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██╔════╝" -ForegroundColor Magenta
+        Write-Host "  ██████╔╝ ╚███╔╝ ██║         ██╔████╔██║███████╗   ██║   ██████╔╝███████╗" -ForegroundColor Magenta
+        Write-Host "  ██╔═══╝  ██╔██╗ ██║         ██║╚██╔╝██║╚════██║   ██║   ██╔══██╗╚════██║" -ForegroundColor Magenta
+        Write-Host "  ██║     ██╔╝ ██╗███████╗    ██║ ╚═╝ ██║███████║   ██║   ██║  ██║███████║" -ForegroundColor Magenta
+        Write-Host "  ╚═╝     ╚═╝  ╚═╝╚══════╝    ╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝" -ForegroundColor Magenta
+        Write-Host ""
+        Write-Host "  ╔══════════════════════════════════════════════════════════════════════╗" -ForegroundColor Red
+        Write-Host "  ║                                                                      ║" -ForegroundColor Red
+        Write-Host "  ║   [!] ACCESS DENIED                                                  ║" -ForegroundColor Red
+        Write-Host "  ║                                                                      ║" -ForegroundColor Red
+        Write-Host "  ║   > Private repository authentication failed                         ║" -ForegroundColor DarkGray
+        Write-Host "  ║   > You need authorized access to PXL-tracks/timeline-sequencer      ║" -ForegroundColor DarkGray
+        Write-Host "  ║                                                                      ║" -ForegroundColor Red
+        Write-Host "  ║   Contact: Ifightfortheusers@pxlmasters.com                           ║" -ForegroundColor Cyan
+        Write-Host "  ║                                                                      ║" -ForegroundColor Red
+        Write-Host "  ╚══════════════════════════════════════════════════════════════════════╝" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Session terminated." -ForegroundColor DarkGray
+        Write-Host ""
+        exit 1
+    }
 } else {
     Write-Host "  Module already present" -ForegroundColor Green
 }
