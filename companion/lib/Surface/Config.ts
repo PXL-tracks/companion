@@ -63,13 +63,16 @@ export function createOrSanitizeSurfaceHandlerConfig(
 			use_last_page: panelConfig.use_last_page ?? panelConfig.page === undefined,
 		},
 
+		// Default enabled to true (existing configs without this field are treated as enabled)
+		enabled: true,
+
 		// Use existing config
 		...existingConfig,
 
 		config: panelConfig,
 
 		// Persist some values in the db for use when it is disconnected
-		type: panel.info.type || 'Unknown',
+		type: panel.info.description || 'Unknown',
 		integrationType,
 		gridSize: panel.gridSize,
 	}

@@ -1,12 +1,14 @@
 import { ServiceBase } from './Base.js'
-import { Bonjour, type Browser } from '@julusian/bonjour-service'
-import { isIPv4 } from 'net'
+import { Bonjour, type DiscoveredService, type Browser } from '@julusian/bonjour-service'
+import { isIPv4, isIPv6 } from 'net'
 import type { ClientBonjourEvent, ClientBonjourService } from '@companion-app/shared/Model/Common.js'
 import type { DataUserConfig } from '../Data/UserConfig.js'
 import type { InstanceController } from '../Instance/Controller.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import z from 'zod'
 import EventEmitter from 'events'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
 
 /**
  * Class providing Bonjour discovery for modules.
@@ -52,8 +54,8 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 				this.#server = new Bonjour()
 
 				this.logger.info('Listening for Bonjour messages')
-			} catch (e: any) {
-				this.logger.error(`Could not launch: ${e.message}`)
+			} catch (e) {
+				this.logger.error(`Could not launch: ${stringifyError(e)}`)
 			}
 		}
 	}
@@ -108,9 +110,25 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 		})
 	}
 
-	#convertService(id: string, svc: any, filter: BonjourBrowserFilter): ClientBonjourService | null {
+	#convertService(id: string, svc: DiscoveredService, filter: BonjourBrowserFilter): ClientBonjourService | null {
 		// Future: whether to include ipv4, ipv6 should be configurable, but this is fine for now
-		const addresses = svc.addresses.filter((addr: string) => isIPv4(addr))
+		let addresses = svc.addresses
+		switch (filter.addressFamily) {
+			case 'ipv4+6':
+				// No need to filter, include both ipv4 and ipv6
+				break
+			case 'ipv6':
+				addresses = addresses.filter(isIPv6)
+				break
+			case 'ipv4':
+			case undefined: // Default
+				addresses = addresses.filter(isIPv4)
+				break
+			default:
+				assertNever(filter.addressFamily)
+				break
+		}
+
 		if (addresses.length === 0) return null
 		if (filter.port && svc.port !== filter.port) return null
 		return {
@@ -153,6 +171,7 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 				protocol: query.protocol,
 				port: query.port,
 				txt: query.txt,
+				addressFamily: 'addressFamily' in query ? query.addressFamily : undefined,
 			}
 			if (typeof filter.type !== 'string' || !filter.type) throw new Error('Invalid type for bonjour query')
 			if (typeof filter.protocol !== 'string' || !filter.protocol) throw new Error('Invalid protocol for bonjour query')
@@ -225,4 +244,5 @@ interface BonjourBrowserFilter {
 	protocol: 'tcp' | 'udp'
 	port: number | undefined
 	txt: Record<string, string> | undefined
+	addressFamily: 'ipv4' | 'ipv6' | 'ipv4+6' | undefined
 }

@@ -93,9 +93,8 @@ export function createTrpcRouter(registry: Registry) {
 
 		bonjour: registry.services.bonjourDiscovery.createTrpcRouter(),
 
-		actionRecorder: registry.controls.actionRecorder.createTrpcRouter(),
+		actionRecorder: registry.instance.actionRecorder.createTrpcRouter(),
 		surfaces: registry.surfaces.createTrpcRouter(),
-		surfaceDiscovery: registry.services.surfaceDiscovery.createTrpcRouter(),
 
 		controls: registry.controls.createTrpcRouter(),
 
@@ -125,5 +124,5 @@ export function toIterable<TEmitter extends EventEmitter, TKey extends string & 
 	key: TKey,
 	signal: AbortSignal | undefined
 ): NodeJS.AsyncIterator<TEventMap<TEmitter>[TKey]> {
-	return on(ee as any, key, { signal }) as NodeJS.AsyncIterator<TEventMap<TEmitter>[TKey]>
+	return on(ee, key, { signal }) as NodeJS.AsyncIterator<TEventMap<TEmitter>[TKey]>
 }

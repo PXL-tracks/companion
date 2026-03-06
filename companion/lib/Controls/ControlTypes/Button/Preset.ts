@@ -75,7 +75,7 @@ export class ControlButtonPreset
 	/**
 	 * The variables referenced in the last draw. Whenever one of these changes, a redraw should be performed
 	 */
-	#last_draw_variables: ReadonlySet<string> | null = null
+	#lastDrawVariables: ReadonlySet<string> | null = null
 
 	/**
 	 * The base style without feedbacks applied
@@ -95,9 +95,15 @@ export class ControlButtonPreset
 		return this.#baseStyle
 	}
 
-	constructor(deps: ControlDependencies, connectionId: string, presetId: string, storage: PresetButtonModel) {
-		const controlId = CreatePresetControlId(connectionId, presetId)
-		super(deps, controlId, `Controls/Button/Preset/${connectionId}/${presetId}`, true)
+	constructor(
+		deps: ControlDependencies,
+		connectionId: string,
+		presetId: string,
+		variablesHash: string,
+		storage: PresetButtonModel
+	) {
+		const controlId = CreatePresetControlId(connectionId, presetId, variablesHash)
+		super(deps, controlId, `Controls/Button/Preset/${connectionId}/${presetId}/${variablesHash}`, true)
 
 		this.#connectionId = connectionId
 		this.#presetId = presetId
@@ -110,11 +116,12 @@ export class ControlButtonPreset
 				instanceDefinitions: deps.instance.definitions,
 				internalModule: deps.internalModule,
 				processManager: deps.instance.processManager,
-				variableValues: deps.variables.values,
+				variableValues: deps.variableValues,
+				pageStore: deps.pageStore,
 			},
 			this.sendRuntimePropsChange.bind(this),
 			(expression, requiredType, injectedVariableValues) =>
-				deps.variables.values
+				deps.variableValues
 					.createVariablesAndExpressionParser(
 						deps.pageStore.getLocationOfControlId(this.controlId),
 						null, // This doesn't support local variables
@@ -200,13 +207,7 @@ export class ControlButtonPreset
 	getDrawStyle(): DrawStyleButtonModel {
 		const style = this.entities.getUnparsedFeedbackStyle(this.#baseStyle)
 
-		this.#last_draw_variables = parseVariablesInButtonStyle(
-			this.logger,
-			this.controlId,
-			this.deps,
-			this.entities,
-			style
-		)
+		this.#lastDrawVariables = parseVariablesInButtonStyle(this.logger, this.controlId, this.deps, this.entities, style)
 
 		return {
 			cloud: false,
@@ -264,19 +265,12 @@ export class ControlButtonPreset
 	 * Propagate variable changes
 	 * @param allChangedVariables - variables with changes
 	 */
-	onVariablesChanged(allChangedVariables: Set<string>): void {
-		this.entities.stepCheckExpressionOnVariablesChanged(allChangedVariables)
+	onVariablesChanged(allChangedVariables: ReadonlySet<string>): void {
+		if (!this.#lastDrawVariables) return
+		if (this.#lastDrawVariables.isDisjointFrom(allChangedVariables)) return
 
-		if (this.#last_draw_variables) {
-			for (const variable of allChangedVariables.values()) {
-				if (this.#last_draw_variables.has(variable)) {
-					this.logger.silly('variable changed in button ' + this.controlId)
-
-					this.triggerRedraw()
-					return
-				}
-			}
-		}
+		this.logger.silly('variable changed in button ' + this.controlId)
+		this.triggerRedraw()
 	}
 
 	/**

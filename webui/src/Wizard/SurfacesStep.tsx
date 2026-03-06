@@ -1,10 +1,11 @@
 import React from 'react'
 import { CFormCheck } from '@coreui/react'
 import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
+import type { JsonValue } from 'type-fest'
 
 interface SurfacesStepProps {
 	config: Partial<UserConfigModel>
-	setValue: (key: keyof UserConfigModel, value: any) => void
+	setValue: (key: keyof UserConfigModel, value: JsonValue) => void
 }
 
 export function SurfacesStep({ config, setValue }: SurfacesStepProps): React.JSX.Element {
@@ -18,85 +19,26 @@ export function SurfacesStep({ config, setValue }: SurfacesStepProps): React.JSX
 					onChange={(e) => setValue('usb_hotplug', e.currentTarget.checked)}
 				/>
 			</div>
-			<div className="indent4">
-				<p>Stream Deck USB Hardware</p>
+			<div className="indent3">
 				<CFormCheck
-					type="radio"
-					label="Use Companion natively (requires Stream Deck software to be closed)"
-					checked={!config.elgato_plugin_enable}
-					onChange={() => setValue('elgato_plugin_enable', false)}
+					label="Auto-enable newly discovered surfaces"
+					checked={config.auto_enable_discovered_surfaces}
+					onChange={(e) => setValue('auto_enable_discovered_surfaces', e.currentTarget.checked)}
 				/>
+			</div>
+			<div className="indent3">
 				<CFormCheck
-					type="radio"
-					label="Use Stream Deck software via Companion plugin"
+					label="Elgato Stream Deck Software Plugin"
 					checked={config.elgato_plugin_enable}
-					onChange={() => setValue('elgato_plugin_enable', true)}
-				/>
-			</div>
-			<div className="indent3">
-				<CFormCheck
-					label="X-keys USB Keypads"
-					checked={config.xkeys_enable}
-					onChange={(e) => setValue('xkeys_enable', e.currentTarget.checked)}
+					onChange={(e) => setValue('elgato_plugin_enable', e.currentTarget.checked)}
 				/>
 			</div>
 
-			<div className="indent3">
-				<CFormCheck
-					label="Loupedeck and Razer Stream Controller USB Devices"
-					checked={config.loupedeck_enable}
-					onChange={(e) => setValue('loupedeck_enable', e.currentTarget.checked)}
-				/>
-			</div>
-
-			<div className="indent3">
-				<CFormCheck
-					label="Mirabox Stream Dock USB Devices"
-					checked={config.mirabox_streamdock_enable}
-					onChange={(e) => setValue('mirabox_streamdock_enable', e.currentTarget.checked)}
-				/>
-			</div>
-
-			<div className="indent3">
-				<CFormCheck
-					label="Contour Shuttle USB Devices"
-					checked={config.contour_shuttle_enable}
-					onChange={(e) => setValue('contour_shuttle_enable', e.currentTarget.checked)}
-				/>
-			</div>
-
-			<div className="indent3">
-				<CFormCheck
-					label="VEC Footpedal USB Devices"
-					checked={config.vec_footpedal_enable}
-					onChange={(e) => setValue('vec_footpedal_enable', e.currentTarget.checked)}
-				/>
-			</div>
-
-			<div className="indent3">
-				<CFormCheck
-					label="203 Systems Mystrix USB Devices"
-					checked={config.mystrix_enable}
-					onChange={(e) => setValue('mystrix_enable', e.currentTarget.checked)}
-				/>
-			</div>
-
-			<div className="indent3">
-				<CFormCheck
-					label="Logitech MX Console Devices"
-					checked={config.logitech_mx_console_enable}
-					onChange={(e) => setValue('logitech_mx_console_enable', e.currentTarget.checked)}
-				/>
-			</div>
-
-			<br />
-			<h5>IP Surface Listeners</h5>
-			<div className="indent3">
-				<CFormCheck
-					label="Videohub Panel Listener"
-					checked={config.videohub_panel_enabled}
-					onChange={(e) => setValue('videohub_panel_enabled', e.currentTarget.checked)}
-				/>
+			<div>
+				<p>
+					Since Companion 4.2, support for different USB devices is done via surface modules. You will want to install
+					and configure the ones you wish to use in the Surface Integrations page after completing this wizard.
+				</p>
 			</div>
 		</div>
 	)

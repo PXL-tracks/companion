@@ -1,13 +1,12 @@
 import {
 	EntityModelType,
 	FeedbackEntitySubType,
-	type FeedbackEntityModel,
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import React, { useContext } from 'react'
+import React, { useCallback, useContext } from 'react'
 import type { IEntityEditorActionService } from '~/Services/Controls/ControlEntitiesService.js'
 import { OptionButtonPreview } from '../OptionButtonPreview.js'
-import { CCol, CForm, CFormLabel, CFormSwitch } from '@coreui/react'
+import { CAlert, CButton, CCol, CForm, CFormLabel } from '@coreui/react'
 import { PreventDefaultHandler } from '~/Resources/util.js'
 import { MyErrorBoundary } from '~/Resources/Error.js'
 import { OptionsInputField } from '../OptionsInputField.js'
@@ -21,8 +20,18 @@ import { TextInputField } from '../../Components/TextInputField.js'
 import { observer } from 'mobx-react-lite'
 import { useEntityEditorContext } from './EntityEditorContext.js'
 import { NonIdealState } from '~/Components/NonIdealState.js'
-import { faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
+import { faCopy, faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { trpc } from '~/Resources/TRPC.js'
+import { VariableValueDisplay } from '~/Components/VariableValueDisplay.js'
+import { LoadingBar } from '~/Resources/Loading.js'
+import type { CompanionInputFieldCheckboxExtended, ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
+import type { JsonValue } from 'type-fest'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import CopyToClipboard from 'react-copy-to-clipboard'
+import { isLabelValid } from '@companion-app/shared/Label.js'
 
 interface EntityCommonCellsProps {
 	entity: SomeEntityModel
@@ -39,6 +48,7 @@ export const EntityCommonCells = observer(function EntityCommonCells({
 	entityDefinition,
 	service,
 }: EntityCommonCellsProps): React.JSX.Element {
+	const { notifier } = useContext(RootAppStoreContext)
 	const { location, localVariablePrefix, controlId, readonly, localVariablesStore } = useEntityEditorContext()
 	const { connections } = useContext(RootAppStoreContext)
 
@@ -47,7 +57,22 @@ export const EntityCommonCells = observer(function EntityCommonCells({
 
 	const showButtonPreview = entity?.connectionId === 'internal' && entityDefinition?.showButtonPreview
 
-	const optionVisibility = useOptionsVisibility(entityDefinition?.options, entity?.options)
+	const optionVisibility = useOptionsVisibility(
+		entityDefinition?.options,
+		!!entityDefinition?.optionsSupportExpressions,
+		entity?.options
+	)
+
+	const setInverted = useCallback(
+		(_k: string, inverted: ExpressionOrValue<JsonValue | undefined>) => {
+			service.setInverted(inverted.isExpression ? inverted : { isExpression: false, value: !!inverted.value })
+		},
+		[service]
+	)
+
+	const onCopied = useCallback(() => {
+		notifier.show(`Copied`, 'Copied to clipboard', 3000)
+	}, [notifier])
 
 	return (
 		<>
@@ -59,23 +84,38 @@ export const EntityCommonCells = observer(function EntityCommonCells({
 				)}
 
 				<CForm className="row g-sm-2 grow" onSubmit={PreventDefaultHandler}>
-					{!!entity && localVariablePrefix && (
+					{entity.type === EntityModelType.Feedback && localVariablePrefix && (
 						<>
 							<MyErrorBoundary>
 								<CFormLabel htmlFor="colFormVariableName" className="col-sm-4 col-form-label col-form-label-sm">
+									Variable name
 									<InlineHelp help={`The name to give this value as a ${localVariablePrefix} variable`}>
-										Variable name
+										<FontAwesomeIcon icon={faQuestionCircle} />
 									</InlineHelp>
+									<CopyToClipboard text={`$(${localVariablePrefix}:${entity.variableName ?? ''})`} onCopy={onCopied}>
+										<CButton size="sm" title="Copy variable name" className="ps-0">
+											<FontAwesomeIcon icon={faCopy} color="#d50215" />
+										</CButton>
+									</CopyToClipboard>
 								</CFormLabel>
 								<CCol sm={8}>
 									<TextInputField
-										// regex?: string TODO - validate value syntax
-										value={(entity as FeedbackEntityModel).variableName ?? ''}
+										value={entity.variableName ?? ''}
 										setValue={service.setVariableName}
-										// setValid?: (valid: boolean) => void
+										checkValid={(str) => str === '' || isLabelValid(str)}
 										disabled={readonly}
 									/>
 								</CCol>
+							</MyErrorBoundary>
+
+							<MyErrorBoundary>
+								<EntityLocalVariableValueField
+									controlId={controlId}
+									entity={entity}
+									localVariablesStore={localVariablesStore}
+									readonly={readonly}
+									service={service}
+								/>
 							</MyErrorBoundary>
 						</>
 					)}
@@ -87,19 +127,18 @@ export const EntityCommonCells = observer(function EntityCommonCells({
 						entityDefinition.feedbackType === FeedbackEntitySubType.Boolean &&
 						entityDefinition.showInvert !== false && (
 							<MyErrorBoundary>
-								<CFormLabel htmlFor="colFormInvert" className="col-sm-4 col-form-label col-form-label-sm">
-									<InlineHelp help="If checked, the behaviour of this feedback is inverted">Invert</InlineHelp>
-								</CFormLabel>
-								<CCol sm={8}>
-									<CFormSwitch
-										name="colFormInvert"
-										color="success"
-										checked={!!('isInverted' in entity && entity.isInverted)}
-										size="xl"
-										onChange={(e) => service.setInverted(e.currentTarget.checked)}
-										disabled={readonly}
-									/>
-								</CCol>
+								<OptionsInputField
+									isLocatedInGrid={!!location}
+									entityType={entity.type}
+									connectionId={entity.connectionId}
+									option={FeedbackInvertOption}
+									value={'isInverted' in entity ? entity.isInverted : undefined}
+									setValue={setInverted}
+									visibility={true}
+									readonly={readonly}
+									localVariablesStore={localVariablesStore}
+									fieldSupportsExpression={entityDefinition.optionsSupportExpressions}
+								/>
 							</MyErrorBoundary>
 						)}
 
@@ -125,19 +164,13 @@ export const EntityCommonCells = observer(function EntityCommonCells({
 								option={opt}
 								value={(entity.options || {})[opt.id]}
 								setValue={service.setValue}
-								visibility={optionVisibility[opt.id] ?? true}
+								visibility={optionVisibility.get(opt.id) ?? true}
 								readonly={readonly}
 								localVariablesStore={localVariablesStore}
+								fieldSupportsExpression={entityDefinition.optionsSupportExpressions && !opt.disableAutoExpression}
 							/>
 						</MyErrorBoundary>
 					))}
-
-					<EntityLocalVariableValueField
-						entity={entity}
-						localVariablesStore={localVariablesStore}
-						readonly={readonly}
-						service={service}
-					/>
 
 					{!!entity && entity.type === EntityModelType.Feedback && feedbackListType === null && (
 						<>
@@ -161,39 +194,79 @@ export const EntityCommonCells = observer(function EntityCommonCells({
 })
 
 const EntityLocalVariableValueField = observer(function EntityLocalVariableValueField({
+	controlId,
 	entity,
 	localVariablesStore,
 	readonly,
 	service,
 }: {
+	controlId: string
 	entity: SomeEntityModel
 	localVariablesStore: LocalVariablesStore | null
 	readonly: boolean
 	service: IEntityEditorActionService
 }) {
-	if (
-		!localVariablesStore ||
-		!entity ||
-		entity.type !== EntityModelType.Feedback ||
-		entity.connectionId !== 'internal' ||
-		entity.definitionId !== 'user_value'
-	)
-		return null
+	if (!localVariablesStore || entity.type !== EntityModelType.Feedback) return null
 
-	const value = entity.variableName ? localVariablesStore.getValue(entity.variableName) : undefined
 	return (
 		<MyErrorBoundary>
 			<CFormLabel htmlFor="colFormInvert" className="col-sm-4 col-form-label col-form-label-sm">
 				Current Value
 			</CFormLabel>
 			<CCol sm={8}>
-				<TextInputField
-					disabled={!entity.variableName || readonly}
-					value={value === undefined ? '' : String(value)}
-					setValue={service.setVariableValue}
-					// setValid?: (valid: boolean) => void
-				/>
+				{entity.connectionId === 'internal' && entity.definitionId === 'user_value' ? (
+					<TextInputField
+						disabled={!entity.variableName || readonly}
+						value={
+							stringifyVariableValue(
+								entity.variableName ? localVariablesStore.getValue(entity.variableName) : undefined
+							) ?? ''
+						}
+						setValue={service.setVariableValue}
+						// setValid?: (valid: boolean) => void
+					/>
+				) : entity.variableName ? (
+					<LocalVariableCurrentValue controlId={controlId} name={entity.variableName} />
+				) : (
+					<small>Variable is not active (the name is empty)</small>
+				)}
 			</CCol>
 		</MyErrorBoundary>
 	)
 })
+
+function LocalVariableCurrentValue({ controlId, name }: { controlId: string; name: string }) {
+	const { notifier } = useContext(RootAppStoreContext)
+
+	const onCopied = useCallback(() => notifier.show(`Copied`, 'Copied to clipboard', 3000), [notifier])
+
+	const sub = useSubscription(
+		trpc.preview.expressionStream.watchExpression.subscriptionOptions(
+			{
+				controlId: controlId,
+				expression: `$(local:${name})`,
+				isVariableString: false,
+			},
+			{}
+		)
+	)
+
+	if (!sub.data) {
+		return <LoadingBar />
+	}
+
+	if (!sub.data.ok) {
+		return <CAlert color="danger">Error: {sub.data.error}</CAlert>
+	}
+
+	return <VariableValueDisplay value={sub.data.value} onCopied={onCopied} />
+}
+
+const FeedbackInvertOption: CompanionInputFieldCheckboxExtended = {
+	id: 'isInverted',
+	type: 'checkbox',
+	default: false,
+	label: 'Invert',
+	tooltip: 'If checked, the behaviour of this feedback is inverted',
+	displayToggle: true,
+}

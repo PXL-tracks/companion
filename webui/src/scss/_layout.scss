@@ -1,5 +1,6 @@
 @use 'variables' as *;
 @use '@coreui/coreui/scss/coreui'; // not strictly necessary, but it allows us to clarify the origin of mixins
+@use 'sass:color';
 
 body {
 	-webkit-text-size-adjust: 100%;
@@ -81,16 +82,128 @@ form.row > * {
 // 	margin: 0 auto;
 // }
 
-.header-toggler svg {
-	color: #fff;
+// header-toggler is a coreui/bootstrap built-in class. It refers to the hamburger icon
+// that opens the sidebar in "mobile" mode (narrow window).
+// OTOH, .sidebar-header-toggler (in this file) refers to the toggler at the bottom of the sidebar in the other modes
+.header-toggler {
+	--cui-header-toggler-color: white; // kinder than color: #fff; ?
+	--cui-header-toggler-hover-color: white;
+
+	// the next two keep the hover highlight border more uniform w/o changing spacing
+	padding: var(--cui-header-toggler-padding-y) !important; // !important overrides .ps-1, just in case
+	margin-right: calc(var(--cui-header-toggler-padding-x) - var(--cui-header-toggler-padding-y));
+
+	//  make the color similar to --cui-btn-hover-bg, which is not accessible here;  alt: #{$header-brand-bg} is a bit darker.
+	&:hover {
+		background-color: color.adjust($header-bg, $lightness: -6%);
+	}
 }
 
 .header-right {
 	margin-right: 5px;
 }
 
-.header .nav-link:hover {
-	color: #ddd;
+// uncomment this if CHeader is assigned position=sticky in Header.tsx
+// .header.header-sticky {
+// 	z-index: 40; // monaco-edit's suggest-details pane is buried if z-index > 41; use 40 just as a round number
+// }
+
+.header {
+	.nav-link:hover {
+		color: #ddd;
+	}
+	/* ensure .header-notification-item text doesn't disappear on focus */
+	.nav-link:focus {
+		color: #ddd;
+	}
+}
+
+.header-notification-item {
+	border-radius: 0.5em;
+	margin-left: 1em;
+	background-color: #333;
+}
+
+.header-update-icon {
+	margin-right: 0.5em;
+}
+
+.help-menu,
+.context-menu {
+	// gather the color scheme up front:
+	--menu-color: #000;
+	--menu-bg: var(--cui-tertiary-bg); // or just use white?
+	--menu-hover-color: #fff;
+	--menu-hover-bg: var(--cui-info);
+	color: var(--menu-color); // this may not affect anything
+	//overflow: visible; // uncomment this if unscoped .btn-group defined in _common.scss needs to make overflow hidden
+
+	// note: <CDropdownToggle color="primary"...> set a group of color properties. Here we extend or override as needed.
+	.help-toggle {
+		color: var(--cui-header-color); // Keep toggle white on red header
+		margin-left: 1em; // buffer between this and the lock icon
+		// the following line makes the focus/hover-highlight a square that is the same size as the notification
+		padding: 0.2em 0em;
+		// CDropdownToggle is not assigned class dropdown-toggle because we're not using the caret, so we manually override
+		// override "middle-of-group" rule (this appears to be a recent bug in CoreUI: https://github.com/coreui/coreui-react/issues/455)
+		border-radius: var(--cui-border-radius) !important;
+	}
+
+	// The nesting within .dropdown-menu is mostly for clarity, to emphasize the DOM structure:
+	.dropdown-menu {
+		--cui-dropdown-bg: var(--menu-bg);
+		--cui-dropdown-link-color: var(--menu-color);
+		--cui-dropdown-link-hover-bg: var(--menu-hover-bg);
+		--cui-dropdown-link-hover-color: var(--menu-hover-color); // only works if .dropdown-item doesn't define color:
+		--cui-dropdown-link-active-bg: var(--menu-hover-bg); // don't change during click
+		--cui-dropdown-link-active-color: var(--menu-hover-color);
+
+		padding: 0.5em 0;
+		border: 1px solid rgba(0, 0, 0, 0.2); // Subtle dark border to the dropdown
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); // Professional shadow to the dropdown
+		border-radius: 6px; // Slightly rounded corners
+		min-width: 240px; // Slightly wider for breathing room
+
+		.dropdown-item {
+			font-size: 0.95rem; // Slightly smaller, more refined
+			padding: 0.4em 0.75em; // More vertical padding, balanced horizontal
+			transition: background-color 0.15s ease-in-out; // Smooth hover transition
+
+			.dropdown-item-icon {
+				// let the rules above and below control its padding
+				padding-left: 0;
+				padding-right: 0;
+			}
+
+			.dropdown-item-label {
+				padding-left: 0.75em;
+				padding-right: 1.5em;
+			}
+		}
+
+		.dropdown-divider {
+			border-top: 1px solid rgba(0, 0, 0, 0.25); // Light divider
+			margin: 0.4em 0.6em;
+		}
+
+		.dropdown-group-label {
+			cursor: default;
+			padding-left: 0.75em;
+			color: rgba(0, 0, 0, 0.5);
+		}
+	}
+}
+
+// override parts that differ from (dropdown) help-menus
+.context-menu {
+	--menu-bg: #f3f4f7; // sidebar appears to override var(--cui-tertiary-bg);, so fix --menu-bg here.
+	.dropdown-menu {
+		min-width: 0;
+
+		.dropdown-item {
+			font-size: 0.85rem;
+		}
+	}
 }
 
 .login-form {
@@ -150,8 +263,31 @@ form.row > * {
 }
 
 .nav.nav-tabs {
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: thin;
+	flex-shrink: 0;
+
+	// Hide scrollbar visually but keep functionality
+	&::-webkit-scrollbar {
+		height: 4px;
+	}
+	&::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	&::-webkit-scrollbar-thumb {
+		background: #ccc;
+		border-radius: 2px;
+	}
+
 	.nav-last {
 		margin-left: auto;
+		flex-shrink: 0;
+	}
+
+	.nav-item {
+		flex-shrink: 0;
 	}
 
 	.nav-item .nav-link {
@@ -234,7 +370,7 @@ form.row > * {
 	}
 
 	.nav-link {
-		background-color: #191919;
+		--cui-sidebar-nav-link-bg: #191919;
 
 		margin-bottom: 0.15rem;
 		padding-top: 0.7rem;
@@ -260,8 +396,16 @@ form.row > * {
 		}
 	}
 
-	&.sidebar-narrow-unfoldable:not(:hover) {
-		.nav-group-toggle::after {
+	.nav-two-line .nav-link {
+		padding-top: 0.5rem;
+		padding-bottom: 0.5rem;
+
+		line-height: calc(var(--cui-body-line-height) * 0.85);
+	}
+
+	&.sidebar-narrow-unfoldable:not(.show):not(:hover) {
+		.nav-group-toggle::after,
+		.context-menu {
 			display: none;
 		}
 	}
@@ -281,25 +425,43 @@ form.row > * {
 		}
 	}
 
-	.nav-group-toggle-link {
-		padding: 0;
+	.nav-group-toggle {
+		padding-right: 0;
 
 		&::after {
+			// affects the caret
 			margin-left: 16px;
 			margin-right: 16px;
+			background-color: white;
 		}
+	}
+
+	.nav-group-toggle-link {
+		padding: 0;
 
 		.nav-link {
 			margin-bottom: 0;
 		}
 	}
+
+	$group-background-color: #2a2a2a;
 	.nav-group-toggle-basic::after,
-	.nav-group-items .nav-link {
-		margin-right: 8px;
+	.nav-group-items {
+		// the box underneath the expanded group
+		padding-left: 0.5em !important;
+		padding-right: 0.1em !important;
+		padding-top: 0px !important;
 	}
 
 	.sidebar-nav .nav-group-items .nav-link {
+		// the individual buttons in a group
 		padding-left: var(--cui-sidebar-nav-link-padding-x);
+		box-shadow: 0px 4px 4px rgba(0, 0, 0, 0.2);
+		--cui-sidebar-nav-link-bg: #{$group-background-color};
+
+		&:hover {
+			background-color: color.adjust($group-background-color, $lightness: 5%) !important;
+		}
 	}
 
 	.sidebar-header.sidebar-header-toggler {
@@ -455,7 +617,7 @@ form.row > * {
 	margin-right: 12px;
 
 	.secondary-panel-simple-header {
-		background: #e9ecef; /* Darker gray background */
+		background: #dee2e5; /* Darker gray background */
 		border-bottom: 1px solid #dee2e6; /* Subtle border */
 		padding: 1.25rem 1.5rem;
 		display: flex;
@@ -605,23 +767,6 @@ hr.slim {
 
 .entity-category:not(:first-child) {
 	margin-top: 2rem;
-}
-
-.add-browse-card .header {
-	padding: 6px 12px;
-	font-size: 1.6em;
-	font-weight: bold;
-	background-color: $primary;
-	color: white;
-	border-radius: 4px;
-}
-
-.add-browse-card .clickable-add-item {
-	cursor: pointer;
-}
-
-.add-browse-card .clickable-add-item:hover {
-	background-color: rgba(0, 0, 0, 0.1);
 }
 
 .shadow-inset {

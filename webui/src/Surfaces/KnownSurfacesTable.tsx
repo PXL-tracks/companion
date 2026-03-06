@@ -1,7 +1,7 @@
 import React, { useCallback, useContext, useRef } from 'react'
 import { CButton, CButtonGroup } from '@coreui/react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCircleUp, faCopy, faFolderOpen, faSearch, faTrash } from '@fortawesome/free-solid-svg-icons'
+import { faCircleUp, faCopy, faFolderOpen, faPowerOff, faSearch, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import classNames from 'classnames'
 import type { ClientDevicesListItem, ClientSurfaceItem } from '@companion-app/shared/Model/Surfaces.js'
@@ -68,18 +68,32 @@ export const KnownSurfacesTable = observer(function KnownSurfacesTable({
 	)
 
 	const surfacesList = Array.from(surfaces.store.values()).sort((a, b) => {
-		if (a.index === undefined && b.index === undefined) {
-			return a.id.localeCompare(b.id)
-		} else {
-			return (a.index ?? Number.POSITIVE_INFINITY) - (b.index ?? Number.POSITIVE_INFINITY)
+		// 1) Those with an index should be first, sorted by index
+		if (a.index !== null && b.index !== null) {
+			return a.index - b.index
 		}
+		if (a.index !== null) return -1
+		if (b.index !== null) return 1
+
+		// 2) Those with a location but no index, sorted by id
+		const aHasLocation = a.isAutoGroup && !!a.surfaces?.some((s) => s.location)
+		const bHasLocation = b.isAutoGroup && !!b.surfaces?.some((s) => s.location)
+
+		if (aHasLocation && bHasLocation) {
+			return a.id.localeCompare(b.id)
+		}
+		if (aHasLocation) return -1
+		if (bHasLocation) return 1
+
+		// 3) Everything else, sorted by id
+		return a.id.localeCompare(b.id)
 	})
 
 	return (
 		<>
 			<GenericConfirmModal ref={confirmRef} />
 
-			<div className="surfaces-grid-container">
+			<div className="scrollable-content surfaces-grid-container">
 				<div className="grid-header-cell">NO</div>
 				<div className="grid-header-cell">Info</div>
 				<div className="grid-header-cell"></div>
@@ -236,23 +250,35 @@ const SurfaceRow = observer(function SurfaceRow({
 		[selectItem, surface.id]
 	)
 
+	const surfaceDisabled =
+		!surface.enabled &&
+		!surface.isConnected &&
+		surface.integrationType !== 'emulator' &&
+		surface.integrationType !== 'elgato-plugin' &&
+		surface.integrationType !== 'satellite'
+
 	return (
 		<div
 			className={classNames('grid-row', {
 				'grid-row-no-border': noBorder,
 				'grid-row-selected': isSelected,
+				'surface-disabled': surfaceDisabled,
 			})}
 			onClick={handleSurfaceClick}
 		>
-			<div className="grid-cell">{index !== null ? `#${index}` : ''}</div>
+			<div className="grid-cell">
+				{index !== null ? `#${index}` : ''}
+				{/* Show disabled icon for surfaces that respect the enabled setting and are disabled */}
+				{surfaceDisabled && <FontAwesomeIcon icon={faPowerOff} color="gray" title="Disabled" />}
+			</div>
 			<div className={classNames('grid-cell', { 'ps-4': isInGroup })}>
 				<div>
 					<b>{surface.name ? `${surface.name} - (${surface.type})` : surface.type}</b>
 					{!!surface.hasFirmwareUpdates && (
 						<>
 							{' '}
-							<WindowLinkOpen href={surface.hasFirmwareUpdates.updaterDownloadUrl}>
-								<FontAwesomeIcon icon={faCircleUp} title="Firmware update is available" />
+							<WindowLinkOpen href={surface.hasFirmwareUpdates.updaterDownloadUrl} title="Firmware update is available">
+								<FontAwesomeIcon icon={faCircleUp} />
 							</WindowLinkOpen>
 						</>
 					)}
@@ -266,7 +292,9 @@ const SurfaceRow = observer(function SurfaceRow({
 							<FontAwesomeIcon icon={faCopy} color="#000" />
 						</CButton>
 					</CopyToClipboard>
-					<span className="surface-location">{surface.isConnected ? surface.location || 'Local' : 'Offline'}</span>
+					<span className={classNames('surface-status', { 'surface-disabled': surfaceDisabled })}>
+						{surfaceDisabled ? 'Disabled' : surface.isConnected ? surface.location || 'Local' : 'Offline'}
+					</span>
 				</div>
 			</div>
 			<div className="grid-cell">

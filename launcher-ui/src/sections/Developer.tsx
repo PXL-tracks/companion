@@ -52,11 +52,11 @@ export function DeveloperSection(): JSX.Element {
 						<p>
 							New to module development? Check out the{' '}
 							<a
-								href="https://github.com/bitfocus/companion-module-base/wiki"
+								href="https://companion.free/for-developers/module-development/module-development-101"
 								target="_blank"
 								className="text-blue-600 hover:text-blue-800 underline bg-transparent border-none p-0 cursor-pointer"
 							>
-								Module Development Wiki
+								Module Development website
 							</a>{' '}
 							for guides and documentation.
 						</p>
@@ -88,11 +88,7 @@ export function DeveloperSection(): JSX.Element {
 									placeholder="Path to local modules directory"
 									className="flex-1 rounded-r-none"
 								/>
-								<Button
-									variant="outline"
-									onClick={handleSelectModulesPath}
-									className="rounded-l-none px-3 shrink-0 h-9"
-								>
+								<Button variant="outline" onClick={handleSelectModulesPath} className="rounded-l-none px-3 shrink-0">
 									Select
 								</Button>
 							</div>

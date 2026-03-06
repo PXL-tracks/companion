@@ -11,13 +11,14 @@ import nodeMachineId from 'node-machine-id'
 import LogController from '../Log/Controller.js'
 import type { DataDatabase } from '../Data/Database.js'
 import type { IPageStore } from '../Page/Store.js'
-import type { ControlsController } from '../Controls/Controller.js'
+import type { IControlStore } from '../Controls/IControlStore.js'
 import type { GraphicsController } from '../Graphics/Controller.js'
 import type { DataStoreTableView } from '../Data/StoreBase.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import EventEmitter from 'node:events'
 import z from 'zod'
 import { CloudRegionState } from '@companion-app/shared/Model/Cloud.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 
 const CLOUD_URL = 'https://api.bitfocus.io/v1'
 const CLOUD_TABLE: string = 'cloud'
@@ -71,7 +72,7 @@ export class CloudController {
 	readonly appInfo: AppInfo
 	readonly #dbTable: DataStoreTableView<CloudDbTable>
 	readonly #cacheTable: DataStoreTableView<DataCacheDefaultTable>
-	readonly controls: ControlsController
+	readonly controls: IControlStore
 	readonly #graphics: GraphicsController
 	readonly pageStore: IPageStore
 
@@ -126,7 +127,7 @@ export class CloudController {
 		appInfo: AppInfo,
 		db: DataDatabase,
 		cache: DataCache,
-		controls: ControlsController,
+		controls: IControlStore,
 		graphics: GraphicsController,
 		pageStore: IPageStore
 	) {
@@ -279,8 +280,8 @@ export class CloudController {
 		for (let region in this.#regionInstances) {
 			try {
 				this.#regionInstances[region].destroy()
-			} catch (e: any) {
-				this.#logger.silly(`couldn't destroy region ${region}: ${e.message}`)
+			} catch (e) {
+				this.#logger.silly(`couldn't destroy region ${region}: ${stringifyError(e)}`)
 			}
 		}
 	}
@@ -423,8 +424,8 @@ export class CloudController {
 							}
 						}
 					}
-				} catch (e: any) {
-					this.#logger.silly(e.message)
+				} catch (e) {
+					this.#logger.silly(stringifyError(e))
 				}
 
 				this.#setState({ regions: newRegions })
@@ -509,8 +510,8 @@ export class CloudController {
 				this.#setState({ authenticated: false, authenticating: false, error: responseObject.message })
 				this.destroy()
 			}
-		} catch (e: any) {
-			this.#logger.error(`Cloud error: ${e.message}`)
+		} catch (e) {
+			this.#logger.error(`Cloud error: ${stringifyError(e)}`)
 			this.#setState({ authenticated: false, authenticating: false, error: JSON.stringify(e) })
 			this.destroy()
 		}
@@ -579,8 +580,8 @@ export class CloudController {
 					error: 'Cannot refresh login token, please login again.',
 				})
 			}
-		} catch (e: any) {
-			this.#logger.error(`Cloud refresh error: ${e.message}`)
+		} catch (e) {
+			this.#logger.error(`Cloud refresh error: ${stringifyError(e)}`)
 			this.#setState({
 				authenticated: false,
 				authenticating: false,
@@ -701,8 +702,8 @@ export class CloudController {
 					regions,
 				})
 			}
-		} catch (e: any) {
-			this.#logger.silly(e.message)
+		} catch (e) {
+			this.#logger.silly(stringifyError(e))
 		}
 	}
 

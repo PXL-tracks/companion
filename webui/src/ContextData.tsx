@@ -33,6 +33,10 @@ import { trpc } from './Resources/TRPC.js'
 import { useEventDefinitions } from './Hooks/useEventDefinitions.js'
 import { useExpressionVariablesListSubscription } from './Hooks/useExpressionVariablesListSubscription.js'
 import { ExpressionVariablesListStore } from './Stores/ExpressionVariablesListStore.js'
+import { SurfaceInstancesStore } from './Stores/SurfaceInstancesStore.js'
+import { useSurfaceInstancesSubscription } from './Hooks/useSurfaceInstancesSubscription.js'
+import { InstanceStatusesStore } from './Stores/InstanceStatusesStore.js'
+import { useInstanceStatusesSubscription } from './Hooks/useInstanceStatusesSubscription.js'
 
 interface ContextDataProps {
 	children: (progressPercent: number, loadingComplete: boolean) => React.JSX.Element | React.JSX.Element[]
@@ -66,7 +70,10 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 			whatsNewModal: whatsNewModalRef,
 
 			modules: new ModuleInfoStore(),
+
 			connections: new ConnectionsStore(),
+			surfaceInstances: new SurfaceInstancesStore(),
+			instanceStatuses: new InstanceStatusesStore(),
 
 			activeLearns: observable.set(),
 
@@ -101,12 +108,20 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 	)
 	const moduleInfoReady = useModuleInfoSubscription(rootStore.modules)
 	const moduleStoreReady = useModuleStoreListSubscription(rootStore.modules)
+	const moduleStoreProgressReady = useModuleStoreRefreshProgressSubscription(rootStore.modules.storeRefreshProgress)
 	const connectionsReady = useConnectionsConfigSubscription(rootStore.connections)
 	const connectionGroupsReady = useGenericCollectionsSubscription(
 		rootStore.connections,
 		trpc.instances.connections.collections.watchQuery,
 		undefined
 	)
+	const surfaceInstancesReady = useSurfaceInstancesSubscription(rootStore.surfaceInstances)
+	const surfaceInstanceCollectionsReady = useGenericCollectionsSubscription(
+		rootStore.surfaceInstances,
+		trpc.instances.surfaces.collections.watchQuery,
+		undefined
+	)
+	const instanceStatusesReady = useInstanceStatusesSubscription(rootStore.instanceStatuses)
 	const triggersListReady = useTriggersListSubscription(rootStore.triggersList)
 	const triggerGroupsReady = useGenericCollectionsSubscription(
 		rootStore.triggersList,
@@ -134,15 +149,18 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 		trpc.controls.expressionVariables.collections.watchQuery,
 		undefined
 	)
-	const moduleStoreProgressReady = useModuleStoreRefreshProgressSubscription(rootStore.moduleStoreRefreshProgress)
 	const entityDefinitionsReady = useEventDefinitions(rootStore.eventDefinitions)
 	const activeLearnRequestsReady = useActiveLearnRequests(rootStore.activeLearns)
 
 	const steps: boolean[] = [
 		moduleInfoReady,
 		moduleStoreReady,
+		moduleStoreProgressReady,
 		connectionsReady,
 		connectionGroupsReady,
+		surfaceInstancesReady,
+		surfaceInstanceCollectionsReady,
+		instanceStatusesReady,
 		variablesReady,
 		actionDefinitionsReady,
 		feedbackDefinitionsReady,
@@ -159,7 +177,6 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 		triggerGroupsReady,
 		entityDefinitionsReady,
 		activeLearnRequestsReady,
-		moduleStoreProgressReady,
 	]
 	const completedSteps = steps.filter((s) => !!s)
 

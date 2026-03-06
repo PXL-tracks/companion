@@ -7,6 +7,7 @@ import { ControlEntityListPoolButton } from '../../Entities/EntityListPoolButton
 import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
 import type { ActionSetId } from '@companion-app/shared/Model/ActionModel.js'
 import type { DrawStyleButtonStateProps } from '@companion-app/shared/Model/StyleModel.js'
+import type { JsonValue } from 'type-fest'
 
 /**
  * Abstract class for a editable button control.
@@ -76,11 +77,12 @@ export abstract class ButtonControlBase<TJson, TOptions extends ButtonOptionsBas
 				instanceDefinitions: deps.instance.definitions,
 				internalModule: deps.internalModule,
 				processManager: deps.instance.processManager,
-				variableValues: deps.variables.values,
+				variableValues: deps.variableValues,
+				pageStore: deps.pageStore,
 			},
 			this.sendRuntimePropsChange.bind(this),
 			(expression, requiredType, injectedVariableValues) =>
-				deps.variables.values
+				deps.variableValues
 					.createVariablesAndExpressionParser(
 						deps.pageStore.getLocationOfControlId(this.controlId),
 						this.entities.getLocalVariableEntities(),
@@ -201,13 +203,12 @@ export abstract class ButtonControlBase<TJson, TOptions extends ButtonOptionsBas
 		return result
 	}
 
-	abstract onVariablesChanged(allChangedVariables: Set<string>): void
+	abstract onVariablesChanged(allChangedVariables: ReadonlySet<string>): void
 
 	/**
 	 * Update an option field of this control
 	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	optionsSetField(key: string, value: any): boolean {
+	optionsSetField(key: string, value: JsonValue): boolean {
 		// Check if rotary_actions should be added/remove
 		if (key === 'rotaryActions') {
 			this.entities.setupRotaryActionSets(!!value, true)
@@ -291,9 +292,11 @@ export abstract class ButtonControlBase<TJson, TOptions extends ButtonOptionsBas
 				if (!pressed && pressedDuration) {
 					// find the correct set to execute on up
 
-					const setIds = Array.from(step.sets.keys())
+					const setIds = step.sets
+						.keys()
 						.map((id) => Number(id))
 						.filter((id) => !isNaN(id) && id < pressedDuration)
+						.toArray()
 					if (setIds.length) {
 						actionSetId = Math.max(...setIds)
 					}

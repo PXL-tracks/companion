@@ -146,6 +146,7 @@ export default [
 			'webui/public/_deps/**/*',
 			'webui/post-install.ts',
 			'.yarnrc.yml',
+			'companion/generated/**/*',
 			// TMP
 			'companion/lib/Cloud/**/*',
 			'companion/test/**/*',
@@ -179,7 +180,18 @@ export default [
 		},
 		rules: {
 			...hookseslint.configs.recommended.rules,
-			'react-refresh/only-export-components': 'warn',
+			'react-refresh/only-export-components': [
+				'warn',
+				{
+					extraHOCs: [
+						// tanstack router
+						'createFileRoute',
+						'createRootRoute',
+						// mobx
+						'observer',
+					],
+				},
+			],
 			'@typescript-eslint/only-throw-error': [
 				'error',
 				{

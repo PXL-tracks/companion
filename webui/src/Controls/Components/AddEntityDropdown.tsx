@@ -29,6 +29,7 @@ interface AddEntityOption {
 	isRecent: boolean
 	value: string
 	label: string
+	sortKey: string
 	fuzzy: ReturnType<typeof fuzzyPrepare>
 }
 interface AddEntityGroup {
@@ -59,19 +60,33 @@ export const AddEntityDropdown = observer(function AddEntityDropdown({
 
 	const options = useComputed(() => {
 		const options: Array<AddEntityOption | AddEntityGroup> = []
-		for (const [connectionId, entityDefinitions] of definitions.connections.entries()) {
+		const pushConnection = (connectionId: string, label: string) => {
+			const entityDefinitions = definitions.connections.get(connectionId)
+			if (!entityDefinitions) return
+
+			const connectionOptions: AddEntityOption[] = []
+
 			for (const [definitionId, definition] of entityDefinitions.entries()) {
 				if (!canAddEntityToFeedbackList(feedbackListType, definition)) continue
 
-				const connectionLabel = connections.getLabel(connectionId) ?? connectionId
-				const optionLabel = `${connectionLabel}: ${definition.label}`
-				options.push({
+				const optionLabel = `${label}: ${definition.label}`
+				connectionOptions.push({
 					isRecent: false,
 					value: `${connectionId}:${definitionId}`,
 					label: optionLabel,
+					sortKey: definition.sortKey ?? definition.label,
 					fuzzy: fuzzyPrepare(optionLabel),
 				})
 			}
+
+			connectionOptions.sort((a, b) => a.sortKey.localeCompare(b.sortKey, undefined, { sensitivity: 'base' }))
+
+			options.push(...connectionOptions)
+		}
+
+		pushConnection('internal', 'internal')
+		for (const connection of connections.sortedConnections()) {
+			pushConnection(connection.id, connection.label)
 		}
 
 		if (!showAll) {
@@ -93,6 +108,7 @@ export const AddEntityDropdown = observer(function AddEntityDropdown({
 							isRecent: true, // Not really, but should behave the same
 							value: `internal:${definitionId}`,
 							label: optionLabel,
+							sortKey: definition.sortKey ?? definition.label,
 							fuzzy: fuzzyPrepare(optionLabel),
 						})
 					}
@@ -120,6 +136,7 @@ export const AddEntityDropdown = observer(function AddEntityDropdown({
 					isRecent: true,
 					value: `${connectionId}:${definitionId}`,
 					label: optionLabel,
+					sortKey: definition.sortKey ?? definition.label,
 					fuzzy: fuzzyPrepare(optionLabel),
 				})
 			}

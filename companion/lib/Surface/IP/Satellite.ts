@@ -22,7 +22,9 @@ import {
 } from '../CommonConfigFields.js'
 import debounceFn from 'debounce-fn'
 import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
-import type { CompanionVariableValue } from '@companion-module/base'
+import { GraphicsRenderer, LOCK_ICON_STYLE } from '../../Graphics/Renderer.js'
+import { ImageResult } from '../../Graphics/ImageResult.js'
+import { stringifyVariableValue, type VariableValue } from '@companion-app/shared/Model/Variables.js'
 import type { CompanionSurfaceConfigField, GridSize } from '@companion-app/shared/Model/Surfaces.js'
 import type {
 	DrawButtonItem,
@@ -31,18 +33,17 @@ import type {
 	SurfacePanelEvents,
 	SurfacePanelInfo,
 } from '../Types.js'
-import type { ImageResult } from '../../Graphics/ImageResult.js'
 import type { SatelliteMessageArgs, SatelliteSocketWrapper } from '../../Service/Satellite/SatelliteApi.js'
 import type {
 	SatelliteControlStylePreset,
 	SatelliteSurfaceLayout,
 } from '../../Service/Satellite/SatelliteSurfaceManifestSchema.js'
-import type { ReadonlyDeep } from 'type-fest'
+import type { JsonValue, ReadonlyDeep } from 'type-fest'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 
 export interface SatelliteDeviceInfo {
 	deviceId: string
 	productName: string
-	path: string
 	socket: SatelliteSocketWrapper
 	gridSize: GridSize
 	supportsBrightness: boolean
@@ -60,12 +61,12 @@ export interface SatelliteTransferableValue {
 }
 interface SatelliteInputVariableInfo {
 	id: string
-	lastValue: CompanionVariableValue
+	lastValue: VariableValue
 }
 interface SatelliteOutputVariableInfo {
 	id: string
 	lastReferencedVariables: ReadonlySet<string> | null
-	lastValue: any
+	lastValue: JsonValue | undefined
 	triggerUpdate?: () => void
 }
 
@@ -100,10 +101,10 @@ function generateConfigFields(
 
 			fields.push({
 				id,
-				type: 'textinput',
+				type: 'expression',
 				label: variable.name,
 				tooltip: variable.description,
-				isExpression: true,
+				allowInvalidValues: true,
 			})
 
 			outputVariables[variable.id] = {
@@ -172,6 +173,7 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	readonly surfaceManifestFromClient: boolean
 	readonly #surfaceManifest: ReadonlyDeep<SatelliteSurfaceLayout>
 	readonly #controlDefinitions: ReadonlyMap<string, ResolvedControlDefinition[]>
+	readonly #supportsLockedState: boolean
 
 	readonly #inputVariables: Record<string, SatelliteInputVariableInfo> = {}
 	readonly #outputVariables: Record<string, SatelliteOutputVariableInfo> = {}
@@ -180,6 +182,9 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	readonly gridSize: GridSize
 	readonly deviceId: string
 	readonly socket: SatelliteSocketWrapper
+
+	// Cache for generated lock images by dimension
+	readonly #lockImageCache = new Map<string, ImageResult>()
 
 	constructor(deviceInfo: SatelliteDeviceInfo, executeExpression: SurfaceExecuteExpressionFn) {
 		super()
@@ -195,17 +200,18 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		this.surfaceManifestFromClient = deviceInfo.surfaceManifestFromClient
 		this.#surfaceManifest = deviceInfo.surfaceManifest
 		this.#controlDefinitions = resolveControlDefinitions(deviceInfo.surfaceManifest)
+		this.#supportsLockedState = deviceInfo.supportsLockedState
 
-		const anyControlHasBitmap = !!Array.from(this.#controlDefinitions.values()).find(
-			(controls) => !!controls.find((control) => !!control.style.bitmap)
-		)
+		const anyControlHasBitmap = !!this.#controlDefinitions
+			.values()
+			.find((controls) => !!controls.find((control) => !!control.style.bitmap))
 
 		this.info = {
-			type: deviceInfo.productName,
-			devicePath: deviceInfo.path,
+			description: deviceInfo.productName,
 			configFields: generateConfigFields(deviceInfo, anyControlHasBitmap, this.#inputVariables, this.#outputVariables),
-			deviceId: deviceInfo.path,
-			location: deviceInfo.socket.remoteAddress,
+			surfaceId: deviceInfo.deviceId,
+			location: deviceInfo.socket.remoteAddress ?? null,
+			isRemote: true, // Satellite connections are always remote
 		}
 
 		this.#logger.info(`Adding Satellite device "${this.deviceId}"`)
@@ -218,8 +224,8 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		this.#writeQueue = new ImageWriteQueue(this.#logger, async (_id, controlDefinition, drawItem) => {
 			try {
 				await this.#sendDraw(controlDefinition, drawItem)
-			} catch (e: any) {
-				this.#logger.debug(`scale image failed: ${e}\n${e.stack}`)
+			} catch (e) {
+				this.#logger.debug(`scale image failed: ${stringifyError(e)}`)
 				this.emit('remove')
 				return
 			}
@@ -229,22 +235,57 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		for (const [name, outputVariable] of Object.entries(this.#outputVariables)) {
 			this.#triggerOutputVariable(name, outputVariable)
 		}
+	}
 
-		if (deviceInfo.supportsLockedState) {
-			this.setLocked = (locked: boolean, characterCount: number): void => {
-				this.#logger.silly(`locked: ${locked} - ${characterCount}`)
-				if (this.socket !== undefined) {
-					this.socket.sendMessage('LOCKED-STATE', null, this.deviceId, {
-						LOCKED: locked,
-						CHARACTER_COUNT: characterCount,
+	setLocked(locked: boolean, characterCount: number): void {
+		if (this.#supportsLockedState) {
+			this.#logger.silly(`locked: ${locked} - ${characterCount}`)
+			if (this.socket !== undefined) {
+				this.socket.sendMessage('LOCKED-STATE', null, this.deviceId, {
+					LOCKED: locked,
+					CHARACTER_COUNT: characterCount,
+				})
+			}
+		} else {
+			// Clear the deck to blank anything we won't be drawing to
+			this.clearDeck()
+
+			if (!locked) return
+
+			// Iterate through all controls and draw lock icons/text
+			for (const definitions of this.#controlDefinitions.values()) {
+				for (const definition of definitions) {
+					// Queue the draw
+					this.#writeQueue.queue(definition.id, definition, {
+						x: definition.column,
+						y: definition.row,
+						image: this.#getLockImage(definition.style),
 					})
 				}
 			}
 		}
 	}
 
-	// Override the base type, it may be defined by the constructor
-	setLocked: SurfacePanel['setLocked']
+	/**
+	 * Get or generate a lock icon image for a given size
+	 */
+	#getLockImage(stylePreset: SatelliteControlStylePreset): ImageResult {
+		const cacheKey =
+			stylePreset.bitmap && stylePreset.bitmap.w > 0 && stylePreset.bitmap.h > 0
+				? `${stylePreset.bitmap.w}x${stylePreset.bitmap.h}`
+				: null
+
+		if (!stylePreset.bitmap || !cacheKey) {
+			return new ImageResult(Buffer.alloc(0), 0, 0, '', LOCK_ICON_STYLE)
+		}
+
+		const cached = this.#lockImageCache.get(cacheKey)
+		if (cached) return cached
+
+		const result = GraphicsRenderer.drawLockIcon(stylePreset.bitmap.w, stylePreset.bitmap.h)
+		this.#lockImageCache.set(cacheKey, result)
+		return result
+	}
 
 	quit(): void {}
 
@@ -280,7 +321,7 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 			if (buffer === undefined || buffer.length == 0) {
 				this.#logger.warn('buffer has invalid size')
 			} else {
-				params['BITMAP'] = Buffer.from(buffer).toString('base64')
+				params['BITMAP'] = buffer.toString('base64')
 			}
 		}
 
@@ -349,12 +390,12 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	/**
 	 * Draw a button
 	 */
-	draw(x: number, y: number, image: ImageResult): void {
-		const definitions = this.#controlDefinitions.get(formatSurfaceXy(x, y))
+	draw(item: DrawButtonItem): void {
+		const definitions = this.#controlDefinitions.get(formatSurfaceXy(item.x, item.y))
 		if (!definitions) return
 
 		for (const definition of definitions) {
-			this.#writeQueue.queue(definition.id, definition, { x, y, image })
+			this.#writeQueue.queue(definition.id, definition, item)
 		}
 	}
 
@@ -393,7 +434,7 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	/**
 	 * Set the value of a variable from this surface
 	 */
-	setVariableValue(variableName: string, variableValue: CompanionVariableValue): void {
+	setVariableValue(variableName: string, variableValue: VariableValue): void {
 		const inputVariableInfo = this.#inputVariables[variableName]
 		if (!inputVariableInfo) return // Not known
 
@@ -417,18 +458,14 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	/**
 	 * Propagate variable changes
 	 */
-	onVariablesChanged(allChangedVariables: Set<string>): void {
+	onVariablesChanged(allChangedVariables: ReadonlySet<string>): void {
 		for (const [name, outputVariable] of Object.entries(this.#outputVariables)) {
 			if (!outputVariable.lastReferencedVariables) continue
 
-			for (const variable of allChangedVariables.values()) {
-				if (!outputVariable.lastReferencedVariables.has(variable)) continue
+			if (outputVariable.lastReferencedVariables.isDisjointFrom(allChangedVariables)) continue
 
-				// There is a change, recalculate and send the value
-
-				this.#triggerOutputVariable(name, outputVariable)
-				break
-			}
+			// There is a change, recalculate and send the value
+			this.#triggerOutputVariable(name, outputVariable)
 		}
 	}
 
@@ -436,10 +473,10 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		if (!outputVariable.triggerUpdate)
 			outputVariable.triggerUpdate = debounceFn(
 				() => {
-					let expressionResult: CompanionVariableValue | undefined = VARIABLE_UNKNOWN_VALUE
+					let expressionResult: VariableValue | undefined = VARIABLE_UNKNOWN_VALUE
 
 					const expressionText = this.#config[outputVariable.id]
-					const parseResult = this.#executeExpression(expressionText ?? '', this.info.deviceId, undefined)
+					const parseResult = this.#executeExpression(expressionText ?? '', this.info.surfaceId, undefined)
 					if (parseResult.ok) {
 						expressionResult = parseResult.value
 					} else {
@@ -454,7 +491,7 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 					outputVariable.lastValue = expressionResult
 
 					if (this.socket !== undefined) {
-						const base64Value = Buffer.from(expressionResult?.toString() ?? '').toString('base64')
+						const base64Value = Buffer.from(stringifyVariableValue(expressionResult) ?? '').toString('base64')
 						this.socket.sendMessage('VARIABLE-VALUE', null, this.deviceId, {
 							VARIABLE: name,
 							VALUE: base64Value,

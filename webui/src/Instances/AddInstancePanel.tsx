@@ -1,5 +1,5 @@
 import React, { useContext, useState, useCallback, useRef } from 'react'
-import { CAlert, CButton, CButtonGroup } from '@coreui/react'
+import { CAlert, CButton, CButtonGroup, CTooltip } from '@coreui/react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
 	faCog,
@@ -22,6 +22,7 @@ import { faGithub } from '@fortawesome/free-brands-svg-icons'
 import { filterProducts, useAllModuleProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
 import { Link } from '@tanstack/react-router'
 import type { AddInstanceService } from './AddInstanceService.js'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 
 interface AddInstancePanelProps {
 	service: AddInstanceService
@@ -57,7 +58,7 @@ export const AddInstancePanel = observer(function AddInstancePanel({
 
 	let candidates: JSX.Element[] = []
 	try {
-		const searchResults = filterProducts(typeProducts, filter)
+		const searchResults = filterProducts(typeProducts, filter, false)
 
 		const candidatesObj: Record<string, JSX.Element> = {}
 		for (const moduleInfo of searchResults) {
@@ -192,16 +193,19 @@ interface AddInstanceEntryProps {
 	addInstance: (module: FuzzyProduct) => void
 }
 
-function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
-	const { helpViewer } = useContext(RootAppStoreContext)
+const AddInstanceEntry = observer(function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
+	const { helpViewer, surfaceInstances } = useContext(RootAppStoreContext)
 
 	const addInstanceClick = useCallback(() => addInstance(moduleInfo), [addInstance, moduleInfo])
 	const showHelpForVersion =
 		moduleInfo.installedInfo?.devVersion ??
 		moduleInfo.installedInfo?.stableVersion ??
 		moduleInfo.installedInfo?.betaVersion ??
+		moduleInfo.installedInfo?.builtinVersion ??
 		moduleInfo.installedInfo?.installedVersions?.[0] ??
-		(moduleInfo.storeInfo ? { helpPath: moduleInfo.storeInfo.helpUrl, versionId: '' } : undefined)
+		(moduleInfo.storeInfo
+			? { helpPath: moduleInfo.storeInfo.helpUrl, versionId: '', allowMultipleInstances: true }
+			: undefined)
 
 	const showHelpClick = useCallback(
 		() =>
@@ -221,11 +225,29 @@ function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
 		]
 	)
 
+	const alreadyAddedCount =
+		moduleInfo.moduleType === ModuleInstanceType.Surface
+			? surfaceInstances.getAllOfModuleId(moduleInfo.moduleId).length
+			: 0
+	// If it is installed, we know if it supports multiple instances.
+	// If it isn't installed, count will be 0, so it doesn't matter
+	const isLimitReached = alreadyAddedCount > 0 && !(showHelpForVersion?.allowMultipleInstances ?? false)
+
 	return (
 		<div className="flex">
-			<CButton color="primary" onClick={addInstanceClick}>
-				Add
-			</CButton>
+			{isLimitReached ? (
+				<CTooltip content="This module is limited to one instance">
+					<span>
+						<CButton color="primary" disabled>
+							Add
+						</CButton>
+					</span>
+				</CTooltip>
+			) : (
+				<CButton color="primary" onClick={addInstanceClick}>
+					Add
+				</CButton>
+			)}
 			&nbsp;
 			{moduleInfo.installedInfo?.stableVersion?.isLegacy && (
 				<>
@@ -273,4 +295,4 @@ function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
 			</div>
 		</div>
 	)
-}
+})

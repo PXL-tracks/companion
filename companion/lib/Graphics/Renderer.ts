@@ -9,18 +9,43 @@
  * this program.
  */
 
-import { Image } from './Image.js'
+import { Image, type TextLayoutCache } from './Image.js'
 import { ParseAlignment, parseColor } from '../Resources/Util.js'
 import { formatLocation } from '@companion-app/shared/ControlId.js'
 import { ImageResult } from './ImageResult.js'
 import type { GraphicsOptions } from './Controller.js'
 import type { DrawStyleButtonModel, DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import QuickLRU from 'quick-lru'
 
 const colorButtonYellow = 'rgb(255, 198, 0)'
 const colorWhite = 'white'
 const colorBlack = 'black'
 const colorDarkGrey = 'rgba(15, 15, 15, 1)'
+
+/**
+ * Shared style for lock icon display
+ */
+export const LOCK_ICON_STYLE: DrawStyleButtonModel = {
+	text: '🔒',
+	textExpression: false,
+	size: 'auto',
+	alignment: 'center:center',
+	pngalignment: 'center:center',
+	color: 0xc8c8c8, // rgb(200, 200, 200) as number
+	bgcolor: 0x000000, // rgb(0, 0, 0) as number
+	show_topbar: false,
+	png64: null,
+	style: 'button',
+	imageBuffers: [],
+	pushed: false,
+	stepCurrent: 0,
+	stepCount: 1,
+	cloud: undefined,
+	cloud_error: undefined,
+	button_status: undefined,
+	action_running: undefined,
+}
 
 const internalIcons = {
 	// 15x8 argb
@@ -46,6 +71,9 @@ const internalIcons = {
 // let lastDraw = 0
 
 export class GraphicsRenderer {
+	/** Static cache for text layout computations, shared across all Image instances */
+	static #textLayoutCache: TextLayoutCache = new QuickLRU({ maxSize: 5000 })
+
 	/**
 	 * Draw the image for an empty button
 	 */
@@ -54,7 +82,7 @@ export class GraphicsRenderer {
 		// console.log('starting drawBlank ' + now, 'time elapsed since last start ' + (now - lastDraw))
 		// lastDraw = now
 		// console.time('drawBlankImage')
-		const img = new Image(72, 72, 2)
+		const img = new Image(72, 72, 2, GraphicsRenderer.#textLayoutCache)
 
 		img.fillColor('black')
 
@@ -96,7 +124,7 @@ export class GraphicsRenderer {
 	}> {
 		// console.log('starting drawButtonImage '+ performance.now())
 		// console.time('drawButtonImage')
-		const img = new Image(72, 72, 4)
+		const img = new Image(72, 72, 4, GraphicsRenderer.#textLayoutCache)
 
 		let draw_style: DrawStyleModel['style'] | undefined = undefined
 
@@ -364,27 +392,19 @@ export class GraphicsRenderer {
 	}
 
 	/**
-	 * Draw pincode entry button for given number
-	 * @param num Display number
+	 * Draw a lock icon for a given size
+	 * @param width Width of the image
+	 * @param height Height of the image
 	 */
-	static drawPincodeNumber(num: number): ImageResult {
-		const img = new Image(72, 72, 3)
-		img.fillColor(colorDarkGrey)
-		img.drawTextLineAligned(36, 36, `${num}`, colorWhite, 44, 'center', 'center')
-		return new ImageResult(img.buffer(), img.realwidth, img.realheight, img.toDataURLSync(), undefined)
-	}
+	static drawLockIcon(width: number, height: number): ImageResult {
+		const img = new Image(width, height, 2, GraphicsRenderer.#textLayoutCache)
 
-	/**
-	 * Draw pincode entry button
-	 */
-	static drawPincodeEntry(code: string | undefined): ImageResult {
-		const img = new Image(72, 72, 4)
-		img.fillColor(colorDarkGrey)
-		img.drawTextLineAligned(36, 30, 'Lockout', colorButtonYellow, 14, 'center', 'center')
-		if (code !== undefined) {
-			img.drawAlignedText(0, 15, 72, 72, code.replace(/[a-z0-9]/gi, '*'), colorWhite, 18, 'center', 'center')
-		}
+		// Fill with black background
+		img.fillColor('rgb(0, 0, 0)')
 
-		return new ImageResult(img.buffer(), img.realwidth, img.realheight, img.toDataURLSync(), undefined)
+		// Draw a centered padlock unicode character in light grey
+		img.drawAlignedText(0, 0, width, height, '🔒', 'rgb(200, 200, 200)', Math.floor(height * 0.6), 'center', 'center')
+
+		return new ImageResult(img.buffer(), img.realwidth, img.realheight, img.toDataURLSync(), LOCK_ICON_STYLE)
 	}
 }

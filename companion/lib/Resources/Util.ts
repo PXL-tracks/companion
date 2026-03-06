@@ -153,8 +153,7 @@ export const convert2Digit = (num: number): string => {
 /**
  * Check if Satellite API value is falsey
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export const isFalsey = (val: any): boolean => {
+export const isFalsey = (val: unknown): boolean => {
 	// eslint-disable-next-line no-extra-boolean-cast
 	return (typeof val === 'string' && val.toLowerCase() == 'false') || val == '0' || !Boolean(val)
 }
@@ -162,8 +161,7 @@ export const isFalsey = (val: any): boolean => {
 /**
  * Check if Satellite API value is truthy
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export const isTruthy = (val: any): boolean => {
+export const isTruthy = (val: unknown): boolean => {
 	return (
 		!isFalsey(val) &&
 		((typeof val === 'string' && (val.toLowerCase() == 'true' || val.toLowerCase() == 'yes')) || Number(val) >= 1)
@@ -273,42 +271,6 @@ export function translateRotation(rotation: SurfaceRotation | null): imageRs.Rot
 }
 
 /**
- * Offset a SurfaceRotation by a given amount in 90° steps
- * @param rotation - the rotation to apply the offset to
- * @param offset - the amount to offset by, will be rounded to full quarters
- */
-export function offsetRotation(rotation: SurfaceRotation | null, offset: number): SurfaceRotation | null {
-	let orig: string | number | null = rotation
-	let surface = false
-	if (orig === null) return null
-	if (typeof orig === 'string' && orig.startsWith('surface')) {
-		orig = parseInt(orig.replace('surface', ''))
-		surface = true
-	}
-
-	const quarter = (Number(orig) / 90 + Math.round(offset / 90)) % 4
-
-	let newRotation: SurfaceRotation
-	if (quarter == 0) {
-		newRotation = 0
-	} else if (quarter == 1 || quarter == -3) {
-		newRotation = 90
-	} else if (quarter == 2 || quarter == -2) {
-		newRotation = 180
-	} else if (quarter == 3 || quarter == -1) {
-		newRotation = -90
-	} else {
-		return null
-	}
-
-	if (surface) {
-		return `surface${newRotation}`
-	} else {
-		return newRotation
-	}
-}
-
-/**
  * Transform a button image render to the format needed for a surface integration
  */
 export async function transformButtonImage(
@@ -338,6 +300,10 @@ export async function transformButtonImage(
 
 	const computedImage = await image.toBuffer(targetFormat)
 	return computedImage.buffer
+}
+
+export function uint8ArrayToBuffer(arr: Uint8Array | Uint8ClampedArray): Buffer {
+	return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength)
 }
 
 /**

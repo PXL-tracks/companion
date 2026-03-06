@@ -3,11 +3,12 @@ import type { ClientConnectionsUpdate } from '@companion-app/shared/Model/Connec
 import { InstanceVersionUpdatePolicy, ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import z from 'zod'
 import { publicProcedure, router, toIterable } from '../../UI/TRPC.js'
-import { translateConnectionConfigFields } from '../ConfigFields.js'
 import type { InstanceController, InstanceControllerEvents } from '../Controller.js'
 import type { InstanceConfigStore } from '../ConfigStore.js'
 import type { Logger } from '../../Log/Controller.js'
 import type EventEmitter from 'events'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { JsonObjectSchema } from '@companion-app/shared/Model/Options.js'
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function createConnectionsTrpcRouter(
@@ -70,7 +71,7 @@ export function createConnectionsTrpcRouter(
 				})
 			)
 			.mutation(({ input }) => {
-				configStore.moveConnection(input.collectionId, input.connectionId, input.dropIndex)
+				configStore.moveInstance(input.collectionId, ModuleInstanceType.Connection, input.connectionId, input.dropIndex)
 			}),
 
 		setEnabled: publicProcedure
@@ -105,14 +106,14 @@ export function createConnectionsTrpcRouter(
 					const fields = await instance.requestConfigFields()
 
 					const result: ClientEditInstanceConfig = {
-						fields: translateConnectionConfigFields(fields),
+						fields: fields,
 						useNewLayout: instance.usesNewConfigLayout,
 						config: instanceConf.config,
 						secrets: instanceConf.secrets || {},
 					}
 					return result
-				} catch (e: any) {
-					logger.silly(`Failed to load instance config_fields: ${e.message}`)
+				} catch (e) {
+					logger.silly(`Failed to load instance config_fields: ${stringifyError(e)}`)
 					return null
 				}
 			}),
@@ -123,8 +124,8 @@ export function createConnectionsTrpcRouter(
 					connectionId: z.string(),
 					label: z.string(),
 					enabled: z.boolean().optional(),
-					config: z.record(z.string(), z.any()).optional(),
-					secrets: z.record(z.string(), z.any()).optional(),
+					config: JsonObjectSchema.optional(),
+					secrets: JsonObjectSchema.optional(),
 					updatePolicy: z.enum(InstanceVersionUpdatePolicy).optional(),
 				})
 			)

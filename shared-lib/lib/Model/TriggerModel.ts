@@ -14,7 +14,7 @@ export interface TriggerModel {
 	localVariables: SomeEntityModel[]
 }
 
-export interface TriggerOptions {
+export type TriggerOptions = {
 	name: string
 	enabled: boolean
 	sortOrder: number
@@ -25,6 +25,7 @@ export interface ClientTriggerData extends TriggerOptions {
 	type: 'trigger'
 	lastExecuted: number | null
 	description: string
+	collectionEnabled?: boolean
 }
 
 export type TriggersUpdate =

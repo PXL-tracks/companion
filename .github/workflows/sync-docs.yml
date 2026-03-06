@@ -6,7 +6,7 @@ on:
       - main
       - stable-*
     paths:
-      - 'docs/user-guide/**'
+      - "docs/user-guide/**"
   workflow_dispatch:
 
 concurrency:
@@ -49,12 +49,14 @@ jobs:
           git checkout -f whats-new/index.md
 
       - name: Commit and push changes (beta)
-        if: github.ref != 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           repository: website
-          commit_message: 'Sync user-guide from companion'
-          file_pattern: 'user-guide/** whats-new/**'
+          commit_message: "Sync user-guide from companion"
+          file_pattern: "user-guide/** whats-new/**"
+          commit_user_name: companion-module-bot
+          commit_user_email: companion-module-bot@users.noreply.github.com
 
       - name: Sync user-guide folder (release)
         if: github.ref != 'refs/heads/main'
@@ -87,5 +89,7 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           repository: website
-          commit_message: 'Sync user-guide (v${{ steps.sync_release.outputs.version }}) from companion'
-          file_pattern: 'versioned_docs/** versioned_sidebars/** versions.json'
+          commit_message: "Sync user-guide (v${{ steps.sync_release.outputs.version }}) from companion"
+          file_pattern: "versioned_docs/** versioned_sidebars/** versions.json"
+          commit_user_name: companion-module-bot
+          commit_user_email: companion-module-bot@users.noreply.github.com

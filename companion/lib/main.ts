@@ -19,7 +19,10 @@ import envPaths from 'env-paths'
 import { nanoid } from 'nanoid'
 import { ConfigReleaseDirs } from '@companion-app/shared/Paths.js'
 import { type SyslogTransportOptions } from 'winston-syslog'
-import net from 'net'
+import net, { isIPv6 } from 'net'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { isPackaged } from './Resources/Util.js'
+import { DISABLE_IPv6, GLOBAL_BIND_ADDRESS } from './Resources/Constants.js'
 
 const program = new Command()
 
@@ -50,6 +53,7 @@ program
 	.option('--syslog-port <string>', 'Port on syslog server to write to')
 	.option('--syslog-tcp', 'Use TCP for transport (default: udp)')
 	.option('--syslog-localhost <string>', 'Hostname of this machine')
+	.option('--no-notifications', "Don't show version-related notifications in the header.")
 
 program.command('start', { isDefault: true, hidden: true }).action(() => {
 	const options = program.opts()
@@ -99,7 +103,12 @@ program.command('start', { isDefault: true, hidden: true }).action(() => {
 		process.exit(1)
 	}
 
-	let adminIp = options.adminAddress || '::' // default to admin global
+	let adminIp = options.adminAddress || GLOBAL_BIND_ADDRESS // default to admin global
+
+	if (DISABLE_IPv6 && isIPv6(adminIp)) {
+		console.error(`IPv6 has been disabled but has been specified as the admin address`)
+		process.exit(1)
+	}
 
 	if (options.adminInterface) {
 		adminIp = null
@@ -222,16 +231,25 @@ program.command('start', { isDefault: true, hidden: true }).action(() => {
 		}
 	}
 
-	const registry = new Registry(
+	const registry = new Registry({
 		configDir,
-		{
-			connection: path.join(rootConfigDir, 'modules'), // For backwards compatibility
+		modulesDirs: {
+			[ModuleInstanceType.Connection]: path.join(rootConfigDir, 'modules'), // Naming for backwards compatibility
+			[ModuleInstanceType.Surface]: path.join(rootConfigDir, 'surfaces'),
 		},
-		machineId
-	)
+		builtinModuleDirs: {
+			[ModuleInstanceType.Connection]: null,
+			[ModuleInstanceType.Surface]: isPackaged()
+				? path.join(import.meta.dirname, 'builtin-surfaces')
+				: path.join(import.meta.dirname, '../../.cache/builtin-surfaces'),
+		},
+		udevRulesDir: path.join(rootConfigDir, 'udev-rules'),
+		machineId,
+		notifications: options.notifications ?? true, // options magically generates notifications rather than noNotifications (and will make it true if CL flag is omitted)
+	})
 
 	registry
-		.ready(options.extraModulePath, adminIp, options.adminPort)
+		.ready(options.extraModulePath, adminIp, Number(options.adminPort))
 		.then(() => {
 			console.log('Started')
 

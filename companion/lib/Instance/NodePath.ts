@@ -1,8 +1,10 @@
 import fs from 'fs-extra'
 import { isPackaged } from '../Resources/Util.js'
 import path from 'path'
-import type { ModuleManifest } from '@companion-module/base'
-import { doesModuleSupportPermissionsModel } from './ApiVersions.js'
+import { doesModuleSupportPermissionsModel } from './Connection/ApiVersions.js'
+import type { SomeModuleManifest } from '@companion-app/shared/Model/ModuleManifest.js'
+import type { ModuleManifestRuntime } from '@companion-module/base/manifest'
+import { createRequire } from 'module'
 
 /**
  * Get the path to the Node.js binary for the given runtime type.
@@ -31,37 +33,58 @@ export async function getNodeJsPath(runtimeType: string): Promise<string | null>
 }
 
 export function getNodeJsPermissionArguments(
-	manifest: ModuleManifest,
+	manifest: SomeModuleManifest,
 	moduleApiVersion: string,
 	moduleDir: string,
 	enableInspect: boolean
 ): string[] {
-	// Not supported by node18
-	if (enableInspect || manifest.runtime.type === 'node18' || !doesModuleSupportPermissionsModel(moduleApiVersion))
-		return []
+	const args: string[] = []
 
-	const args = [
-		'--no-warnings=SecurityWarning',
-		'--permission',
-		// Always allow read access to the module source directory
-		`--allow-fs-read=${moduleDir}`,
-	]
+	// Not supported by surfaces
+	if (manifest.type === 'surface') return args
 
-	let forceReadWriteAll = false
-	if (process.platform === 'win32' && moduleDir.startsWith('\\\\')) {
-		// This is a network path, which nodejs does not support for the permissions model
-		forceReadWriteAll = true
-	}
+	// Check module api is new enough
+	if (!doesModuleSupportPermissionsModel(moduleApiVersion)) return args
 
-	const manifestPermissions = manifest.runtime.permissions || {}
-	if (manifestPermissions['worker-threads']) args.push('--allow-worker')
-	if (manifestPermissions['child-process'] || manifestPermissions['native-addons']) args.push('--allow-child-process')
-	if (manifestPermissions['native-addons']) args.push('--allow-addons')
-	if (manifestPermissions['native-addons'] || manifestPermissions['filesystem'] || forceReadWriteAll) {
-		// Note: Using native addons usually means probing random filesystem paths to check the current platform
+	const manifestPermissions: ModuleManifestRuntime['permissions'] = manifest.runtime.permissions || {}
 
-		// Future: This should be scoped to some limited directories as specified by the user in the connection settings
-		args.push('--allow-fs-read=*', '--allow-fs-write=*')
+	if (manifestPermissions['insecure-algorithms']) args.push('--openssl-legacy-provider')
+
+	// Node18 is more limited in supported arguments
+	if (manifest.runtime.type === 'node18') return args
+
+	args.push('--use-system-ca')
+
+	if (!enableInspect) {
+		args.push(
+			'--no-warnings=SecurityWarning',
+			'--permission',
+			// Always allow read access to the module source directory
+			`--allow-fs-read=${moduleDir}`,
+			`--allow-fs-read=${isPackaged() ? import.meta.dirname : path.join(import.meta.dirname, '../../..')}` // Allow read access to companion code, because of some esm loader issues
+		)
+
+		if (!isPackaged()) {
+			// Always allow read access to module host package, needed when running a dev version
+			const require = createRequire(import.meta.url)
+			args.push(`--allow-fs-read=${path.join(path.dirname(require.resolve('@companion-module/host')), '../../..')}`)
+		}
+
+		let forceReadWriteAll = false
+		if (process.platform === 'win32' && moduleDir.startsWith('\\\\')) {
+			// This is a network path, which nodejs does not support for the permissions model
+			forceReadWriteAll = true
+		}
+
+		if (manifestPermissions['worker-threads']) args.push('--allow-worker')
+		if (manifestPermissions['child-process'] || manifestPermissions['native-addons']) args.push('--allow-child-process')
+		if (manifestPermissions['native-addons']) args.push('--allow-addons')
+		if (manifestPermissions['native-addons'] || manifestPermissions['filesystem'] || forceReadWriteAll) {
+			// Note: Using native addons usually means probing random filesystem paths to check the current platform
+
+			// Future: This should be scoped to some limited directories as specified by the user in the connection settings
+			args.push('--allow-fs-read=*', '--allow-fs-write=*')
+		}
 	}
 
 	return args

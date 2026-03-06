@@ -1,10 +1,12 @@
 import type { Operation as JsonPatchOperation } from 'fast-json-patch'
-import type { DropdownChoice } from '@companion-module/base'
+import type { DropdownChoice } from './Common.js'
 import type {
 	CompanionInputFieldCheckboxExtended,
 	CompanionInputFieldCustomVariableExtended,
 	CompanionInputFieldDropdownExtended,
+	CompanionInputFieldExpressionExtended,
 	CompanionInputFieldNumberExtended,
+	CompanionInputFieldStaticTextExtended,
 	CompanionInputFieldTextInputExtended,
 } from './Options.js'
 import type { CollectionBase } from './Collections.js'
@@ -32,6 +34,18 @@ export interface ClientSurfaceItem {
 	location: string | null
 	locked: boolean
 
+	/**
+	 * Whether this surface is enabled and should be opened when discovered.
+	 * Note: This setting does not apply to satellite, emulator, or elgato-plugin surfaces.
+	 */
+	enabled: boolean
+
+	/**
+	 * Whether the enabled setting can be changed for this surface.
+	 * Note: A surface can move between connection types, so this is based on the current connection.
+	 */
+	canChangeEnabled: boolean
+
 	hasFirmwareUpdates: SurfaceFirmwareUpdateInfo | null
 
 	size: RowsAndColumns | null
@@ -54,6 +68,13 @@ export interface SurfaceConfig {
 	groupId: string | null
 
 	name?: string
+
+	/**
+	 * Whether this surface is enabled and should be opened when discovered.
+	 * Defaults to true when not specified.
+	 * Note: This setting does not apply to satellite, emulator, or elgato-plugin surfaces.
+	 */
+	enabled?: boolean
 
 	// Properties defined by the panel/integration, that may not be defined for old configs
 	type: string | undefined
@@ -121,11 +142,13 @@ export interface SurfacesUpdateUpdateOp {
 
 export interface OutboundSurfaceInfo {
 	id: string
-	displayName: string
-	type: 'elgato'
 	enabled: boolean
-	address: string
-	port: number
+
+	displayName: string
+	type: 'plugin'
+	moduleId: string
+	instanceId: string
+	config: Record<string, any>
 
 	collectionId: string | null
 	sortOrder: number
@@ -157,7 +180,7 @@ export interface OutboundSurfacesUpdateAddOp {
 	info: OutboundSurfaceInfo
 }
 
-export type ClientDiscoveredSurfaceInfo = ClientDiscoveredSurfaceInfoSatellite | ClientDiscoveredSurfaceInfoStreamDeck
+export type ClientDiscoveredSurfaceInfo = ClientDiscoveredSurfaceInfoSatellite | ClientDiscoveredSurfaceInfoPlugin
 
 export interface ClientDiscoveredSurfaceInfoSatellite {
 	id: string
@@ -171,17 +194,16 @@ export interface ClientDiscoveredSurfaceInfoSatellite {
 	apiEnabled: boolean
 }
 
-export interface ClientDiscoveredSurfaceInfoStreamDeck {
+export interface ClientDiscoveredSurfaceInfoPlugin {
 	id: string
 
-	surfaceType: 'streamdeck'
+	surfaceType: 'plugin'
+	instanceId: string
 
 	name: string
-	address: string
-	port: number
+	description: string
 
-	modelName: string
-	serialnumber: string | undefined
+	config: Record<string, any>
 }
 
 export type SurfacesDiscoveryUpdate =
@@ -211,7 +233,9 @@ export interface CompanionExternalAddresses {
 export type CompanionSurfaceInputFieldTextInput = Omit<CompanionInputFieldTextInputExtended, 'useVariables'>
 
 export type CompanionSurfaceConfigField =
+	| CompanionInputFieldStaticTextExtended
 	| CompanionSurfaceInputFieldTextInput
+	| CompanionInputFieldExpressionExtended
 	| CompanionInputFieldDropdownExtended
 	| CompanionInputFieldNumberExtended
 	| CompanionInputFieldCheckboxExtended

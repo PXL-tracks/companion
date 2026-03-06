@@ -1,7 +1,7 @@
 import React, { useCallback, useContext, useRef } from 'react'
 import { CButton, CButtonGroup, CFormSwitch } from '@coreui/react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlug, faLayerGroup, faAdd } from '@fortawesome/free-solid-svg-icons'
+import { faPlug, faLayerGroup } from '@fortawesome/free-solid-svg-icons'
 import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { observer } from 'mobx-react-lite'
@@ -16,7 +16,8 @@ import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import { MyErrorBoundary } from '~/Resources/Error.js'
 import type { OutboundSurfaceInfo, OutboundSurfaceCollection } from '@companion-app/shared/Model/Surfaces.js'
 import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable.js'
-import { AddOutboundSurfaceModal, type AddOutboundSurfaceModalRef } from '~/Surfaces/Remote/AddOutboundSurfaceModal.js'
+import { AddRemoteSurfaceButton } from './AddRemoteSurfaceButton.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 
 interface RemoteSurfacesListProps {
 	selectedRemoteConnectionId: string | null
@@ -53,10 +54,6 @@ export const RemoteSurfacesList = observer(function RemoteSurfacesList({
 		[selectedRemoteConnectionId]
 	)
 
-	const addModalRef = useRef<AddOutboundSurfaceModalRef>(null)
-
-	const addSurface = useCallback(() => addModalRef?.current?.show(), [])
-
 	return (
 		<div className="connections-list-container flex-column-layout">
 			<div className="connections-list-header fixed-header">
@@ -70,26 +67,20 @@ export const RemoteSurfacesList = observer(function RemoteSurfacesList({
 					itself.
 				</p>
 
-				<AddOutboundSurfaceModal ref={addModalRef} />
-
 				<GenericConfirmModal ref={confirmModalRef} />
 
-				<div className="connection-group-actions mb-2">
-					<CButtonGroup size="sm">
-						<CButton color="primary" onClick={addSurface}>
-							<FontAwesomeIcon icon={faAdd} /> Add Remote Surface
-						</CButton>
-						<CButton
-							color="info"
-							className="d-xl-none"
-							onClick={() => void navigate({ to: '/surfaces/remote/discover' })}
-						>
-							<FontAwesomeIcon icon={faPlug} className="me-1" />
-							Discover Remote Surfaces
-						</CButton>
-						<CreateCollectionButton />
-					</CButtonGroup>
-				</div>
+				<CButtonGroup size="sm" className="connection-group-actions mb-2">
+					<AddRemoteSurfaceButton />
+					<CButton
+						color="warning"
+						className="d-xl-none"
+						onClick={() => void navigate({ to: '/surfaces/remote/discover' })}
+					>
+						<FontAwesomeIcon icon={faPlug} className="me-1" />
+						Discover Remote Surfaces
+					</CButton>
+					<CreateCollectionButton />
+				</CButtonGroup>
 			</div>
 
 			<div className="connections-list-table-container scrollable-content">
@@ -131,8 +122,8 @@ function RemoteSurfacesGroupHeaderContent({ collection }: { collection: Outbound
 		(e: React.ChangeEvent<HTMLInputElement>) => {
 			const enabled = e.target.checked
 
-			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e: any) => {
-				console.error('Failed to set collection enabled state', e)
+			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e) => {
+				console.error('Failed to set collection enabled state', stringifyError(e))
 			})
 		},
 		[setEnabledMutation, collection.id]

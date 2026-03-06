@@ -17,7 +17,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Prepare
         run: |
@@ -51,10 +51,10 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache
           key: linux-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -92,8 +92,9 @@ jobs:
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
@@ -113,7 +114,7 @@ jobs:
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
           api-product: companion
-          api-target: 'linux-tgz'
+          api-target: "linux-tgz"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
   linux-arm64:
@@ -130,10 +131,10 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache
           key: linux-arm64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -171,8 +172,9 @@ jobs:
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
@@ -191,11 +193,20 @@ jobs:
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
           api-product: companion
-          api-target: 'linux-arm64-tgz'
+          api-target: "linux-arm64-tgz"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
+      - name: Trigger companion-pi build
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          gh workflow run companionpi.yml \
+            --repo bitfocus/companion-pi \
+            --field companion-ref="${{ github.ref_name }}"
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_MODULES_PAT }}
+
   osx-x64:
-    runs-on: macos-latest
+    runs-on: macos-26
     needs: check-types
     timeout-minutes: 60
 
@@ -208,10 +219,10 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache
           key: macos-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -251,8 +262,9 @@ jobs:
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
@@ -271,11 +283,11 @@ jobs:
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
           api-product: companion
-          api-target: 'mac-intel'
+          api-target: "mac-intel"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
   osx-arm64:
-    runs-on: macos-latest
+    runs-on: macos-26
     needs: check-types
     timeout-minutes: 60
 
@@ -288,10 +300,10 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache
           key: macos-arm64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -333,8 +345,9 @@ jobs:
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
@@ -353,7 +366,7 @@ jobs:
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
           api-product: companion
-          api-target: 'mac-arm'
+          api-target: "mac-arm"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
   win32-x64:
@@ -370,10 +383,10 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache
           key: windows-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -426,8 +439,9 @@ jobs:
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
@@ -446,7 +460,7 @@ jobs:
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
           api-product: companion
-          api-target: 'win-x64'
+          api-target: "win-x64"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
   docker-image:
@@ -517,6 +531,6 @@ jobs:
           platforms: linux/amd64,linux/arm64/v8
           push: true
           labels: ${{ steps.meta.outputs.labels }}
-          tags: '${{ steps.meta.outputs.tags }}'
+          tags: "${{ steps.meta.outputs.tags }}"
           build-args: |
             build_name=${{ needs.linux-x64.outputs.version }}

@@ -1,8 +1,8 @@
 import { EntityModelType, type SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import type { CompanionVariableValue, CompanionVariableValues } from '@companion-module/base'
+import type { VariableValue, VariableValues } from '@companion-app/shared/Model/Variables.js'
 import { action, makeObservable, observable } from 'mobx'
 import { useEffect, useMemo } from 'react'
-import type { DropdownChoiceInt } from '../DropDownInputFancy.js'
+import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
 import { computedFn } from 'mobx-utils'
 import { useQuery } from '@tanstack/react-query'
 import { trpc } from '~/Resources/TRPC.js'
@@ -11,7 +11,7 @@ export class LocalVariablesStore {
 	readonly controlId: string
 
 	#variables = observable.map<string, SomeEntityModel>()
-	#values = observable.map<string, CompanionVariableValue | undefined>()
+	#values = observable.map<string, VariableValue | undefined>()
 
 	constructor(controlId: string) {
 		this.controlId = controlId
@@ -25,22 +25,22 @@ export class LocalVariablesStore {
 		this.#variables.replace(localVariables.map((v) => [v.id, v]))
 	}
 
-	setValues(values: CompanionVariableValues): void {
+	setValues(values: VariableValues): void {
 		this.#values.replace(Object.entries(values))
 	}
 
-	getValue = (variableName: string): CompanionVariableValue | undefined => {
+	getValue = (variableName: string): VariableValue | undefined => {
 		return this.#values.get(variableName)
 	}
 
 	getOptions = computedFn(
-		(entityType: EntityModelType | null, isInternal: boolean, isLocatedInGrid: boolean): DropdownChoiceInt[] => {
+		(entityType: EntityModelType | null, internalParser: boolean, isLocatedInGrid: boolean): DropdownChoiceInt[] => {
 			let fixedVariables: DropdownChoiceInt[] = []
 
 			if (isLocatedInGrid) {
 				fixedVariables = ControlLocalVariables
-				if (isInternal && entityType === EntityModelType.Action) {
-					fixedVariables = InternalActionLocalVariables
+				if (internalParser && entityType === EntityModelType.Action) {
+					fixedVariables = ControlWithInternalLocalVariables
 				}
 			}
 
@@ -103,6 +103,10 @@ export const ControlLocalVariables: DropdownChoiceInt[] = [
 		value: 'this:row',
 		label: 'This row',
 	},
+	{
+		value: 'this:location',
+		label: 'This location (eg 1/2/3)',
+	},
 	// {
 	// 	value: 'this:pushed',
 	// 	label: 'Whether the button is in the pushed state',
@@ -129,7 +133,7 @@ export const ControlLocalVariables: DropdownChoiceInt[] = [
 	},
 ]
 
-export const InternalActionLocalVariables: DropdownChoiceInt[] = [
+export const ControlWithInternalLocalVariables: DropdownChoiceInt[] = [
 	...ControlLocalVariables,
 	{
 		value: 'this:surface_id',

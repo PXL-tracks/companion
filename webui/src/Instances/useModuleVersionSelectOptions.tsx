@@ -1,6 +1,6 @@
 import type { ClientModuleInfo } from '@companion-app/shared/Model/ModuleInfo.js'
 import semver from 'semver'
-import type { DropdownChoiceInt } from '~/DropDownInputFancy.js'
+import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
 import { useModuleStoreInfo } from '~/Modules/useModuleStoreInfo.js'
 import { useModuleUpgradeToVersions } from '~/Modules/useModuleUpgradeToVersions.js'
 import { useComputed } from '~/Resources/util.js'
@@ -71,6 +71,7 @@ export function useModuleVersionSelectOptions(
 		choices.sort((a, b) => semver.compare(String(b.value), String(a.value), { loose: true }))
 
 		if (installedInfo?.devVersion) choices.unshift({ value: 'dev', label: 'Dev version' })
+		if (installedInfo?.builtinVersion) choices.unshift({ value: 'builtin', label: 'Builtin version' })
 
 		const replacementChoices: DropdownChoiceInt[] = []
 		// Push the potential replacements first

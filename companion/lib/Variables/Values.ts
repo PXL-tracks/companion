@@ -13,24 +13,39 @@ import LogController from '../Log/Controller.js'
 import EventEmitter from 'events'
 import type { VariableValueData, VariablesCache } from './Util.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { CompanionVariableValue, CompanionVariableValues } from '@companion-module/base'
+import {
+	stringifyVariableValue,
+	type VariableValue,
+	type VariableValues,
+} from '@companion-app/shared/Model/Variables.js'
 import { router, publicProcedure } from '../UI/TRPC.js'
 import z from 'zod'
 import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
 import { VariablesAndExpressionParser } from './VariablesAndExpressionParser.js'
 import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import { formatLocation } from '@companion-app/shared/ControlId.js'
+import { VariablesBlinker } from './VariablesBlinker.js'
 
 export interface VariablesValuesEvents {
-	variables_changed: [changed: Set<string>, connection_labels: Set<string>]
-	local_variables_changed: [changed: Set<string>, fromControlId: string]
+	variables_changed: [changed: ReadonlySet<string>, connection_labels: ReadonlySet<string>]
+	local_variables_changed: [changed: ReadonlySet<string>, fromControlId: string]
 }
 
 export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 	readonly #logger = LogController.createLogger('Variables/Values')
 
+	readonly #blinker: VariablesBlinker
 	#variableValues: VariableValueData = {}
 
-	getVariableValue(label: string, name: string): CompanionVariableValue | undefined {
+	constructor() {
+		super()
+
+		this.#blinker = new VariablesBlinker((values) => {
+			this.setVariableValues('internal', values)
+		})
+	}
+
+	getVariableValue(label: string, name: string): VariableValue | undefined {
 		if (label === 'internal' && name.substring(0, 7) == 'custom_') {
 			label = 'custom'
 			name = name.substring(7)
@@ -39,19 +54,25 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 		return this.#variableValues[label]?.[name]
 	}
 
-	getCustomVariableValue(name: string): CompanionVariableValue | undefined {
+	getCustomVariableValue(name: string): VariableValue | undefined {
 		return this.getVariableValue('custom', name)
 	}
 
 	createVariablesAndExpressionParser(
 		controlLocation: ControlLocation | null | undefined,
 		localValues: ControlEntityInstance[] | null,
-		overrideVariableValues: CompanionVariableValues | null
+		overrideVariableValues: VariableValues | null
 	): VariablesAndExpressionParser {
 		const thisValues: VariablesCache = new Map()
 		this.addInjectedVariablesForLocation(thisValues, controlLocation)
 
-		return new VariablesAndExpressionParser(this.#variableValues, thisValues, localValues, overrideVariableValues)
+		return new VariablesAndExpressionParser(
+			this.#blinker,
+			this.#variableValues,
+			thisValues,
+			localValues,
+			overrideVariableValues
+		)
 	}
 
 	forgetConnection(_id: string, label: string): void {
@@ -129,7 +150,7 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 
 				// Skip debug if it's just internal:time_* spamming.
 				if (this.#logger.isSillyEnabled() && !(label === 'internal' && variable.id.startsWith('time_'))) {
-					this.#logger.silly('Variable $(' + label + ':' + variable.id + ') is "' + variable.value + '"')
+					this.#logger.silly(`Variable $(${label}:${variable.id}) is "${stringifyVariableValue(variable.value)}"`)
 				}
 			}
 		}
@@ -138,7 +159,7 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 		this.#emitVariablesChanged(all_changed_variables_set, connection_labels)
 	}
 
-	#emitVariablesChanged(all_changed_variables_set: Set<string>, connection_labels: Set<string>) {
+	#emitVariablesChanged(all_changed_variables_set: ReadonlySet<string>, connection_labels: ReadonlySet<string>) {
 		try {
 			if (all_changed_variables_set.size > 0) {
 				this.emit('variables_changed', all_changed_variables_set, connection_labels)
@@ -155,6 +176,7 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 		values.set('$(this:page)', location?.pageNumber)
 		values.set('$(this:column)', location?.column)
 		values.set('$(this:row)', location?.row)
+		values.set('$(this:location)', location ? formatLocation(location) : undefined)
 
 		// Reactivity happens for these because of references to the inner variables
 		values.set(
@@ -195,5 +217,5 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 
 export interface VariableValueEntry {
 	id: string
-	value: CompanionVariableValue | undefined
+	value: VariableValue | undefined
 }

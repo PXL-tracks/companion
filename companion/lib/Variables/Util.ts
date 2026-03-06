@@ -14,35 +14,116 @@ import { ExpressionFunctions } from '@companion-app/shared/Expression/Expression
 import { type GetVariableValueProps, ResolveExpression } from '@companion-app/shared/Expression/ExpressionResolve.js'
 import { ParseExpression } from '@companion-app/shared/Expression/ExpressionParse.js'
 import type { ExecuteExpressionResult } from '@companion-app/shared/Expression/ExpressionResult.js'
-import type { CompanionVariableValue } from '@companion-module/base'
+import {
+	stringifyVariableValue,
+	type VariableValues,
+	type VariableValue,
+} from '@companion-app/shared/Model/Variables.js'
 import type { ReadonlyDeep } from 'type-fest'
 import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import type { VariablesBlinker } from './VariablesBlinker.js'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import {
+	exprVal,
+	isExpressionOrValue,
+	type ExpressionableOptionsObject,
+	type ExpressionOrValue,
+	type SomeCompanionInputField,
+} from '@companion-app/shared/Model/Options.js'
+import { EntityModelType, type SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 
 // Everybody stand back. I know regular expressions. - xckd #208 /ck/kc/
 const VARIABLE_REGEX = /\$\(([^:$)]+):([^)$]+)\)/
 
 const logger = LogController.createLogger('Variables/Util')
 
-export type VariableValueData = Record<string, Record<string, CompanionVariableValue | undefined> | undefined>
-export type VariablesCache = Map<string, CompanionVariableValue | undefined>
+export type VariableValueData = Record<string, Record<string, VariableValue | undefined> | undefined>
+export type VariablesCache = Map<string, VariableValue | undefined>
 export interface ParseVariablesResult {
 	text: string
 	variableIds: Set<string>
 }
 
+export interface VisitEntityOptionValueOptions {
+	/** Whether expressions are allowed in the field */
+	allowExpression: boolean
+	/** Whether to parse variables in the field (only applies if not an expression) */
+	parseVariables: boolean
+	/** Force the field to be treated as an expression, even if not marked as such. */
+	forceExpression?: boolean
+}
+
+/**
+ * Visitor function for transforming entity option values based on field variable support.
+ * Determines which fields support variables/expressions and invokes the visitor for each field.
+ * @param definition The entity definition
+ * @param options The raw options object
+ * @param visitor Function to call for each field. fieldType will be null for passthrough fields.
+ */
+export function visitEntityOptionsForVariables<T>(
+	definition: ClientEntityDefinition,
+	options: ExpressionableOptionsObject,
+	visitor: (
+		field: SomeCompanionInputField,
+		value: ExpressionOrValue<any> | undefined,
+		fieldType: VisitEntityOptionValueOptions | null
+	) => T
+): Record<string, T> {
+	const result: Record<string, T> = {}
+
+	if (definition.optionsSupportExpressions) {
+		// Modern approach: check field types
+		for (const field of definition.options) {
+			const fieldType: VisitEntityOptionValueOptions = {
+				allowExpression: !field.disableAutoExpression,
+				parseVariables: false,
+			}
+
+			if (field.type === 'textinput' && field.useVariables) {
+				fieldType.parseVariables = true
+			} else if (field.type === 'expression') {
+				fieldType.forceExpression = true
+			}
+
+			const optionValue = options[field.id]
+			result[field.id] = visitor(field, optionValue, fieldType)
+		}
+	} else {
+		// Legacy approach: only textinput with useVariables
+		for (const field of definition.options) {
+			const optionValue = options[field.id]
+
+			if (field.type === 'textinput' && field.useVariables) {
+				// Parse variables only
+				const fieldType: VisitEntityOptionValueOptions = {
+					allowExpression: false,
+					parseVariables: true,
+				}
+				result[field.id] = visitor(field, optionValue, fieldType)
+			} else {
+				// Field doesn't support variables or expressions, just pass through (null = passthrough)
+				result[field.id] = visitor(field, optionValue, null)
+			}
+		}
+	}
+
+	return result
+}
+
 export function parseVariablesInString(
-	string: CompanionVariableValue,
+	string: VariableValue,
 	rawVariableValues: VariableValueData,
 	cachedVariableValues: VariableValueCache,
 	undefinedValue: string
 ): ParseVariablesResult {
+	string = stringifyVariableValue(string)
 	if (string === undefined || string === null || string === '') {
 		return {
-			text: string,
+			text: '',
 			variableIds: new Set(),
 		}
 	}
-	if (typeof string !== 'string') string = `${string}`
 
 	const referencedVariableIds = new Set<string>()
 
@@ -66,7 +147,7 @@ export function parseVariablesInString(
 
 		referencedVariableIds.add(`${connectionLabel}:${variableId}`)
 
-		let value: CompanionVariableValue | undefined
+		let value: VariableValue | undefined
 		if (cachedVariableValues.has(fullId)) {
 			const cachedValue = cachedVariableValues.get(fullId)
 
@@ -101,7 +182,7 @@ export function parseVariablesInString(
 		if (value === undefined) value = undefinedValue
 
 		// Pass a function, to avoid special interpreting of `$$` and other sequences
-		const cachedValueConst = value?.toString()
+		const cachedValueConst = stringifyVariableValue(value) ?? ''
 		string = string.replace(fullId, () => cachedValueConst)
 	}
 
@@ -114,8 +195,8 @@ export function parseVariablesInString(
 /**
  * Replace all the variables in a string, to reference a new label
  */
-export function replaceAllVariables(string: string, newLabel: string): string {
-	if (string && string.includes('$(')) {
+export function replaceAllVariables(string: string, newLabel: string, preserveLabels: Set<string>): string {
+	if (string && typeof string === 'string' && string.includes('$(')) {
 		let matchCount = 0
 		let matches: RegExpExecArray | null
 		let fromIndex = 0
@@ -129,7 +210,7 @@ export function replaceAllVariables(string: string, newLabel: string): string {
 			// ensure we don't try and match the same thing again
 			fromIndex = matches.index + fromIndex + 1
 
-			if (matches[2] !== undefined) {
+			if (matches[2] !== undefined && !preserveLabels.has(matches[1])) {
 				string = string.replace(matches[0], `$(${newLabel}:${matches[2]})`)
 			}
 		}
@@ -143,8 +224,8 @@ export function replaceAllVariables(string: string, newLabel: string): string {
  */
 export interface VariableValueCache {
 	has(id: string): boolean
-	get(id: string): CompanionVariableValue | (() => CompanionVariableValue | undefined) | undefined
-	set(id: string, value: CompanionVariableValue | undefined): void
+	get(id: string): VariableValue | (() => VariableValue | undefined) | undefined
+	set(id: string, value: VariableValue | undefined): void
 }
 
 /**
@@ -155,6 +236,7 @@ export interface VariableValueCache {
  * @param cachedVariableValues - Inject some variable values
  */
 export function executeExpression(
+	blinker: VariablesBlinker,
 	str: string,
 	rawVariableValues: ReadonlyDeep<VariableValueData>,
 	requiredType: string | undefined,
@@ -163,12 +245,12 @@ export function executeExpression(
 	const referencedVariableIds = new Set<string>()
 
 	try {
-		const getVariableValue = (props: GetVariableValueProps): CompanionVariableValue | undefined => {
+		const getVariableValue = (props: GetVariableValueProps): VariableValue | undefined => {
 			referencedVariableIds.add(props.variableId)
 
 			const fullId = `$(${props.variableId})`
 			// First check for an injected value
-			let value: CompanionVariableValue | undefined
+			let value: VariableValue | undefined
 			if (cachedVariableValues.has(fullId)) {
 				const rawValue = cachedVariableValues.get(fullId)!
 
@@ -205,7 +287,7 @@ export function executeExpression(
 					const wrappedCache: VariableValueCache = {
 						has: (id: string) => id === fullId || cachedVariableValues.has(id),
 						get: (id: string) => (id === fullId ? '$RE' : cachedVariableValues.get(id)),
-						set: (id: string, val: CompanionVariableValue | undefined) => {
+						set: (id: string, val: VariableValue | undefined) => {
 							if (id === fullId) return
 
 							cachedVariableValues.set(id, val)
@@ -227,6 +309,20 @@ export function executeExpression(
 
 		const functions = {
 			...ExpressionFunctions,
+			blink(interval: any, dutyCycle: any): 0 | 1 {
+				// Validate the interval
+				const int = Number(interval)
+				if (isNaN(int) || int <= 0) return 0
+
+				const dutyRaw = Number(dutyCycle)
+				const duty = isNaN(dutyRaw) ? 0.5 : dutyRaw
+
+				// Fetch the name of the variable to watch
+				const variableName = blinker.trackDependencyOnInterval(int, duty)
+				if (!variableName) return 0
+
+				return getVariableValue(variableName) ? 1 : 0
+			},
 			parseVariables: (str: string, undefinedValue?: string): string => {
 				const result = parseVariablesInString(
 					str,
@@ -249,7 +345,7 @@ export function executeExpression(
 		// Fix up the result for some types
 		switch (requiredType) {
 			case 'string':
-				value = `${value}`
+				value = stringifyVariableValue(value) ?? ''
 				break
 			case 'number':
 				value = Number(value)
@@ -269,11 +365,33 @@ export function executeExpression(
 			value,
 			variableIds: referencedVariableIds,
 		}
-	} catch (e: any) {
+	} catch (e) {
 		return {
 			ok: false,
-			error: e?.message ?? 'Unknown error',
+			error: stringifyError(e, true) || 'Unknown error',
 			variableIds: referencedVariableIds,
 		}
 	}
+}
+
+export function injectOverriddenLocalVariableValues(
+	localVariables: SomeEntityModel[],
+	values: VariableValues
+): VariableValues {
+	const injectedValues: VariableValues = {}
+
+	for (const localVariable of localVariables) {
+		if (localVariable.type !== EntityModelType.Feedback) continue
+
+		const variableName = localVariable.variableName
+		if (!variableName) continue
+
+		const newValue = values[variableName]
+		if (newValue !== undefined) {
+			localVariable.options.startup_value = isExpressionOrValue(newValue) ? newValue : exprVal(newValue)
+			injectedValues[variableName] = newValue
+		}
+	}
+
+	return injectedValues
 }

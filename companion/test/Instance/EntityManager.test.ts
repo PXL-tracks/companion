@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ConnectionEntityManager } from '../../lib/Instance/Connection/EntityManager.js'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
-import { UpdateActionInstancesMessage } from '@companion-module/base/dist/host-api/api.js'
+import {
+	ConnectionEntityManager,
+	EntityManagerActionEntity,
+	EntityManagerAdapter,
+	EntityManagerFeedbackEntity,
+} from '../../lib/Instance/Connection/EntityManager.js'
+import {
+	EntityModelType,
+	ReplaceableActionEntityModel,
+	ReplaceableFeedbackEntityModel,
+} from '@companion-app/shared/Model/EntityModel.js'
+import { CompanionOptionValues } from '@companion-module/host'
 
 // Mock dependencies
 vi.mock('nanoid', () => ({
@@ -10,12 +19,13 @@ vi.mock('nanoid', () => ({
 
 describe('InstanceEntityManager', () => {
 	// Create mock objects for dependencies
-	const mockIpcWrapper = {
-		sendWithCb: vi.fn().mockResolvedValue({
-			updatedActions: [],
-			updatedFeedbacks: [],
-		}),
-	}
+	const mockAdapter = {
+		updateActions: vi.fn().mockResolvedValue(null),
+		updateFeedbacks: vi.fn().mockResolvedValue(null),
+
+		upgradeActions: vi.fn().mockResolvedValue([]),
+		upgradeFeedbacks: vi.fn().mockResolvedValue([]),
+	} satisfies EntityManagerAdapter
 
 	const mockControl = {
 		entities: {
@@ -26,9 +36,19 @@ describe('InstanceEntityManager', () => {
 	}
 
 	const mockVariablesParser = {
-		parseVariables: vi.fn().mockReturnValue({
-			text: 'parsed-value',
-			variableIds: ['var1', 'var2'],
+		parseEntityOptions: vi.fn().mockImplementation((entityDefinition, options) => {
+			const parsedOptions: CompanionOptionValues = {}
+
+			let i = 0
+			for (const option of entityDefinition.options) {
+				parsedOptions[option.id] = `value-${i++}`
+			}
+
+			return {
+				ok: true,
+				parsedOptions: parsedOptions,
+				referencedVariableIds: new Set(['var1', 'var2']),
+			}
 		}),
 	}
 
@@ -42,12 +62,31 @@ describe('InstanceEntityManager', () => {
 	// Reset mocks before each test
 	beforeEach(() => {
 		vi.clearAllMocks()
+
+		// Reset mock implementations to defaults (clearAllMocks only clears call history)
+		mockVariablesParser.parseEntityOptions.mockImplementation((entityDefinition, options) => {
+			const parsedOptions: CompanionOptionValues = {}
+
+			let i = 0
+			for (const option of entityDefinition.options) {
+				parsedOptions[option.id] = `value-${i++}`
+			}
+
+			return {
+				ok: true,
+				parsedOptions: parsedOptions,
+				referencedVariableIds: new Set(['var1', 'var2']),
+			}
+		})
+		mockControlsController.getControl.mockReturnValue(mockControl)
+		mockControlsController.createVariablesAndExpressionParser.mockReturnValue(mockVariablesParser)
+		mockAdapter.updateActions.mockResolvedValue(null)
+		mockAdapter.updateFeedbacks.mockResolvedValue(null)
+		mockAdapter.upgradeActions.mockResolvedValue([])
+		mockAdapter.upgradeFeedbacks.mockResolvedValue([])
+
 		// Create a new instance for each test
-		entityManager = new ConnectionEntityManager(
-			mockIpcWrapper as any,
-			mockControlsController as any,
-			'test-connection-id'
-		)
+		entityManager = new ConnectionEntityManager(mockAdapter as any, mockControlsController as any, 'test-connection-id')
 
 		vi.useFakeTimers()
 	})
@@ -78,18 +117,25 @@ describe('InstanceEntityManager', () => {
 			// Verify the entity is being processed
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateActions', {
-				actions: {
-					'entity-1': {
-						id: 'entity-1',
-						actionId: 'action-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-					},
-				},
-			} satisfies UpdateActionInstancesMessage)
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-1',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: {},
+							} as any,
+							parsedOptions: {},
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
 		})
 
 		it('should replace existing entity with the same ID', () => {
@@ -134,7 +180,7 @@ describe('InstanceEntityManager', () => {
 
 			// Clear calls from first entity
 			vi.runAllTimers()
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
 
 			// Track replacement entity
 			entityManager.trackEntity(mockEntity2 as any, 'control-1')
@@ -142,18 +188,25 @@ describe('InstanceEntityManager', () => {
 
 			// Verify the replacement was processed
 			expect(mockEntity2.asEntityModel).toHaveBeenCalled()
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateActions', {
-				actions: {
-					'entity-1': {
-						id: 'entity-1',
-						actionId: 'action-1',
-						options: { replaced: true },
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-					},
-				},
-			})
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-1',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: { replaced: true },
+							} as any,
+							parsedOptions: { replaced: 'value-0' },
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
 		})
 	})
 
@@ -186,20 +239,26 @@ describe('InstanceEntityManager', () => {
 			expect(mockControlsController.getControl).toHaveBeenCalledWith('control-1')
 			expect(mockControl.getBitmapSize).toHaveBeenCalled()
 
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateFeedbacks', {
-				feedbacks: {
-					'feedback-1': {
-						id: 'feedback-1',
-						feedbackId: 'feedback-def-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-						image: { width: 72, height: 58 },
-						isInverted: false,
-					},
-				},
-			})
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
+				new Map<string, EntityManagerFeedbackEntity | null>([
+					[
+						'feedback-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'feedback-1',
+								type: EntityModelType.Feedback,
+								definitionId: 'feedback-def-1',
+								connectionId: 'connection-1',
+								options: {},
+							} as any,
+							parsedOptions: {},
+							imageSize: { width: 72, height: 58 },
+						} satisfies EntityManagerFeedbackEntity,
+					],
+				])
+			)
 		})
 	})
 
@@ -230,11 +289,10 @@ describe('InstanceEntityManager', () => {
 			vi.runAllTimers()
 
 			// Should have been called with null for the entity
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateActions', {
-				actions: {
-					'entity-1': null,
-				},
-			})
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([['entity-1', null]])
+			)
 		})
 
 		it('should do nothing if entity does not exist', () => {
@@ -243,7 +301,8 @@ describe('InstanceEntityManager', () => {
 
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
 		})
 	})
 
@@ -272,26 +331,32 @@ describe('InstanceEntityManager', () => {
 
 			// First clear the initial processing
 			vi.runAllTimers()
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateFeedbacks.mockClear()
 
 			// Now resend feedbacks
 			entityManager.resendFeedbacks()
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateFeedbacks', {
-				feedbacks: {
-					'feedback-1': {
-						id: 'feedback-1',
-						feedbackId: 'feedback-def-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-						image: { width: 72, height: 58 },
-						isInverted: false,
-					},
-				},
-			})
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
+				new Map<string, EntityManagerFeedbackEntity | null>([
+					[
+						'feedback-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'feedback-1',
+								type: EntityModelType.Feedback,
+								definitionId: 'feedback-def-1',
+								connectionId: 'connection-1',
+								options: {},
+							} as any,
+							parsedOptions: {},
+							imageSize: { width: 72, height: 58 },
+						} satisfies EntityManagerFeedbackEntity,
+					],
+				])
+			)
 		})
 
 		it('should handle entities in various states correctly when resending', () => {
@@ -329,7 +394,7 @@ describe('InstanceEntityManager', () => {
 
 			// Process initial state
 			vi.runAllTimers()
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateFeedbacks.mockClear()
 
 			// Force feedback-2 to be forgotten
 			entityManager.forgetEntity('feedback-2')
@@ -339,157 +404,42 @@ describe('InstanceEntityManager', () => {
 			vi.runAllTimers()
 
 			// Should have been called with the appropriate feedbacks
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateFeedbacks', {
-				feedbacks: {
-					'feedback-1': {
-						id: 'feedback-1',
-						feedbackId: 'feedback-def-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-						image: { width: 72, height: 58 },
-						isInverted: false,
-					},
-					'feedback-2': null, // feedback-2 should be null
-					'feedback-3': {
-						id: 'feedback-3',
-						feedbackId: 'feedback-def-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-3',
-						image: { width: 72, height: 58 },
-						isInverted: false,
-					},
-				},
-			})
-		})
-	})
-
-	describe('parseOptionsObject', () => {
-		it('should return unchanged options if no entityDefinition provided', () => {
-			const options = { key1: 'value1' }
-			const result = entityManager.parseOptionsObject(undefined, options, 'control-1')
-
-			expect(result).toEqual({
-				parsedOptions: options,
-				referencedVariableIds: expect.any(Set),
-			})
-			expect(result.referencedVariableIds.size).toBe(0)
-		})
-
-		it('should parse options with variables', () => {
-			const entityDefinition = {
-				options: [
-					{ id: 'field1', type: 'textinput', useVariables: true },
-					{ id: 'field2', type: 'dropdown' },
-				],
-				optionsToIgnoreForSubscribe: [],
-			}
-			const options = { field1: '$(var:text)', field2: 'option1' }
-
-			const result = entityManager.parseOptionsObject(entityDefinition as any, options, 'control-1')
-
-			expect(mockControlsController.createVariablesAndExpressionParser).toHaveBeenCalledWith('control-1', null)
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledWith('$(var:text)')
-			expect(result.parsedOptions).toEqual({
-				field1: 'parsed-value',
-				field2: 'option1',
-			})
-			expect(result.referencedVariableIds.has('var1')).toBe(true)
-			expect(result.referencedVariableIds.has('var2')).toBe(true)
-		})
-
-		it('should pass through non-variable fields unchanged', () => {
-			const entityDefinition = {
-				options: [{ id: 'field1', type: 'number' }],
-				optionsToIgnoreForSubscribe: [],
-			}
-			const options = { field1: 42 }
-
-			const result = entityManager.parseOptionsObject(entityDefinition as any, options, 'control-1')
-
-			expect(result.parsedOptions).toEqual({ field1: 42 })
-			expect(mockControlsController.createVariablesAndExpressionParser).toHaveBeenCalledWith('control-1', null)
-			expect(mockVariablesParser.parseVariables).not.toHaveBeenCalled()
-		})
-
-		it('should handle missing option values', () => {
-			const entityDefinition = {
-				options: [
-					{ id: 'field1', type: 'textinput', useVariables: true },
-					{ id: 'field2', type: 'dropdown' },
-				],
-				optionsToIgnoreForSubscribe: [],
-			}
-			const options = { field2: 'option1' } // field1 missing
-
-			// For missing fields, parseVariables will be called with "undefined"
-			// So we need to update our mock for this specific test case
-			mockVariablesParser.parseVariables.mockReturnValueOnce({
-				text: undefined,
-				variableIds: [],
-			})
-
-			const result = entityManager.parseOptionsObject(entityDefinition as any, options, 'control-1')
-
-			// field1 should be undefined in the parsed options
-			expect(result.parsedOptions).toEqual({
-				field1: undefined,
-				field2: 'option1',
-			})
-
-			// parseVariables should be called with "undefined" for the missing field
-			expect(mockControlsController.createVariablesAndExpressionParser).toHaveBeenCalledWith('control-1', null)
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledWith('undefined')
-		})
-
-		it('should parse variables but not include them in referencedVariableIds for options in optionsToIgnoreForSubscribe', () => {
-			const entityDefinition = {
-				options: [
-					{ id: 'field1', type: 'textinput', useVariables: true },
-					{ id: 'field2', type: 'textinput', useVariables: true },
-					{ id: 'field3', type: 'dropdown' },
-				],
-				optionsToIgnoreForSubscribe: ['field1'],
-			}
-			const options = {
-				field1: '$(var:ignored)',
-				field2: '$(var:parsed)',
-				field3: 'option1',
-			}
-
-			// Mock different return values for each parseVariables call
-			mockVariablesParser.parseVariables
-				.mockReturnValueOnce({
-					text: 'parsed-ignored-value',
-					variableIds: ['ignored-var'],
-				})
-				.mockReturnValueOnce({
-					text: 'parsed-value',
-					variableIds: ['var1'],
-				})
-
-			const result = entityManager.parseOptionsObject(entityDefinition as any, options, 'control-1')
-
-			// Both field1 and field2 should be parsed for display
-			expect(result.parsedOptions).toEqual({
-				field1: 'parsed-ignored-value',
-				field2: 'parsed-value',
-				field3: 'option1',
-			})
-
-			// parseVariables should be called for both variable fields
-			expect(mockControlsController.createVariablesAndExpressionParser).toHaveBeenCalledWith('control-1', null)
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledTimes(2)
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledWith('$(var:ignored)')
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledWith('$(var:parsed)')
-
-			// Should only reference variables from non-ignored fields
-			expect(result.referencedVariableIds.has('var1')).toBe(true)
-			expect(result.referencedVariableIds.has('ignored-var')).toBe(false)
-			expect(result.referencedVariableIds.size).toBe(1)
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
+				new Map<string, EntityManagerFeedbackEntity | null>([
+					[
+						'feedback-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'feedback-1',
+								type: EntityModelType.Feedback,
+								definitionId: 'feedback-def-1',
+								connectionId: 'connection-1',
+								options: {},
+							} as any,
+							parsedOptions: {},
+							imageSize: { width: 72, height: 58 },
+						} satisfies EntityManagerFeedbackEntity,
+					],
+					['feedback-2', null],
+					[
+						'feedback-3',
+						{
+							controlId: 'control-3',
+							entity: {
+								id: 'feedback-3',
+								type: EntityModelType.Feedback,
+								definitionId: 'feedback-def-1',
+								connectionId: 'connection-1',
+								options: {},
+							} as any,
+							parsedOptions: {},
+							imageSize: { width: 72, height: 58 },
+						} satisfies EntityManagerFeedbackEntity,
+					],
+				])
+			)
 		})
 	})
 
@@ -521,25 +471,31 @@ describe('InstanceEntityManager', () => {
 
 			// Process the entity so it references variables
 			vi.runAllTimers()
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
 
 			// Simulate variables changing
-			entityManager.onVariablesChanged(new Set(['var1']))
+			entityManager.onVariablesChanged(new Set(['var1']), null)
 			vi.runAllTimers()
 
 			// Verify it triggered a re-process
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateActions', {
-				actions: {
-					'entity-1': {
-						id: 'entity-1',
-						actionId: 'action-1',
-						options: { field1: 'parsed-value' },
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-					},
-				},
-			})
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-1',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: { field1: '$(var:test)' },
+							} as any,
+							parsedOptions: { field1: 'value-0' },
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
 		})
 
 		it('should not invalidate entities if changed variables are not referenced', () => {
@@ -563,11 +519,12 @@ describe('InstanceEntityManager', () => {
 				}),
 			}
 
-			// Customize parse variables to return specific variables
-			mockVariablesParser.parseVariables.mockReturnValue({
-				text: 'parsed-value',
-				variableIds: ['specific-var'],
-			})
+			// Customize parseEntityOptions to return specific variables
+			mockVariablesParser.parseEntityOptions.mockImplementation((_entityDefinition, options) => ({
+				ok: true,
+				parsedOptions: options,
+				referencedVariableIds: new Set(['specific-var']),
+			}))
 
 			// Add entity to manager
 			entityManager.start(5)
@@ -575,14 +532,180 @@ describe('InstanceEntityManager', () => {
 
 			// Process the entity so it references variables
 			vi.runAllTimers()
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
 
 			// Simulate unrelated variables changing
-			entityManager.onVariablesChanged(new Set(['unrelated-var']))
+			entityManager.onVariablesChanged(new Set(['unrelated-var']), null)
 			vi.runAllTimers()
 
 			// Should not have triggered a re-process
-			expect(mockIpcWrapper.sendWithCb).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+		})
+
+		it('should only invalidate entities on the specified control when controlId is provided', () => {
+			// Setup entities on different controls that reference the same variables
+			const mockEntity1 = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: { field1: '$(var:test)' },
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', useVariables: true }],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			const mockEntity2 = {
+				id: 'entity-2',
+				type: EntityModelType.Action,
+				definitionId: 'action-2',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-2',
+					type: EntityModelType.Action,
+					definitionId: 'action-2',
+					connectionId: 'connection-1',
+					options: { field1: '$(var:test)' },
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', useVariables: true }],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			// Both entities reference 'var1' and 'var2'
+			mockVariablesParser.parseEntityOptions.mockImplementation((_entityDefinition, options) => ({
+				ok: true,
+				parsedOptions: options,
+				referencedVariableIds: new Set(['var1', 'var2']),
+			}))
+
+			// Add entities to manager on different controls
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity1 as any, 'control-1')
+			entityManager.trackEntity(mockEntity2 as any, 'control-2')
+
+			// Process the entities
+			vi.runAllTimers()
+			mockAdapter.updateActions.mockClear()
+
+			// Simulate variables changing for only control-1
+			entityManager.onVariablesChanged(new Set(['var1']), 'control-1')
+			vi.runAllTimers()
+
+			// Should only have triggered a re-process for entity-1
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-1',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: { field1: '$(var:test)' },
+							} as any,
+							parsedOptions: { field1: '$(var:test)' },
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+		})
+
+		it('should not invalidate entities on different controls when controlId is provided', () => {
+			// Setup entities on different controls
+			const mockEntity1 = {
+				id: 'entity-1',
+				type: EntityModelType.Feedback,
+				definitionId: 'feedback-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Feedback,
+					definitionId: 'feedback-1',
+					connectionId: 'connection-1',
+					options: { field1: '$(var:test)' },
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', useVariables: true }],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			const mockEntity2 = {
+				id: 'entity-2',
+				type: EntityModelType.Feedback,
+				definitionId: 'feedback-2',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-2',
+					type: EntityModelType.Feedback,
+					definitionId: 'feedback-2',
+					connectionId: 'connection-1',
+					options: { field1: '$(var:test)' },
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', useVariables: true }],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			// Both entities reference 'control-var'
+			mockVariablesParser.parseEntityOptions.mockImplementation((_entityDefinition, options) => ({
+				ok: true,
+				parsedOptions: options,
+				referencedVariableIds: new Set(['control-var']),
+			}))
+
+			// Add entities to manager on different controls
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity1 as any, 'control-1')
+			entityManager.trackEntity(mockEntity2 as any, 'control-2')
+
+			// Process the entities
+			vi.runAllTimers()
+			mockAdapter.updateFeedbacks.mockClear()
+
+			// Simulate variables changing for only control-2
+			entityManager.onVariablesChanged(new Set(['control-var']), 'control-2')
+			vi.runAllTimers()
+
+			// Should only have triggered a re-process for entity-2, not entity-1
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
+				new Map<string, EntityManagerFeedbackEntity | null>([
+					[
+						'entity-2',
+						{
+							controlId: 'control-2',
+							entity: {
+								id: 'entity-2',
+								type: EntityModelType.Feedback,
+								definitionId: 'feedback-2',
+								connectionId: 'connection-1',
+								options: { field1: '$(var:test)' },
+							} as any,
+							parsedOptions: { field1: '$(var:test)' },
+							imageSize: { width: 72, height: 58 },
+						} satisfies EntityManagerFeedbackEntity,
+					],
+				])
+			)
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
 		})
 	})
 
@@ -615,17 +738,22 @@ describe('InstanceEntityManager', () => {
 			vi.runAllTimers()
 
 			// Should have called upgradeActionsAndFeedbacks
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith(
-				'upgradeActionsAndFeedbacks',
-				expect.objectContaining({
-					actions: expect.arrayContaining([
-						expect.objectContaining({
+			expect(mockAdapter.upgradeFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.upgradeActions).toHaveBeenCalledWith(
+				[
+					{
+						controlId: 'control-1',
+						entity: {
 							id: 'entity-1',
+							type: EntityModelType.Action,
+							definitionId: 'action-1',
+							connectionId: 'connection-1',
+							options: {},
 							upgradeIndex: 3,
-						}),
-					]),
-					feedbacks: [],
-				})
+						},
+					} satisfies Omit<EntityManagerActionEntity, 'parsedOptions'>,
+				],
+				5
 			)
 		})
 
@@ -641,7 +769,7 @@ describe('InstanceEntityManager', () => {
 					type: EntityModelType.Action,
 					definitionId: 'action-1',
 					connectionId: 'connection-1',
-					options: { old: true },
+					options: { old: { isExpression: false, value: true } },
 					upgradeIndex: 3,
 				}),
 				getEntityDefinition: vi.fn().mockReturnValue({
@@ -661,18 +789,16 @@ describe('InstanceEntityManager', () => {
 			mockControlsController.getControl.mockReturnValue(mockControl)
 
 			// Setup the upgrade response
-			mockIpcWrapper.sendWithCb.mockImplementationOnce(async () => {
-				return {
-					updatedActions: [
-						{
-							id: 'entity-1',
-							actionId: 'action-1',
-							options: { upgraded: true },
-							upgradeIndex: 5,
-						},
-					],
-					updatedFeedbacks: [],
-				}
+			mockAdapter.upgradeActions.mockImplementationOnce(async () => {
+				return [
+					{
+						id: 'entity-1',
+						type: EntityModelType.Action,
+						definitionId: 'action-1',
+						options: { upgraded: { isExpression: false, value: true } },
+						upgradeIndex: 5,
+					},
+				] satisfies ReplaceableActionEntityModel[]
 			})
 
 			entityManager.start(5)
@@ -690,7 +816,7 @@ describe('InstanceEntityManager', () => {
 					id: 'entity-1',
 					type: EntityModelType.Action,
 					definitionId: 'action-1',
-					options: { upgraded: true },
+					options: { upgraded: { isExpression: false, value: true } },
 					upgradeIndex: 5,
 				})
 			)
@@ -717,11 +843,13 @@ describe('InstanceEntityManager', () => {
 			entityManager.destroy()
 
 			// After destroy, tracking a new entity should not call processing
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
+			mockAdapter.updateFeedbacks.mockClear()
 			entityManager.trackEntity(mockEntity as any, 'control-1')
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
 		})
 	})
 
@@ -749,7 +877,10 @@ describe('InstanceEntityManager', () => {
 			}
 
 			// Setup the ipc to reject with an error
-			mockIpcWrapper.sendWithCb.mockRejectedValueOnce(new Error('Upgrade failed'))
+			mockAdapter.updateActions.mockRejectedValueOnce(new Error('Upgrade failed'))
+			mockAdapter.updateFeedbacks.mockRejectedValueOnce(new Error('Upgrade failed'))
+			mockAdapter.upgradeActions.mockRejectedValueOnce(new Error('Upgrade failed'))
+			mockAdapter.upgradeFeedbacks.mockRejectedValueOnce(new Error('Upgrade failed'))
 
 			entityManager.start(5)
 			entityManager.trackEntity(mockEntity as any, 'control-1')
@@ -781,23 +912,248 @@ describe('InstanceEntityManager', () => {
 				}),
 			}
 
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
+			mockAdapter.updateFeedbacks.mockClear()
 			entityManager.trackEntity(mockEntity2 as any, 'control-1')
 			vi.runAllTimers()
 
 			// New entities should still be processed
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateActions', {
-				actions: {
-					'entity-2': {
-						id: 'entity-2',
-						actionId: 'action-2',
-						options: {},
-						disabled: false,
-						upgradeIndex: 5,
-						controlId: 'control-1',
-					},
-				},
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-2',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-2',
+								type: EntityModelType.Action,
+								definitionId: 'action-2',
+								connectionId: 'connection-1',
+								options: {},
+								upgradeIndex: 5,
+							} as any,
+							parsedOptions: {},
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
+		})
+
+		it('should mark entity as inactive when parseEntityOptions returns ok: false', () => {
+			// Setup parseEntityOptions to return ok: false with option errors
+			mockVariablesParser.parseEntityOptions.mockImplementationOnce(() => ({
+				ok: false,
+				optionErrors: { field1: 'Invalid expression syntax' },
+				referencedVariableIds: new Set(['test:num']),
+			}))
+
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: { field1: { isExpression: true, value: 'invalid expression (' } },
+					upgradeIndex: 5,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', isExpression: true }],
+					optionsToIgnoreForSubscribe: [],
+					optionsSupportExpressions: true,
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			// Should have been called with null to mark the entity as inactive
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([['entity-1', null]])
+			)
+		})
+
+		it('should mark entity as inactive when parseEntityOptions throws an error', () => {
+			// Setup parseEntityOptions to throw an error
+			mockVariablesParser.parseEntityOptions.mockImplementationOnce(() => {
+				throw new Error('Expression parsing failed')
 			})
+
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: { field1: { isExpression: true, value: 'invalid expression (' } },
+					upgradeIndex: 5,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', isExpression: true }],
+					optionsToIgnoreForSubscribe: [],
+					optionsSupportExpressions: true,
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			// Should have been called with null to mark the entity as inactive
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([['entity-1', null]])
+			)
+		})
+
+		it('should handle entities with expression options that parse successfully', () => {
+			// Setup parseEntityOptions to return parsed expression result
+			mockVariablesParser.parseEntityOptions.mockImplementationOnce(() => ({
+				ok: true,
+				parsedOptions: { field1: 42 },
+				referencedVariableIds: new Set(['test:num']),
+			}))
+
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: { field1: { isExpression: true, value: '$(test:num) + 1' } },
+					upgradeIndex: 5,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', isExpression: true }],
+					optionsToIgnoreForSubscribe: [],
+					optionsSupportExpressions: true,
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-1',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: { field1: { isExpression: true, value: '$(test:num) + 1' } },
+								upgradeIndex: 5,
+							},
+							parsedOptions: { field1: 42 },
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
+		})
+
+		it('should track referenced variables for entity invalidation with expressions', () => {
+			// Setup parseEntityOptions to track specific variables
+			mockVariablesParser.parseEntityOptions.mockImplementation(() => ({
+				ok: true,
+				parsedOptions: { field1: 100 },
+				referencedVariableIds: new Set(['test:expr_var']),
+			}))
+
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: { field1: { isExpression: true, value: '$(test:expr_var) * 10' } },
+					upgradeIndex: 5,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', isExpression: true }],
+					optionsToIgnoreForSubscribe: [],
+					optionsSupportExpressions: true,
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			mockAdapter.updateActions.mockClear()
+
+			// Trigger variable change for the referenced variable
+			entityManager.onVariablesChanged(new Set(['test:expr_var']), null)
+			vi.runAllTimers()
+
+			// Should have triggered a re-process because the expression variable changed
+			expect(mockAdapter.updateActions).toHaveBeenCalled()
+		})
+
+		it('should not invalidate entity when unrelated variables change with expressions', () => {
+			// Setup parseEntityOptions to track specific variables
+			mockVariablesParser.parseEntityOptions.mockImplementation(() => ({
+				ok: true,
+				parsedOptions: { field1: 100 },
+				referencedVariableIds: new Set(['test:expr_var']),
+			}))
+
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: { field1: { isExpression: true, value: '$(test:expr_var) * 10' } },
+					upgradeIndex: 5,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [{ id: 'field1', type: 'textinput', isExpression: true }],
+					optionsToIgnoreForSubscribe: [],
+					optionsSupportExpressions: true,
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			mockAdapter.updateActions.mockClear()
+
+			// Trigger variable change for an unrelated variable
+			entityManager.onVariablesChanged(new Set(['other:unrelated_var']), null)
+			vi.runAllTimers()
+
+			// Should NOT have triggered a re-process
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
 		})
 	})
 
@@ -837,7 +1193,7 @@ describe('InstanceEntityManager', () => {
 						type: isAction ? EntityModelType.Action : EntityModelType.Feedback,
 						definitionId: `def-${i}`,
 						connectionId: 'connection-1',
-						options: { index: i },
+						options: { index: { isExpression: false, value: i } },
 						upgradeIndex: 5,
 					}),
 					getEntityDefinition: vi.fn().mockReturnValue({
@@ -857,46 +1213,48 @@ describe('InstanceEntityManager', () => {
 			// Run debounced function
 			vi.runAllTimers()
 
-			// Get all the calls to sendWithCb
-			const calls = mockIpcWrapper.sendWithCb.mock.calls
-
 			// Find action call and verify it contains expected action entities
-			const actionCall = calls.find((call) => call[0] === 'updateActions')
-			expect(actionCall).toBeDefined()
-			const actionPayload = actionCall![1].actions
+			const actionPayload: Map<string, EntityManagerActionEntity | null> = mockAdapter.updateActions.mock.calls[0][0]
 
 			// Should have exactly the right number of action entities (half of entityCount)
-			expect(Object.keys(actionPayload).length).toBe(Math.ceil(entityCount / 2))
+			expect(actionPayload.size).toBe(Math.ceil(entityCount / 2))
 
 			// Check a few specific actions
-			expect(actionPayload['entity-0']).toEqual({
-				id: 'entity-0',
-				actionId: 'def-0',
-				options: { index: 0 },
-				disabled: false,
-				upgradeIndex: 5,
+			expect(actionPayload.get('entity-0')).toEqual({
 				controlId: 'control-0',
-			})
+				entity: {
+					id: 'entity-0',
+					type: EntityModelType.Action,
+					definitionId: 'def-0',
+					connectionId: 'connection-1',
+					options: { index: { isExpression: false, value: 0 } },
+					upgradeIndex: 5,
+				},
+				parsedOptions: { index: 'value-0' },
+			} satisfies EntityManagerActionEntity)
 
 			// Find feedback call and verify it contains expected feedback entities
-			const feedbackCall = calls.find((call) => call[0] === 'updateFeedbacks')
-			expect(feedbackCall).toBeDefined()
-			const feedbackPayload = feedbackCall![1].feedbacks
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalled()
+			const feedbackPayload: Map<string, EntityManagerFeedbackEntity | null> =
+				mockAdapter.updateFeedbacks.mock.calls[0][0]
 
 			// Should have exactly the right number of feedback entities (half of entityCount)
-			expect(Object.keys(feedbackPayload).length).toBe(Math.floor(entityCount / 2))
+			expect(feedbackPayload.size).toBe(Math.floor(entityCount / 2))
 
 			// Check a specific feedback
-			expect(feedbackPayload['entity-1']).toEqual({
-				id: 'entity-1',
-				feedbackId: 'def-1',
-				options: { index: 1 },
-				disabled: false,
-				upgradeIndex: 5,
+			expect(feedbackPayload.get('entity-1')).toEqual({
 				controlId: 'control-1',
-				image: { width: 72, height: 58 },
-				isInverted: false,
-			})
+				entity: {
+					id: 'entity-1',
+					type: EntityModelType.Feedback,
+					definitionId: 'def-1',
+					connectionId: 'connection-1',
+					options: { index: { isExpression: false, value: 1 } },
+					upgradeIndex: 5,
+				},
+				parsedOptions: { index: 'value-0' },
+				imageSize: { width: 72, height: 58 },
+			} satisfies EntityManagerFeedbackEntity)
 		})
 	})
 
@@ -908,7 +1266,7 @@ describe('InstanceEntityManager', () => {
 				resolvePromise = resolve
 			})
 
-			mockIpcWrapper.sendWithCb.mockReturnValueOnce(delayedPromise)
+			mockAdapter.updateActions.mockReturnValueOnce(delayedPromise)
 
 			// Create an entity that needs upgrading
 			const mockEntity = {
@@ -988,7 +1346,7 @@ describe('InstanceEntityManager', () => {
 
 			// Should have passed the location to parse variables
 			expect(mockControlsController.createVariablesAndExpressionParser).toHaveBeenCalledWith('control-1', null)
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledWith('$(var:page_specific)')
+			expect(mockVariablesParser.parseEntityOptions).toHaveBeenCalled()
 		})
 	})
 
@@ -1015,7 +1373,7 @@ describe('InstanceEntityManager', () => {
 			// Should skip the entity since there's no entity definition
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
 		})
 
 		it('should skip entities without lifecycle functions', () => {
@@ -1044,7 +1402,7 @@ describe('InstanceEntityManager', () => {
 			// Should skip the entity since it doesn't have lifecycle functions
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).not.toHaveBeenCalled()
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
 		})
 
 		it('should skip feedback entities without lifecycle functions', () => {
@@ -1073,7 +1431,7 @@ describe('InstanceEntityManager', () => {
 			// Should skip the feedback entity since it doesn't have lifecycle functions
 			vi.runAllTimers()
 
-			expect(mockIpcWrapper.sendWithCb).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
 		})
 
 		it('should handle mixed entities - some with lifecycle functions, some without', () => {
@@ -1122,21 +1480,28 @@ describe('InstanceEntityManager', () => {
 			vi.runAllTimers()
 
 			// Only the entity with lifecycle functions should be sent to the module
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateActions', {
-				actions: {
-					'entity-with-lifecycle': {
-						id: 'entity-with-lifecycle',
-						actionId: 'action-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: null,
-						controlId: 'control-1',
-					},
-				},
-			})
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-with-lifecycle',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-with-lifecycle',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: {},
+							} as any,
+							parsedOptions: {},
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
 
 			// Should only be called once (for the entity with lifecycle functions)
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledTimes(1)
+			expect(mockAdapter.updateActions).toHaveBeenCalledTimes(1)
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledTimes(0)
 		})
 
 		it('should skip upgrading entities without lifecycle functions even with old upgradeIndex', async () => {
@@ -1160,12 +1525,6 @@ describe('InstanceEntityManager', () => {
 				}),
 			}
 
-			// Setup upgrade response
-			mockIpcWrapper.sendWithCb.mockResolvedValueOnce({
-				updatedActions: [],
-				updatedFeedbacks: [],
-			})
-
 			entityManager.start(5)
 			entityManager.trackEntity(mockEntityWithoutLifecycle as any, 'control-1')
 
@@ -1173,138 +1532,26 @@ describe('InstanceEntityManager', () => {
 			await vi.runAllTimersAsync()
 
 			// Should call upgradeActionsAndFeedbacks first, but then ignore the result
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('upgradeActionsAndFeedbacks', {
-				actions: [
+			expect(mockAdapter.upgradeActions).toHaveBeenCalledWith(
+				[
 					{
-						id: 'entity-without-lifecycle',
-						actionId: 'action-1',
 						controlId: 'control-1',
-						disabled: false,
-						options: {},
-						upgradeIndex: 3,
-					},
+						entity: {
+							id: 'entity-without-lifecycle',
+							type: EntityModelType.Action,
+							definitionId: 'action-1',
+							connectionId: 'connection-1',
+							options: {},
+							upgradeIndex: 3,
+						},
+					} satisfies Omit<EntityManagerActionEntity, 'parsedOptions'>,
 				],
-				feedbacks: [],
-				defaultUpgradeIndex: 0,
-			})
+				5
+			)
 
 			// Should only be called once (for upgrade), not for regular processing
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledTimes(1)
-		})
-
-		it('should handle disabled entities without sending them to the module', () => {
-			const mockEntity = {
-				id: 'entity-1',
-				type: EntityModelType.Action,
-				definitionId: 'action-1',
-				disabled: true,
-				asEntityModel: vi.fn().mockReturnValue({
-					id: 'entity-1',
-					type: EntityModelType.Action,
-					definitionId: 'action-1',
-					connectionId: 'connection-1',
-					options: {},
-					disabled: true,
-				}),
-				getEntityDefinition: vi.fn().mockReturnValue({
-					hasLifecycleFunctions: true,
-					options: [],
-					optionsToIgnoreForSubscribe: [],
-				}),
-			}
-
-			entityManager.start(5)
-			entityManager.trackEntity(mockEntity as any, 'control-1')
-
-			vi.runAllTimers()
-
-			// Should send disabled: true to the module
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith(
-				'updateActions',
-				expect.objectContaining({
-					actions: expect.objectContaining({
-						'entity-1': expect.objectContaining({
-							disabled: true,
-						}),
-					}),
-				})
-			)
-		})
-
-		it('should handle entity with invalid option types', () => {
-			const entityDefinition = {
-				options: [{ id: 'field1', type: 'textinput', useVariables: true }],
-				optionsToIgnoreForSubscribe: [],
-			}
-
-			// Test with option value that's not a string
-			const options = {
-				field1: { nestedObject: true },
-			}
-
-			mockVariablesParser.parseVariables.mockReturnValueOnce({
-				text: 'parsed-object',
-				variableIds: [],
-			})
-
-			const result = entityManager.parseOptionsObject(entityDefinition as any, options as any, 'control-1')
-
-			// Should convert to string for parsing
-			expect(mockControlsController.createVariablesAndExpressionParser).toHaveBeenCalledWith('control-1', null)
-			expect(mockVariablesParser.parseVariables).toHaveBeenCalledWith('[object Object]')
-			expect(result.parsedOptions).toEqual({
-				field1: 'parsed-object',
-			})
-		})
-	})
-
-	describe('Batch processing', () => {
-		it('should process multiple entities in one batch', () => {
-			entityManager.start(5)
-
-			// Create multiple action entities
-			const actionEntities: any[] = []
-			for (let i = 0; i < 5; i++) {
-				actionEntities.push({
-					id: `action-${i}`,
-					type: EntityModelType.Action,
-					definitionId: 'action-1',
-					upgradeIndex: 5,
-					asEntityModel: vi.fn().mockReturnValue({
-						id: `action-${i}`,
-						type: EntityModelType.Action,
-						definitionId: 'action-1',
-						connectionId: 'connection-1',
-						options: { index: i },
-					}),
-					getEntityDefinition: vi.fn().mockReturnValue({
-						hasLifecycleFunctions: true,
-						options: [],
-						optionsToIgnoreForSubscribe: [],
-					}),
-				})
-			}
-
-			// Track all entities
-			actionEntities.forEach((entity) => {
-				entityManager.trackEntity(entity as any, 'control-1')
-			})
-
-			// Should batch them into a single call
-			vi.runAllTimers()
-
-			// Only one call should have been made
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledTimes(1)
-
-			// It should contain all entities
-			const call = mockIpcWrapper.sendWithCb.mock.calls[0]
-			expect(call[0]).toBe('updateActions')
-
-			const payload = call[1].actions
-			expect(Object.keys(payload).length).toBe(5)
-			for (let i = 0; i < 5; i++) {
-				expect(payload[`action-${i}`]).toBeDefined()
-			}
+			expect(mockAdapter.upgradeActions).toHaveBeenCalledTimes(1)
+			expect(mockAdapter.upgradeFeedbacks).toHaveBeenCalledTimes(0)
 		})
 	})
 
@@ -1337,7 +1584,7 @@ describe('InstanceEntityManager', () => {
 				resolvePromise = resolve
 			})
 
-			mockIpcWrapper.sendWithCb.mockReturnValueOnce(delayedPromise)
+			mockAdapter.updateActions.mockReturnValueOnce(delayedPromise)
 
 			entityManager.start(5)
 			entityManager.trackEntity(mockEntity as any, 'control-1')
@@ -1349,7 +1596,7 @@ describe('InstanceEntityManager', () => {
 
 			// Call resendFeedbacks while entity is upgrading
 			// This should mark feedbacks as UPGRADING_INVALIDATED
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
 
 			// Add a feedback that's in READY state
 			const mockFeedback = {
@@ -1374,27 +1621,34 @@ describe('InstanceEntityManager', () => {
 			entityManager.trackEntity(mockFeedback as any, 'control-2')
 			vi.runAllTimers()
 
-			mockIpcWrapper.sendWithCb.mockClear()
+			mockAdapter.updateActions.mockClear()
 
 			// Now resend feedbacks
 			entityManager.resendFeedbacks()
 			vi.runAllTimers()
 
 			// Should have called updateFeedbacks
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith('updateFeedbacks', {
-				feedbacks: {
-					'feedback-1': {
-						id: 'feedback-1',
-						feedbackId: 'feedback-def-1',
-						options: {},
-						disabled: false,
-						upgradeIndex: 5,
-						controlId: 'control-2',
-						image: { width: 72, height: 58 },
-						isInverted: false,
-					},
-				},
-			})
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
+				new Map<string, EntityManagerFeedbackEntity | null>([
+					[
+						'feedback-1',
+						{
+							controlId: 'control-2',
+							entity: {
+								id: 'feedback-1',
+								type: EntityModelType.Feedback,
+								definitionId: 'feedback-def-1',
+								connectionId: 'connection-1',
+								options: {},
+								upgradeIndex: 5,
+							} as any,
+							parsedOptions: {},
+							imageSize: { width: 72, height: 58 },
+						} satisfies EntityManagerFeedbackEntity,
+					],
+				])
+			)
 		})
 	})
 
@@ -1489,25 +1743,27 @@ describe('InstanceEntityManager', () => {
 			}))
 
 			// Setup IPC wrapper to return upgrade results
-			mockIpcWrapper.sendWithCb.mockImplementationOnce(async () => {
-				return {
-					updatedActions: [
-						{
-							id: 'entity-1',
-							actionId: 'action-1',
-							options: { upgraded: true },
-							upgradeIndex: 5,
-						},
-					],
-					updatedFeedbacks: [
-						{
-							id: 'entity-3',
-							feedbackId: 'feedback-1',
-							options: { upgraded: true },
-							upgradeIndex: 5,
-						},
-					],
-				}
+			mockAdapter.upgradeActions.mockImplementationOnce(async () => {
+				return [
+					{
+						id: 'entity-1',
+						type: EntityModelType.Action,
+						definitionId: 'action-1',
+						options: { upgraded: { isExpression: false, value: true } },
+						upgradeIndex: 5,
+					},
+				] satisfies ReplaceableActionEntityModel[]
+			})
+			mockAdapter.upgradeFeedbacks.mockImplementationOnce(async () => {
+				return [
+					{
+						id: 'entity-3',
+						type: EntityModelType.Feedback,
+						definitionId: 'feedback-1',
+						options: { upgraded: { isExpression: false, value: true } },
+						upgradeIndex: 5,
+					},
+				] satisfies ReplaceableFeedbackEntityModel[]
 			})
 
 			// Track all entities
@@ -1519,39 +1775,46 @@ describe('InstanceEntityManager', () => {
 			await vi.runAllTimersAsync()
 
 			// Should have sent entities that need upgrading to upgradeActionsAndFeedbacks
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith(
-				'upgradeActionsAndFeedbacks',
-				expect.objectContaining({
-					actions: expect.arrayContaining([
-						expect.objectContaining({
+			expect(mockAdapter.upgradeActions).toHaveBeenCalledWith(
+				[
+					{
+						controlId: 'control-1',
+						entity: {
 							id: 'entity-1',
-						}),
-					]),
-					feedbacks: expect.arrayContaining([
-						expect.objectContaining({
+							type: EntityModelType.Action,
+							connectionId: 'connection-1',
+							definitionId: 'action-1',
+							options: {},
+							upgradeIndex: 3,
+						},
+					},
+				] satisfies Omit<EntityManagerActionEntity, 'parsedOptions'>[],
+				5
+			)
+			expect(mockAdapter.upgradeFeedbacks).toHaveBeenCalledWith(
+				[
+					{
+						controlId: 'control-1',
+						entity: {
 							id: 'entity-3',
-						}),
-					]),
-				})
+							type: EntityModelType.Feedback,
+							connectionId: 'connection-1',
+							definitionId: 'feedback-1',
+							options: {},
+							upgradeIndex: 3,
+						},
+						imageSize: undefined,
+					},
+				] satisfies Omit<EntityManagerFeedbackEntity, 'parsedOptions'>[],
+				5
 			)
 
 			// Should have sent entities that don't need upgrading to updateActions/updateFeedbacks
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith(
-				'updateActions',
-				expect.objectContaining({
-					actions: expect.objectContaining({
-						'entity-2': expect.anything(),
-					}),
-				})
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([['entity-2', expect.anything()]])
 			)
-
-			expect(mockIpcWrapper.sendWithCb).toHaveBeenCalledWith(
-				'updateFeedbacks',
-				expect.objectContaining({
-					feedbacks: expect.objectContaining({
-						'entity-4': expect.anything(),
-					}),
-				})
+			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([['entity-4', expect.anything()]])
 			)
 		})
 	})

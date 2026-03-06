@@ -1,0 +1,589 @@
+import LogController, { type Logger } from '../../Log/Controller.js'
+import type { RespawnMonitor } from '@companion-app/shared/Respawn.js'
+import type {
+	ChangePageMessage,
+	DisconnectMessage,
+	FirmwareUpdateInfoMessage,
+	ForgetDiscoveredSurfacesMessage,
+	HostOpenDeviceResult,
+	HostToSurfaceModuleEvents,
+	InputPressMessage,
+	InputRotateMessage,
+	LogMessageMessage,
+	NotifyConnectionsForgottenMessage,
+	NotifyConnectionsFoundMessage,
+	NotifyOpenedDeviceMessage,
+	PincodeEntryMessage,
+	RegisterMessage,
+	SetVariableValueMessage,
+	ShouldOpenDeviceMessage,
+	ShouldOpenDeviceResponseMessage,
+	SurfaceModuleToHostEvents,
+} from './IpcTypes.js'
+import { SurfacePluginPanel } from '../../Surface/PluginPanel.js'
+import type { ChildProcessHandlerBase } from '../ProcessManager.js'
+import type { InstanceStatus } from '../Status.js'
+import type { SurfaceScanHandler, SurfaceController } from '../../Surface/Controller.js'
+import { IpcWrapper, type IpcEventHandlers } from '../Common/IpcWrapper.js'
+import type { CompanionSurfaceConfigField, OutboundSurfaceInfo } from '@companion-app/shared/Model/Surfaces.js'
+import type { HIDDevice, RemoteSurfaceConnectionInfo, SurfaceModuleManifest } from '@companion-surface/base'
+import type { DiscoveredSurfaceInfo } from './DiscoveredSurfaceRegistry.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+
+export interface SurfaceChildHandlerDependencies {
+	readonly surfaceController: SurfaceController
+	readonly instanceStatus: InstanceStatus
+
+	readonly debugLogLine: (
+		instanceId: string,
+		time: number | null,
+		source: string,
+		level: string,
+		message: string
+	) => void
+
+	readonly invalidateClientJson: (instanceId: string) => void
+}
+
+export interface SurfaceChildFeatures {
+	readonly supportsDetection: boolean
+	readonly supportsHid: boolean
+	readonly supportsScan: boolean
+	readonly supportsRemote: {
+		configFields: CompanionSurfaceConfigField[]
+		configMatchesExpression: string | null
+	} | null
+}
+
+export class SurfaceChildHandler implements ChildProcessHandlerBase, SurfaceScanHandler {
+	logger: Logger
+
+	readonly #ipcWrapper: IpcWrapper<HostToSurfaceModuleEvents, SurfaceModuleToHostEvents>
+
+	readonly #deps: SurfaceChildHandlerDependencies
+
+	readonly #panels = new Map<string, SurfacePluginPanel>()
+
+	/** Map of surfaceId -> unsub for surfaceController surfaceConfig events */
+	readonly #surfaceConfigListeners = new Map<string, () => void>()
+
+	readonly moduleId: string
+	readonly instanceId: string
+
+	#features: SurfaceChildFeatures
+
+	get features(): SurfaceChildFeatures {
+		return this.#features
+	}
+
+	/**
+	 * Unsubscribe listeners, for use during cleanup
+	 */
+	#unsubListeners: () => void
+
+	#relevantHidDevices = new Map<number, Set<number>>()
+
+	constructor(
+		deps: SurfaceChildHandlerDependencies,
+		monitor: RespawnMonitor,
+		moduleId: string,
+		instanceId: string,
+		manifest: SurfaceModuleManifest,
+		onRegister: (verificationToken: string) => Promise<void>
+	) {
+		this.logger = LogController.createLogger(`Surface/Wrapper/${instanceId}`)
+
+		this.#deps = deps
+		this.moduleId = moduleId
+		this.instanceId = instanceId
+
+		// Default features if not yet registered
+		this.#features = {
+			supportsDetection: false,
+			supportsHid: false,
+			supportsScan: false,
+			supportsRemote: null,
+		}
+
+		this.#unsubListeners = () => null // will be set properly on registration
+
+		const funcs: IpcEventHandlers<SurfaceModuleToHostEvents> = {
+			register: async (msg: RegisterMessage) => {
+				// Call back to ProcessManager to handle registration
+				await onRegister(msg.verificationToken)
+				// Complete local registration with the props
+				this.#completeRegistration(msg)
+				return {}
+			},
+
+			disconnect: this.#handleDisconnectMessage.bind(this),
+
+			shouldOpenDiscoveredSurface: this.#handleShouldOpenDiscoveredSurface.bind(this),
+			notifyOpenedDiscoveredDevice: this.#handleNotifyOpenedDiscoveredDevice.bind(this),
+			forgetDiscoveredSurfaces: this.#handleForgetDiscoveredSurfaces.bind(this),
+
+			notifyConnectionsFound: this.#handleNotifyConnectionsFound.bind(this),
+			notifyConnectionsForgotten: this.#handleNotifyConnectionsForgotten.bind(this),
+
+			'log-message': this.#handleLogMessage.bind(this),
+
+			'input-press': this.#handleInputPress.bind(this),
+			'input-rotate': this.#handleInputRotate.bind(this),
+			'change-page': this.#handleChangePage.bind(this),
+
+			'pincode-entry': this.#handlePincodeEntry.bind(this),
+
+			'set-variable-value': this.#handleSetVariableValue.bind(this),
+
+			'firmware-update-info': this.#handleFirmwareUpdateInfo.bind(this),
+		}
+
+		this.#ipcWrapper = new IpcWrapper(
+			funcs,
+			(msg) => {
+				if (monitor.child) {
+					monitor.child.send(msg)
+				} else {
+					this.logger.debug(`Child is not running, unable to send message: ${JSON.stringify(msg)}`)
+				}
+			},
+			5000
+		)
+
+		// Attach message handler to receive messages from child process
+		const messageHandler = (msg: any) => {
+			this.#ipcWrapper.receivedMessage(msg)
+		}
+		monitor.on('message', messageHandler)
+		this.#unsubListeners = () => monitor.off('message', messageHandler)
+
+		// Build relevant HID devices map for quick lookup
+		for (const usbIds of manifest.usbIds || []) {
+			let productIds = this.#relevantHidDevices.get(usbIds.vendorId)
+			if (!productIds) {
+				productIds = new Set()
+				this.#relevantHidDevices.set(usbIds.vendorId, productIds)
+			}
+			for (const id of usbIds.productIds) {
+				productIds.add(id)
+			}
+		}
+	}
+
+	#completeRegistration(registerProps: RegisterMessage): void {
+		this.#features = {
+			supportsDetection: !!registerProps.supportsDetection,
+			supportsHid: !!registerProps.supportsHid,
+			supportsScan: !!registerProps.supportsScan,
+			supportsRemote: registerProps.supportsOutbound ?? null,
+		}
+		this.logger.debug(`Received features: ${JSON.stringify(this.features)}`)
+
+		if (this.features.supportsScan || this.features.supportsDetection || this.features.supportsHid) {
+			// Register with the controller for scan events
+			this.#deps.surfaceController.registerSurfaceScanHandler(this.instanceId, this)
+		}
+
+		if (this.features.supportsRemote) {
+			this.#deps.surfaceController.outbound.events.on(`startStop:${this.instanceId}`, this.#startStopConnections)
+
+			this.#deps.surfaceController.outbound.updateDefaultConfigForSurfaceInstance(
+				this.instanceId,
+				this.moduleId,
+				this.features.supportsRemote
+			)
+		}
+	}
+
+	#startStopConnections = (connectionInfo: OutboundSurfaceInfo) => {
+		if (!this.features.supportsRemote) return
+		if (connectionInfo.enabled) {
+			this.#ipcWrapper
+				.sendWithCb('setupRemoteConnections', {
+					connectionInfos: [
+						{
+							connectionId: connectionInfo.id,
+							config: connectionInfo.config,
+						},
+					],
+				})
+				.catch((e) => {
+					this.logger.warn(`Error setting up remote connection: ${e.message}`)
+				})
+		} else {
+			this.#ipcWrapper
+				.sendWithCb('stopRemoteConnections', {
+					connectionIds: [connectionInfo.id],
+				})
+				.catch((e) => {
+					this.logger.warn(`Error tearing down remote connection: ${e.message}`)
+				})
+		}
+	}
+
+	async init(): Promise<void> {
+		// Initialize the plugin
+		await this.#ipcWrapper.sendWithCb('init', {})
+
+		this.#deps.instanceStatus.updateInstanceStatus(this.instanceId, 'ok', null)
+	}
+	async ready(): Promise<void> {
+		this.#deps.surfaceController.initInstance(this.instanceId, this.features)
+
+		this.#deps.invalidateClientJson(this.instanceId)
+
+		// Start up any existing outbound connections for this instance
+		if (this.features.supportsRemote) {
+			const remoteConnections = this.#deps.surfaceController.outbound.getAllEnabledConnectionsForInstance(
+				this.instanceId
+			)
+			this.#ipcWrapper
+				.sendWithCb('setupRemoteConnections', {
+					connectionInfos: remoteConnections.map(
+						(conn) =>
+							({
+								connectionId: conn.id,
+								config: conn.config,
+							}) satisfies RemoteSurfaceConnectionInfo
+					),
+				})
+				.catch((e) => {
+					this.logger.warn(`Error setting up initial remote connections: ${stringifyError(e)}`)
+				})
+		}
+	}
+
+	/**
+	 * Tell the child instance class to 'destroy' itself
+	 */
+	async destroy(): Promise<void> {
+		// Cleanup the system once the module is destroyed
+
+		try {
+			await this.#ipcWrapper.sendWithCb('destroy', {})
+		} catch (e) {
+			this.logger.warn(`Destroy for "${this.instanceId}" errored: ${stringifyError(e)}`)
+		}
+
+		// Stop ipc commands being received
+		this.#unsubListeners()
+
+		this.cleanup()
+	}
+
+	cleanup(): void {
+		this.#deps.invalidateClientJson(this.instanceId)
+		this.#deps.surfaceController.outbound.updateDefaultConfigForSurfaceInstance(this.instanceId, this.moduleId, null)
+		this.#deps.surfaceController.outbound.events.off(`startStop:${this.instanceId}`, this.#startStopConnections)
+
+		// Unsubscribe any remaining surface config listeners
+		for (const unsub of this.#surfaceConfigListeners.values()) {
+			unsub()
+		}
+		this.#surfaceConfigListeners.clear()
+		this.#deps.surfaceController.outbound.discovery.instanceForget(this.instanceId)
+
+		// Clean up all surface-related state
+		this.#deps.surfaceController.cleanupForInstance(this.instanceId)
+	}
+
+	/**
+	 * Process HID devices during a scan and return discovered surfaces.
+	 * Implements the HidScanHandler interface.
+	 * Serial numbers are already populated by the Controller's DiscoveredSurfaceRegistry.
+	 * @param hidDevices - HID devices with serialNumber already populated
+	 * @returns Promise resolving to array of discovered surfaces
+	 */
+	async scanForSurfaces(hidDevices: HIDDevice[]): Promise<DiscoveredSurfaceInfo[]> {
+		const discovered: DiscoveredSurfaceInfo[] = []
+
+		// Handle plugins with their own scan/detection
+		if (this.features.supportsScan || this.features.supportsDetection) {
+			try {
+				const msg = await this.#ipcWrapper.sendWithCb('scanDevices', {})
+				this.logger.debug(`scan devices returned ${msg.devices.length} devices`)
+
+				for (const device of msg.devices) {
+					discovered.push({
+						surfaceId: device.surfaceId,
+						surfaceIdIsNotUnique: device.surfaceIdIsNotUnique,
+						description: device.description,
+						scannedDeviceInfo: device,
+					})
+				}
+			} catch (e: unknown) {
+				const message = e instanceof Error ? e.message : String(e)
+				this.logger.warn(`Error performing scanDevices: ${message}`)
+			}
+		}
+
+		// Handle HID-based surfaces
+		if (this.features.supportsHid) {
+			// Filter to only devices relevant to this handler
+			const relevantDevices: HIDDevice[] = []
+			const devicesByPath = new Map<string, HIDDevice>()
+
+			for (const device of hidDevices) {
+				const hidVendorEntry = this.#relevantHidDevices.get(device.vendorId)
+				if (hidVendorEntry && hidVendorEntry.has(device.productId)) {
+					relevantDevices.push(device)
+					devicesByPath.set(device.path, device)
+				}
+			}
+
+			if (relevantDevices.length > 0) {
+				try {
+					// Single batched IPC call for all relevant devices
+					const msg = await this.#ipcWrapper.sendWithCb('checkHidDevices', { devices: relevantDevices })
+
+					for (const result of msg.devices) {
+						const device = devicesByPath.get(result.devicePath)
+						if (!device) continue
+
+						discovered.push({
+							surfaceId: result.surfaceId,
+							surfaceIdIsNotUnique: result.surfaceIdIsNotUnique,
+							description: result.description,
+							hidDevice: device,
+						})
+					}
+				} catch (e: unknown) {
+					const message = e instanceof Error ? e.message : String(e)
+					this.logger.warn(`Error performing checkHidDevices: ${message}`)
+				}
+			}
+		}
+
+		return discovered
+	}
+
+	/**
+	 * Open a discovered surface.
+	 * Implements the HidScanHandler interface.
+	 * @param surface - The surface to open (as returned from scanHidDevices)
+	 * @param resolvedSurfaceId - The collision-resolved surface ID to use
+	 */
+	async openDiscoveredSurface(surface: DiscoveredSurfaceInfo, resolvedSurfaceId: string): Promise<void> {
+		// Already opened, stop here
+		if (this.#panels.has(resolvedSurfaceId)) return
+
+		// Check if it can be opened here
+		const reserveCb = this.#deps.surfaceController.reserveSurfaceForOpening(resolvedSurfaceId, true)
+		if (!reserveCb) return
+
+		try {
+			if (surface.hidDevice) {
+				// HID device - use openHidDevice
+				const openInfo = await this.#ipcWrapper.sendWithCb('openHidDevice', {
+					device: surface.hidDevice,
+					resolvedSurfaceId,
+				})
+				if (!openInfo.info) return
+
+				await this.#setupSurfacePanel(openInfo.info)
+			} else if (surface.scannedDeviceInfo) {
+				// Scanned device - use openScannedDevice
+				const openInfo = await this.#ipcWrapper.sendWithCb('openScannedDevice', {
+					device: surface.scannedDeviceInfo,
+					resolvedSurfaceId,
+				})
+				if (!openInfo.info) return
+
+				await this.#setupSurfacePanel(openInfo.info)
+			} else {
+				this.logger.warn(`Cannot open surface ${surface.surfaceId}: no HID or scanned device info`)
+			}
+		} finally {
+			// Clear the reservation, if it hasn't been used
+			reserveCb()
+		}
+	}
+
+	async #setupSurfacePanel(info: HostOpenDeviceResult): Promise<void> {
+		try {
+			this.logger.info(`Opening surface panel: ${info.surfaceId} - ${info.description}`)
+
+			if (this.#panels.has(info.surfaceId)) {
+				this.logger.warn(`Surface with id ${info.surfaceId} is already opened`)
+
+				// TODO - tell the child, as something has probably gone wrong
+				return
+			}
+
+			// Fetch the initial config for this surface from the surfaceController
+			const surfaceConfig = this.#deps.surfaceController.getDeviceConfig(info.surfaceId)
+			const initialConfig = surfaceConfig?.config || {}
+			this.#ipcWrapper
+				.sendWithCb('readySurface', {
+					surfaceId: info.surfaceId,
+					initialConfig,
+				})
+				.catch((e) => {
+					this.logger.warn(`Error marking surface as ready: ${e.message}`)
+				})
+
+			const panel = new SurfacePluginPanel(
+				this.#ipcWrapper,
+				this.instanceId,
+				info,
+				this.#deps.surfaceController.surfaceExecuteExpression.bind(this.#deps.surfaceController)
+			)
+			this.#panels.set(info.surfaceId, panel)
+
+			this.#deps.surfaceController.addPluginPanel(this.moduleId, panel)
+
+			// Listen for config changes for this surface and forward them to the child process
+			const listener = (surfaceId: string, newConfig: Record<string, any> | null) => {
+				if (surfaceId !== info.surfaceId) return
+
+				this.#ipcWrapper
+					.sendWithCb('updateConfig', {
+						surfaceId,
+						newConfig: newConfig || {},
+					})
+					.catch((e) => {
+						this.logger.warn(`Failed forwarding surface config to child for ${surfaceId}: ${e}`)
+					})
+			}
+
+			this.#surfaceConfigListeners.set(info.surfaceId, () => {
+				this.#deps.surfaceController.off('surface-config', listener)
+			})
+			this.#deps.surfaceController.on('surface-config', listener)
+			this.logger.info(`Surface panel ready: ${info.surfaceId}`)
+		} catch (e) {
+			// TODO - tell the child, as something has gone wrong
+			this.logger.warn(`Error opening surface panel: ${e}`)
+		}
+	}
+
+	async #handleDisconnectMessage(msg: DisconnectMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			this.logger.info(`Surface panel disconnected: ${msg.surfaceId} (${msg.reason ?? 'no reason given'})`)
+			surface.emit('remove')
+			this.#panels.delete(msg.surfaceId)
+
+			const unsub = this.#surfaceConfigListeners.get(msg.surfaceId)
+			if (unsub) {
+				this.#surfaceConfigListeners.delete(msg.surfaceId)
+				unsub()
+			}
+		} else {
+			this.logger.warn(`Received disconnect for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+
+	async #handleShouldOpenDiscoveredSurface(msg: ShouldOpenDeviceMessage): Promise<ShouldOpenDeviceResponseMessage> {
+		// Generate a collision-resolved surface ID and check if it should be opened
+		// Self-discovering surfaces bypass the enabled check since we cannot reliably abort the open process (for now)
+		const { resolvedSurfaceId, shouldOpen } = await this.#deps.surfaceController.generateDiscoveredSurfaceId(
+			this,
+			msg.info,
+			false
+		)
+
+		if (!shouldOpen) {
+			return { shouldOpen: false, resolvedSurfaceId }
+		}
+
+		// Already opened with this resolved ID, stop here
+		if (this.#panels.has(resolvedSurfaceId)) {
+			return { shouldOpen: false, resolvedSurfaceId }
+		}
+
+		return { shouldOpen: true, resolvedSurfaceId }
+	}
+	async #handleNotifyOpenedDiscoveredDevice(msg: NotifyOpenedDeviceMessage): Promise<void> {
+		this.#setupSurfacePanel(msg.info).catch((e) => {
+			this.logger.warn(`Error opening discovered surface panel: ${e}`)
+		})
+	}
+	async #handleForgetDiscoveredSurfaces(msg: ForgetDiscoveredSurfacesMessage): Promise<void> {
+		for (const devicePath of msg.devicePaths) {
+			this.#deps.surfaceController.forgetDiscoveredSurface(this.instanceId, devicePath)
+		}
+	}
+
+	async #handleNotifyConnectionsFound(msg: NotifyConnectionsFoundMessage): Promise<void> {
+		try {
+			this.#deps.surfaceController.outbound.discovery.instanceConnectionsFound(this.instanceId, msg.connectionInfos)
+		} catch (e) {
+			this.logger.warn(`Error handling notifyConnectionsFound: ${e}`)
+		}
+	}
+	async #handleNotifyConnectionsForgotten(msg: NotifyConnectionsForgottenMessage): Promise<void> {
+		try {
+			this.#deps.surfaceController.outbound.discovery.instanceConnectionsForgotten(this.instanceId, msg.connectionIds)
+		} catch (e) {
+			this.logger.warn(`Error handling notifyConnectionsForgotten: ${e}`)
+		}
+	}
+
+	/**
+	 * Handle a log message from the child process
+	 */
+	async #handleLogMessage(msg: LogMessageMessage): Promise<void> {
+		if (msg.level === 'error' || msg.level === 'warn' || msg.level === 'info') {
+			// Ignore debug from modules in main log
+			this.logger.log({
+				source: msg.source ? `${this.logger.source}/${msg.source}` : this.logger.source,
+				level: msg.level,
+				message: msg.message,
+			})
+		}
+
+		// Send everything to the 'debug' page
+		this.#deps.debugLogLine(this.instanceId, msg.time, msg.source || '/', msg.level, msg.message.toString())
+	}
+
+	async #handleInputPress(msg: InputPressMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			surface.inputPress(msg.controlId, msg.pressed)
+		} else {
+			this.logger.warn(`Received input press for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+	async #handleInputRotate(msg: InputRotateMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			surface.inputRotate(msg.controlId, msg.delta)
+		} else {
+			this.logger.warn(`Received input rotate for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+	async #handleChangePage(msg: ChangePageMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			surface.changePage(msg.forward)
+		} else {
+			this.logger.warn(`Received change page for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+	async #handlePincodeEntry(msg: PincodeEntryMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			surface.inputPincode(msg.keycode)
+		} else {
+			this.logger.warn(`Received input pincode for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+	async #handleSetVariableValue(msg: SetVariableValueMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			surface.inputVariableValue(msg.name, msg.value)
+		} else {
+			this.logger.warn(`Received input variable value for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+
+	async #handleFirmwareUpdateInfo(msg: FirmwareUpdateInfoMessage): Promise<void> {
+		const surface = this.#panels.get(msg.surfaceId)
+		if (surface) {
+			surface.updateFirmwareUpdateInfo(msg.updateInfo?.updateUrl ?? null)
+		} else {
+			this.logger.warn(`Received firmware updateinfo for unknown surface: ${msg.surfaceId}`)
+		}
+	}
+}

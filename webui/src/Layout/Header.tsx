@@ -1,16 +1,63 @@
-import React, { useContext } from 'react'
-import { CHeader, CHeaderBrand, CHeaderNav, CNavItem, CNavLink, CHeaderToggler, CContainer } from '@coreui/react'
-import { faBars, faLock, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import React, { type ReactElement, useCallback, useContext, useMemo } from 'react'
+import {
+	CHeader,
+	CHeaderBrand,
+	CHeaderNav,
+	CNavItem,
+	CNavLink,
+	CHeaderToggler,
+	CContainer,
+	CDropdownToggle,
+	CDropdown,
+} from '@coreui/react'
+import {
+	faBars,
+	faInfo,
+	faStar,
+	faExternalLinkSquare,
+	faLock,
+	faTriangleExclamation,
+	faDollarSign,
+} from '@fortawesome/free-solid-svg-icons'
+import { faCircleQuestion, faCircle as faOpenCircle } from '@fortawesome/free-regular-svg-icons'
+import { faSlack, faFacebook, faGithub } from '@fortawesome/free-brands-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { observer } from 'mobx-react-lite'
 import { useSidebarState } from './Sidebar.js'
 import { trpc } from '../Resources/TRPC.js'
 import { useSubscription } from '@trpc/tanstack-react-query'
-
+import { ActionMenu, type MenuItemData } from '~/Components/ActionMenu.js'
+import { MenuSeparator } from '~/Components/useContextMenuProps.js'
 interface MyHeaderProps {
 	canLock: boolean
 	setLocked: (locked: boolean) => void
+}
+
+// make our own circleInfo since it's not in the free FontAwesome offering (two options here)
+// note: the inline styling here is because it's aligning the compound element components rather than a stylistic choice.
+function circleInfo(stacked = false): ReactElement {
+	if (stacked) {
+		return (
+			<span className="fa-stack fa-2xs" style={{ marginLeft: '0.2em', marginRight: '-0.8em', marginTop: '-0.35em' }}>
+				<FontAwesomeIcon icon={faOpenCircle} className="fa-stack-2x" style={{ marginLeft: '-0.45em' }} />
+				<FontAwesomeIcon icon={faInfo} className="fa-stack-1x" style={{ marginLeft: '0.1em' }} />
+			</span>
+		)
+	} else {
+		return (
+			<FontAwesomeIcon
+				icon={faInfo}
+				className="fa-xs"
+				style={{
+					border: '0.2em solid',
+					borderRadius: '100%',
+					padding: '0.15em 0.05em 0.35em 0.1em', // top right bottom left
+					margin: '-0.05em 0em -0.45em -0.05em',
+				}}
+			/>
+		)
+	}
 }
 
 export const MyHeader = observer(function MyHeader({ canLock, setLocked }: MyHeaderProps) {
@@ -21,7 +68,10 @@ export const MyHeader = observer(function MyHeader({ canLock, setLocked }: MyHea
 	const updateData = useSubscription(trpc.appInfo.updateInfo.subscriptionOptions())
 
 	return (
-		<CHeader position="sticky" className="p-0">
+		// note: position="sticky" is not necessary since the header is never part of a scrolling element.
+		//  if position is sticky, the header is assigned z-index: 1020, which interferes with popups (monaco suggest-details, for example)
+		//  and would likely have to be overridden anyway (to be no more than 40, in the monaco case).
+		<CHeader className="p-0">
 			<CContainer fluid>
 				{showToggle && (
 					<CHeaderToggler className="ps-1" onClick={clickToggle}>
@@ -38,8 +88,8 @@ export const MyHeader = observer(function MyHeader({ canLock, setLocked }: MyHea
 					)}
 
 					{updateData.data?.message ? (
-						<CNavItem className="header-update-warn">
-							<CNavLink target="_blank" href={updateData.data.link || 'https://bitfocus.io/companion/'}>
+						<CNavItem className="header-notification-item">
+							<CNavLink target="_blank" href={updateData.data.link || 'https://companion.free/'}>
 								<div className="flex">
 									<div className="align-self-center">
 										<FontAwesomeIcon icon={faTriangleExclamation} className="header-update-icon" />
@@ -52,6 +102,7 @@ export const MyHeader = observer(function MyHeader({ canLock, setLocked }: MyHea
 												{updateData.data.message2}
 											</>
 										)}
+										<FontAwesomeIcon icon={faExternalLinkSquare} className="ms-2" />
 									</div>
 								</div>
 							</CNavLink>
@@ -61,16 +112,98 @@ export const MyHeader = observer(function MyHeader({ canLock, setLocked }: MyHea
 					)}
 				</CHeaderNav>
 
-				{canLock && (
-					<CHeaderNav className="ml-auto header-right">
+				<CHeaderNav className="ml-auto header-right">
+					{canLock && (
 						<CNavItem>
 							<CNavLink onClick={() => setLocked(true)} title="Lock Admin UI">
-								<FontAwesomeIcon icon={faLock} />
+								<FontAwesomeIcon icon={faLock} className="fa-lg" />
 							</CNavLink>
 						</CNavItem>
-					</CHeaderNav>
-				)}
+					)}
+				</CHeaderNav>
+				{/* Placing HelpMenu outside CHeaderNav gives "standard" menu line-heights. 
+						Move it into the CHeaderNav block to make it look more like the sidebar line height.  */}
+				<HelpMenu />
 			</CContainer>
 		</CHeader>
 	)
 })
+
+function HelpMenu() {
+	// We could add the config wizard (showWizard) to the help menu in this useContext...
+	const { whatsNewModal } = useContext(RootAppStoreContext)
+	const whatsNewOpen = useCallback(() => whatsNewModal.current?.show(), [whatsNewModal])
+
+	// note: the definition has to be inside a component so that we can grab `whatsNewOpen` which is a useCallback...
+	const helpMenuItems: MenuItemData[] = useMemo(
+		() => [
+			{
+				id: 'user-guide',
+				label: 'User Guide / Help',
+				icon: circleInfo, // this is a function call, unlike the rest.
+				to: '/user-guide/',
+				tooltip: 'Open the User Guide in a new tab.',
+				inNewTab: true,
+			},
+			{
+				id: 'whats-new',
+				label: "What's New",
+				icon: faStar,
+				to: whatsNewOpen,
+				tooltip: 'Show the current release notes.',
+				inNewTab: false,
+			},
+			{ ...MenuSeparator, label: 'Additional Support' },
+			{
+				id: 'fb',
+				label: 'Community Support',
+				icon: faFacebook,
+				to: 'https://l.companion.free/q/6pc9ciJR5',
+				tooltip: 'Share your experience or ask questions to your Companions.',
+				inNewTab: true,
+			},
+			{
+				id: 'slack',
+				label: 'Slack Workspace',
+				icon: faSlack,
+				to: 'https://l.companion.free/q/OWxbBnDKG',
+				tooltip: 'Discuss technical issues on Slack.',
+				inNewTab: true,
+			},
+			{
+				id: 'github',
+				label: 'Report an Issue',
+				icon: faGithub,
+				to: 'https://l.companion.free/q/QZbI6mdNd',
+				tooltip: 'Report bugs or request features on GitHub.',
+				inNewTab: true,
+			},
+			MenuSeparator,
+			{
+				id: 'sponsor',
+				label: 'Sponsor Companion',
+				icon: faDollarSign,
+				to: 'https://l.companion.free/q/6PtdAvZab',
+				tooltip: 'Contribute funds to Bitfocus Companion.',
+				inNewTab: true,
+			},
+		],
+		[whatsNewOpen]
+	)
+
+	// technical detail: unlike the other elements, CDropdownToggle does not define a 'dropdown-toggle' CSS class,
+	// but worse, if you add it manually, `caret={false}` is ignored, so it's named 'help-toggle' here.
+	return (
+		// note: CDropdown is assigned class btn-group. Previously _common.scss incorrectly assigned "overflow: hidden" to this class
+		//  which caused the dropdown to be clipped out of existence. Leading to the former note... now all is good.
+		//  and the dropdown is automatically assigned z-index: 1000 (--cui-dropdown-zindex)
+		// former note: without position-static, the menu doesn't show. Alternatively, set style={{position: 'inherit'}} or play with z-index
+		<CDropdown className="help-menu" offset={[10, 0]}>
+			<CDropdownToggle color="primary" caret={false} className="help-toggle" aria-label="Help and support menu">
+				<FontAwesomeIcon icon={faCircleQuestion} className="fa-2xl" />
+			</CDropdownToggle>
+
+			<ActionMenu menuItems={helpMenuItems} />
+		</CDropdown>
+	)
+}

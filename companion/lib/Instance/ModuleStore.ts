@@ -7,13 +7,17 @@ import type {
 } from '@companion-app/shared/Model/ModulesStore.js'
 import type { DataCache, DataCacheDefaultTable } from '../Data/Cache.js'
 import semver from 'semver'
-import { isSomeModuleApiVersionCompatible, MODULE_BASE_VERSION } from '@companion-app/shared/ModuleApiVersionCheck.js'
+import {
+	isSomeModuleApiVersionCompatible,
+	MODULE_BASE_VERSIONS,
+	SURFACE_BASE_VERSION,
+} from '@companion-app/shared/ModuleApiVersionCheck.js'
 import createClient, { type Client } from 'openapi-fetch'
 import type {
 	paths as ModuleStoreOpenApiPaths,
 	components as ModuleStoreOpenApiComponents,
 } from '@companion-app/shared/OpenApi/ModuleStore.js'
-import type { Complete } from '@companion-module/base/dist/util.js'
+import type { Complete } from '@companion-module/base'
 import EventEmitter from 'node:events'
 import type { DataStoreTableView } from '../Data/StoreBase.js'
 import type { AppInfo } from '../Registry.js'
@@ -21,6 +25,7 @@ import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import z from 'zod'
 import { assertNever } from '@companion-app/shared/Util.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 
 const baseUrl = process.env.STAGING_MODULE_API
 	? 'https://developer-staging.bitfocus.io/api'
@@ -66,6 +71,9 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 
 			connectionModuleApiVersion: null,
 			connectionModules: null,
+
+			surfaceModuleApiVersion: null,
+			surfaceModules: null,
 		} satisfies ModuleStoreListCacheStore)
 
 		this.#infoStore = new Map<any, ModuleStoreModuleInfoStore>(Object.entries(this.#cacheTable.all()))
@@ -81,7 +89,11 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 		})
 
 		// If this is the first time we're running, refresh the store data now
-		if (this.#listStore.lastUpdated === 0 || this.#listStore.connectionModuleApiVersion !== MODULE_BASE_VERSION) {
+		if (
+			this.#listStore.lastUpdated === 0 ||
+			this.#listStore.connectionModuleApiVersion !== JSON.stringify(MODULE_BASE_VERSIONS) ||
+			this.#listStore.surfaceModuleApiVersion !== SURFACE_BASE_VERSION
+		) {
 			setImmediate(() => this.refreshStoreListData())
 		}
 		// TODO - setup some better interval stuff, so that we can notify the user of updates they can install
@@ -167,6 +179,8 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 		switch (moduleType) {
 			case ModuleInstanceType.Connection:
 				return this.#listStore.connectionModules ?? {}
+			case ModuleInstanceType.Surface:
+				return this.#listStore.surfaceModules ?? {}
 			default:
 				assertNever(moduleType)
 				return {}
@@ -221,9 +235,9 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 				let progress = 0
 				this.emit('refreshProgress', null, progress)
 
-				const increment = 0.5
+				const increment = 0.25
 
-				const [connectionResult] = await Promise.all([
+				const [connectionResult, surfaceResult] = await Promise.all([
 					this.#openApiClient
 						.GET('/v1/companion/modules/{moduleType}', {
 							params: {
@@ -231,7 +245,22 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 									moduleType: 'connection',
 								},
 								query: {
-									'module-api-version': MODULE_BASE_VERSION,
+									'module-api-version': MODULE_BASE_VERSIONS,
+								},
+							},
+						})
+						.then((res) => {
+							progress += increment
+							return res
+						}),
+					this.#openApiClient
+						.GET('/v1/companion/modules/{moduleType}', {
+							params: {
+								path: {
+									moduleType: 'surface',
+								},
+								query: {
+									'module-api-version': [SURFACE_BASE_VERSION],
 								},
 							},
 						})
@@ -243,7 +272,7 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 
 				this.emit('refreshProgress', null, 0.5)
 
-				const error = connectionResult.error
+				const error = connectionResult.error || surfaceResult.error
 				if (error) throw new Error(`Failed to fetch module list: ${JSON.stringify(error)}`)
 
 				this.#listStore = {
@@ -251,9 +280,14 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 					lastUpdateAttempt: Date.now(),
 					updateWarning: null,
 
-					connectionModuleApiVersion: MODULE_BASE_VERSION,
+					connectionModuleApiVersion: JSON.stringify(MODULE_BASE_VERSIONS),
 					connectionModules: Object.fromEntries(
 						connectionResult.data.modules.map((data) => [data.id, transformApiModuleToCache(data)])
+					),
+
+					surfaceModuleApiVersion: SURFACE_BASE_VERSION,
+					surfaceModules: Object.fromEntries(
+						surfaceResult.data.modules.map((data) => [data.id, transformApiModuleToCache(data)])
 					),
 				}
 			})
@@ -304,7 +338,7 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 				{
 					params: {
 						path: {
-							moduleType: moduleType as 'connection',
+							moduleType: moduleType,
 							moduleName: moduleId,
 						},
 					},
@@ -352,10 +386,10 @@ export class ModuleStoreService extends EventEmitter<ModuleStoreServiceEvents> {
 					),
 				}
 			}
-		} catch (e: any) {
+		} catch (e) {
 			// This could be on an always offline system
 
-			this.#logger.warn(`Refreshing store info for module "${moduleId}" failed: ${e?.message ?? e}`)
+			this.#logger.warn(`Refreshing store info for module "${moduleId}" failed: ${stringifyError(e)}`)
 
 			moduleData = this.#infoStore.get(`${moduleType}:${moduleId}`) ?? {
 				id: moduleId,
@@ -429,7 +463,7 @@ function transformApiModuleToCache(
 
 		storeUrl: data.storeUrl,
 		githubUrl: data.githubUrl ?? null,
-		helpUrl: data.latestHelpUrl ?? null,
+		helpUrl: data.latestHelpUrl ?? data.prereleaseHelpUrl ?? null,
 
 		legacyIds: data.legacyIds ?? [],
 		deprecationReason: data.deprecationReason ?? null,

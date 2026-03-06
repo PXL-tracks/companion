@@ -18,8 +18,9 @@ import type { ControlActionSetAndStepsManager } from './ControlActionSetAndSteps
 import { validateActionSetId } from '@companion-app/shared/ControlId.js'
 import type { ControlEntityInstance } from './EntityInstance.js'
 import { assertNever } from '@companion-app/shared/Util.js'
-import type { CompanionVariableValues } from '@companion-module/base'
+import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
 import type { ExecuteExpressionResult } from '@companion-app/shared/Expression/ExpressionResult.js'
+import type { NewFeedbackValue, NewIsInvertedValue } from './Types.js'
 
 interface CurrentStepFromExpression {
 	type: 'expression'
@@ -51,7 +52,7 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 	readonly #executeExpressionInControl: (
 		expression: string,
 		requiredType?: string,
-		injectedVariableValues?: CompanionVariableValues
+		injectedVariableValues?: VariableValues
 	) => ExecuteExpressionResult
 	readonly #sendRuntimePropsChange: () => void
 
@@ -80,7 +81,7 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 		executeExpressionInControl: (
 			expression: string,
 			requiredType?: string,
-			injectedVariableValues?: CompanionVariableValues
+			injectedVariableValues?: VariableValues
 		) => ExecuteExpressionResult
 	) {
 		super(props)
@@ -168,7 +169,7 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 		const entityLists: ControlEntityList[] = [this.#feedbacks, this.#localVariables]
 
 		for (const step of this.#steps.values()) {
-			entityLists.push(...Array.from(step.sets.values()))
+			entityLists.push(...step.sets.values())
 		}
 
 		return entityLists
@@ -185,16 +186,21 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 	}
 
 	getStepIds(): string[] {
-		return Array.from(this.#steps.keys()).sort((a, b) => Number(a) - Number(b))
+		return this.#steps
+			.keys()
+			.toArray()
+			.sort((a, b) => Number(a) - Number(b))
 	}
 
 	actionSetAdd(stepId: string): boolean {
 		const step = this.#steps.get(stepId)
 		if (!step) return false
 
-		const existingKeys = Array.from(step.sets.keys())
+		const existingKeys = step.sets
+			.keys()
 			.map((k) => Number(k))
 			.filter((k) => !isNaN(k))
+			.toArray()
 		if (existingKeys.length === 0) {
 			// add the default '1000' set
 			step.sets.set(1000, this.#createActionEntityList([], false, false))
@@ -383,19 +389,18 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 	}
 
 	/**
-	 * Propagate variable changes, and update the current step if the variables affect it
+	 * Propagate variable changes
 	 */
-	stepCheckExpressionOnVariablesChanged(changedVariables: Set<string>): void {
+	onVariablesChanged(changedVariables: ReadonlySet<string>): void {
+		super.onVariablesChanged(changedVariables)
+
 		if (this.#currentStep.type !== 'expression') return
 
-		for (const variableName of this.#currentStep.lastVariables) {
-			if (changedVariables.has(variableName)) {
-				if (this.#stepCheckExpression(true)) {
-					// Something changed, so redraw
-					this.invalidateControl()
-				}
-				return
-			}
+		if (this.#currentStep.lastVariables.isDisjointFrom(changedVariables)) return
+
+		if (this.#stepCheckExpression(true)) {
+			// Something changed, so redraw
+			this.invalidateControl()
 		}
 	}
 
@@ -737,7 +742,7 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 	 * @param connectionId The instance the feedbacks are for
 	 * @param newValues The new feedback values
 	 */
-	updateFeedbackValues(connectionId: string, newValues: Record<string, any>): void {
+	updateFeedbackValues(connectionId: string, newValues: ReadonlyMap<string, NewFeedbackValue>): void {
 		for (const step of this.#steps.values()) {
 			for (const set of step.sets.values()) {
 				set.updateFeedbackValues(connectionId, newValues)
@@ -747,6 +752,26 @@ export class ControlEntityListPoolButton extends ControlEntityListPoolBase imple
 		const changedVariableEntities = this.#localVariables.updateFeedbackValues(connectionId, newValues)
 
 		if (this.#feedbacks.updateFeedbackValues(connectionId, newValues).length > 0) {
+			this.invalidateControl()
+		}
+
+		this.tryTriggerLocalVariablesChanged(...changedVariableEntities)
+	}
+
+	/**
+	 * Update the isInverted values on the control with new calculated isInverted values
+	 * @param newValues The new isInverted values
+	 */
+	updateIsInvertedValues(newValues: ReadonlyMap<string, NewIsInvertedValue>): void {
+		for (const step of this.#steps.values()) {
+			for (const set of step.sets.values()) {
+				set.updateIsInvertedValues(newValues)
+			}
+		}
+
+		const changedVariableEntities = this.#localVariables.updateIsInvertedValues(newValues)
+
+		if (this.#feedbacks.updateIsInvertedValues(newValues).length > 0) {
 			this.invalidateControl()
 		}
 

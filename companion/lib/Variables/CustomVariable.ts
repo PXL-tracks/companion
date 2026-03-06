@@ -20,12 +20,13 @@ import type {
 	CustomVariableUpdateRemoveOp,
 } from '@companion-app/shared/Model/CustomVariableModel.js'
 import type { DataDatabase } from '../Data/Database.js'
-import type { CompanionVariableValue } from '@companion-module/base'
+import { stringifyVariableValue, type VariableValue } from '@companion-app/shared/Model/Variables.js'
 import type { DataStoreTableView } from '../Data/StoreBase.js'
 import { CustomVariableCollections } from './CustomVariableCollections.js'
 import EventEmitter from 'events'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import z from 'zod'
+import { JsonValueSchema } from '@companion-app/shared/Model/Options.js'
 
 const CUSTOM_LABEL = 'custom'
 
@@ -124,7 +125,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 				.input(
 					z.object({
 						name: z.string(),
-						value: z.any(),
+						value: JsonValueSchema.optional(),
 					})
 				)
 				.mutation(({ input }) => {
@@ -135,7 +136,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 				.input(
 					z.object({
 						name: z.string(),
-						value: z.any(),
+						value: JsonValueSchema.optional(),
 					})
 				)
 				.mutation(({ input }) => {
@@ -202,17 +203,13 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	 * @param defaultVal Default value of the variable (string)
 	 * @returns null or failure reason
 	 */
-	createVariable(name: string, defaultVal: string): string | null {
+	createVariable(name: string, defaultVal: VariableValue | undefined): string | null {
 		if (this.#custom_variables[name]) {
 			return `Variable "${name}" already exists`
 		}
 
 		if (!isCustomVariableValid(name)) {
 			return `Variable name "${name}" is not valid`
-		}
-
-		if (typeof defaultVal !== 'string') {
-			return 'Bad default value'
 		}
 
 		const highestSortOrder = Math.max(-1, ...Object.values(this.#custom_variables).map((v) => v.sortOrder))
@@ -395,7 +392,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 		}
 
 		// find all the other variables with the matching collectionId
-		const sortedVariables = Array.from(Object.entries(this.#custom_variables))
+		const sortedVariables = Object.entries(this.#custom_variables)
 			.filter(
 				([varName, variable]) =>
 					name !== varName && ((!variable.collectionId && !collectionId) || variable.collectionId === collectionId)
@@ -430,7 +427,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	/**
 	 * Get the value of a custom variable
 	 */
-	getValue(name: string): CompanionVariableValue | undefined {
+	getValue(name: string): VariableValue | undefined {
 		return this.#variableValues.getVariableValue(CUSTOM_LABEL, name)
 	}
 
@@ -440,9 +437,9 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	 * @param value
 	 * @returns Failure reason, if any
 	 */
-	setValue(name: string, value: CompanionVariableValue | undefined): string | null {
+	setValue(name: string, value: VariableValue | undefined): string | null {
 		if (this.#custom_variables[name]) {
-			this.#logger.silly(`Set value "${name}":${value}`)
+			this.#logger.silly(`Set value "${name}":${stringifyVariableValue(value)}`)
 			this.#setValueInner(name, value)
 			return null
 		} else {
@@ -453,7 +450,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	/**
 	 * Helper for setting the value of a custom variable
 	 */
-	#setValueInner(name: string, value: CompanionVariableValue | undefined): void {
+	#setValueInner(name: string, value: VariableValue | undefined): void {
 		this.#variableValues.setVariableValues(CUSTOM_LABEL, [{ id: name, value: value }])
 
 		this.#persistCustomVariableValue(name, value)
@@ -499,7 +496,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	resetValueToDefault(name: string): void {
 		if (this.#custom_variables[name]) {
 			const value = this.#custom_variables[name].defaultValue
-			this.#logger.silly(`Set value "${name}":${value}`)
+			this.#logger.silly(`Set value "${name}":${stringifyVariableValue(value)}`)
 			this.#setValueInner(name, value)
 		}
 	}
@@ -510,8 +507,8 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	syncValueToDefault(name: string): void {
 		if (this.#custom_variables[name]) {
 			const value = this.#variableValues.getVariableValue(CUSTOM_LABEL, name)
-			this.#logger.silly(`Set default value "${name}":${value}`)
-			this.#custom_variables[name].defaultValue = value === undefined ? '' : value
+			this.#logger.silly(`Set default value "${name}":${stringifyVariableValue(value)}`)
+			this.#custom_variables[name].defaultValue = value
 
 			this.#emitUpdateOneVariable(name)
 		}
@@ -520,7 +517,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	/**
 	 * Set the default value of a custom variable
 	 */
-	setVariableDefaultValue(name: string, value: string): string | null {
+	setVariableDefaultValue(name: string, value: VariableValue): string | null {
 		if (!this.#custom_variables[name]) {
 			return 'Unknown name'
 		}
@@ -541,7 +538,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	/**
 	 * Update the persisted value of a variable, if required
 	 */
-	#persistCustomVariableValue(name: string, value: CompanionVariableValue | undefined): void {
+	#persistCustomVariableValue(name: string, value: VariableValue | undefined): void {
 		if (this.#custom_variables[name] && this.#custom_variables[name].persistCurrentValue) {
 			this.#custom_variables[name].defaultValue = value === undefined ? '' : value
 

@@ -1,5 +1,5 @@
 import type { languages, IRange } from 'monaco-editor'
-import type { DropdownChoiceInt } from '~/DropDownInputFancy.js'
+import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api.d.ts' // In theory importable with import type { Monaco } from '@monaco-editor/react'
 
 export const COMPANION_EXPRESSION_LANGUAGE_ID = 'companionExpression'
@@ -130,6 +130,26 @@ export const builtinFunctionCompletions: Array<{
 		detail: 'encode(string, encoding)',
 		documentation: 'Encodes a string to specified encoding',
 	},
+	{
+		name: 'encodeURI',
+		detail: 'encodeURI(string)',
+		documentation: 'Encodes a string as a valid Uniform Resource Identifier (URI)',
+	},
+	{
+		name: 'decodeURI',
+		detail: 'decodeURI(string)',
+		documentation: 'Gets the unencoded version of an encoded Uniform Resource Identifier (URI)',
+	},
+	{
+		name: 'encodeURIComponent',
+		detail: 'encodeURIComponent(string)',
+		documentation: 'Encodes a string as a valid component of a Uniform Resource Identifier (URI)',
+	},
+	{
+		name: 'decodeURIComponent',
+		detail: 'decodeURIComponent(string)',
+		documentation: 'Gets the unencoded version of an encoded component of a Uniform Resource Identifier (URI)',
+	},
 
 	// Bool operations
 	{ name: 'bool', detail: 'bool(value)', documentation: 'Converts a value to boolean' },
@@ -149,6 +169,12 @@ export const builtinFunctionCompletions: Array<{
 		name: 'getVariable',
 		detail: 'getVariable(label, name)',
 		documentation: 'Fetches the value of a Companion variable',
+	},
+	{
+		name: 'blink',
+		detail: 'blink(period_ms, ?fraction_on)',
+		documentation:
+			'A pulsing 0/1 value that cycles at the specified interval in milliseconds. The provided interval specifies how long each cycle should take. The second optional parameter specifies the portion of the time to spend in the on state.',
 	},
 
 	// Object/array operations

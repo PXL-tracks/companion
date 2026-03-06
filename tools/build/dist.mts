@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import yaml from 'yaml'
 import { determinePlatformInfo } from './util.mts'
+// @ts-expect-error Untyped webpack config
 import webpackConfig from '../../companion/webpack.config.js'
 import type { PackageJson } from 'type-fest'
 
@@ -131,10 +132,10 @@ await fs.writeFile(
 
 // Copy prebuilds
 const copyPrebuildsFromDependencies = [
-	'@julusian/jpeg-turbo',
 	'node-hid',
 	'@julusian/image-rs',
 	'@julusian/segfault-raub',
+	//
 ]
 for (const name of copyPrebuildsFromDependencies) {
 	await fs.mkdirp('dist/prebuilds')

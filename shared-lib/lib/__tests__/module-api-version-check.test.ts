@@ -5,8 +5,13 @@ import semver from 'semver'
 
 const require = createRequire(import.meta.url)
 const moduleBasePkg = require('@companion-module/base/package.json')
+const moduleBaseOldPkg = require('@companion-module/base-old/package.json')
 
 describe('isModuleApiVersionCompatible', () => {
+	test('check old installed lib', () => {
+		expect(isModuleApiVersionCompatible(moduleBaseOldPkg.version)).toBe(true)
+	})
+
 	test('check current installed lib', () => {
 		expect(isModuleApiVersionCompatible(moduleBasePkg.version)).toBe(true)
 	})
@@ -47,14 +52,15 @@ describe('isModuleApiVersionCompatible', () => {
 	test('check previous minor version', () => {
 		const version = semver.parse(moduleBasePkg.version)
 		expect(version).not.toBe(null)
-		version!.minor--
-		version!.prerelease = []
+		expect(version?.minor).toEqual(0) // hack: temporary disable until reaches 2.1.0
+		// version!.minor--
+		// version!.prerelease = []
 
-		const versionStr = version!.format()
-		expect(versionStr).toBeTruthy()
-		expect(versionStr).not.toBe(moduleBasePkg.version)
+		// const versionStr = version!.format()
+		// expect(versionStr).toBeTruthy()
+		// expect(versionStr).not.toBe(moduleBasePkg.version)
 
-		expect(isModuleApiVersionCompatible(versionStr)).toBe(true)
+		// expect(isModuleApiVersionCompatible(versionStr)).toBe(true)
 	})
 	test('check previous major version', () => {
 		const version = semver.parse(moduleBasePkg.version)
@@ -65,7 +71,7 @@ describe('isModuleApiVersionCompatible', () => {
 		expect(versionStr).toBeTruthy()
 		expect(versionStr).not.toBe(moduleBasePkg.version)
 
-		expect(isModuleApiVersionCompatible(versionStr)).toBe(false)
+		expect(isModuleApiVersionCompatible(versionStr)).toBe(true) // It is compatible for now
 	})
 
 	test('prerelease of next major version', () => {
@@ -98,5 +104,11 @@ describe('isModuleApiVersionCompatible', () => {
 	})
 	test('check 1.2.5 compatibility', () => {
 		expect(isModuleApiVersionCompatible('1.2.5')).toBe(true)
+	})
+	test('check 2.0.2 compatibility', () => {
+		expect(isModuleApiVersionCompatible('2.0.2')).toBe(true)
+	})
+	test('check 2.5.0 compatibility', () => {
+		expect(isModuleApiVersionCompatible('2.5.0')).toBe(false)
 	})
 })

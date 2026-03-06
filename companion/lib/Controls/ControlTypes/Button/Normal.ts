@@ -18,6 +18,7 @@ import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
 import type { ControlActionSetAndStepsManager } from '../../Entities/ControlActionSetAndStepsManager.js'
 import { GetButtonBitmapSize } from '../../../Resources/Util.js'
 import { parseVariablesInButtonStyle } from './Util.js'
+import type { JsonValue } from 'type-fest'
 
 /**
  * Class for the stepped button control.
@@ -64,7 +65,7 @@ export class ControlButtonNormal
 	/**
 	 * The variables referenced in the last draw. Whenever one of these changes, a redraw should be performed
 	 */
-	#last_draw_variables: ReadonlySet<string> | null = null
+	#lastDrawVariables: ReadonlySet<string> | null = null
 
 	/**
 	 * The base style without feedbacks applied
@@ -129,13 +130,7 @@ export class ControlButtonNormal
 	getDrawStyle(): DrawStyleButtonModel {
 		const style = this.entities.getUnparsedFeedbackStyle(this.#baseStyle)
 
-		this.#last_draw_variables = parseVariablesInButtonStyle(
-			this.logger,
-			this.controlId,
-			this.deps,
-			this.entities,
-			style
-		)
+		this.#lastDrawVariables = parseVariablesInButtonStyle(this.logger, this.controlId, this.deps, this.entities, style)
 
 		return {
 			...structuredClone(style),
@@ -188,26 +183,18 @@ export class ControlButtonNormal
 	 * Propagate variable changes
 	 * @param allChangedVariables - variables with changes
 	 */
-	onVariablesChanged(allChangedVariables: Set<string>): void {
-		this.entities.stepCheckExpressionOnVariablesChanged(allChangedVariables)
+	onVariablesChanged(allChangedVariables: ReadonlySet<string>): void {
+		if (!this.#lastDrawVariables) return
+		if (this.#lastDrawVariables.isDisjointFrom(allChangedVariables)) return
 
-		if (this.#last_draw_variables) {
-			for (const variable of allChangedVariables.values()) {
-				if (this.#last_draw_variables.has(variable)) {
-					this.logger.silly('variable changed in button ' + this.controlId)
-
-					this.triggerRedraw()
-					return
-				}
-			}
-		}
+		this.logger.silly('variable changed in button ' + this.controlId)
+		this.triggerRedraw()
 	}
 
 	/**
 	 * Update an option field of this control
 	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	optionsSetField(key: string, value: any): boolean {
+	optionsSetField(key: string, value: JsonValue): boolean {
 		const changed = super.optionsSetField(key, value)
 
 		if (key === 'stepProgression' || key === 'stepExpression') {

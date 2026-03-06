@@ -3,21 +3,21 @@ import { ControlButtonPageDown } from './ControlTypes/PageDown.js'
 import { ControlButtonPageNumber } from './ControlTypes/PageNumber.js'
 import { ControlButtonPageUp } from './ControlTypes/PageUp.js'
 import { CreateBankControlId, CreatePresetControlId, CreateTriggerControlId } from '@companion-app/shared/ControlId.js'
-import { ActionRunner } from './ActionRunner.js'
-import { ActionRecorder } from './ActionRecorder.js'
 import { ControlTrigger } from './ControlTypes/Triggers/Trigger.js'
 import { nanoid } from 'nanoid'
-import { TriggerEvents } from './TriggerEvents.js'
 import debounceFn from 'debounce-fn'
 import type { SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
 import type { TriggerCollection, TriggerModel } from '@companion-app/shared/Model/TriggerModel.js'
 import type { SomeControl } from './IControlFragments.js'
-import type { Registry } from '../Registry.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import { EventEmitter } from 'events'
-import type { ControlChangeEvents, ControlCommonEvents, ControlDependencies } from './ControlDependencies.js'
+import type {
+	ControlChangeEvents,
+	ControlCommonEvents,
+	ControlDependencies,
+	ControlExternalDependencies,
+} from './ControlDependencies.js'
 import LogController from '../Log/Controller.js'
-import type { DataStoreTableView } from '../Data/StoreBase.js'
 import { TriggerCollections } from './TriggerCollections.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import { createTriggersTrpcRouter } from './TriggersTrpcRouter.js'
@@ -30,7 +30,7 @@ import { createActionSetsTrpcRouter } from './ActionSetsTrpcRouter.js'
 import { createControlsTrpcRouter } from './ControlsTrpcRouter.js'
 import z from 'zod'
 import type { SomeControlModel, UIControlUpdate } from '@companion-app/shared/Model/Controls.js'
-import type { CompanionVariableValues } from '@companion-module/base'
+import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
 import type { VariablesAndExpressionParser } from '../Variables/VariablesAndExpressionParser.js'
 import { ControlExpressionVariable } from './ControlTypes/ExpressionVariable.js'
 import type {
@@ -41,6 +41,13 @@ import { ExpressionVariableCollections } from './ExpressionVariableCollections.j
 import { createExpressionVariableTrpcRouter } from './ExpressionVariableTrpcRouter.js'
 import { ExpressionVariableNameMap } from './ExpressionVariableNameMap.js'
 import { ControlButtonPreset } from './ControlTypes/Button/Preset.js'
+import type { NewFeedbackValue } from './Entities/Types.js'
+import { createStableObjectHash } from '@companion-app/shared/Util/Hash.js'
+import crypto from 'crypto'
+import { injectOverriddenLocalVariableValues } from '../Variables/Util.js'
+import type { ControlStore } from './ControlStore.js'
+import type { TriggerEvents } from './TriggerEvents.js'
+import type { DataDatabase } from '../Data/Database.js'
 
 /**
  * The class that manages the controls
@@ -60,38 +67,18 @@ import { ControlButtonPreset } from './ControlTypes/Button/Preset.js'
 export class ControlsController {
 	readonly #logger = LogController.createLogger('Controls/Controller')
 
-	readonly #registry: Pick<
-		Registry,
-		'db' | 'page' | 'surfaces' | 'internalModule' | 'instance' | 'variables' | 'userconfig'
-	>
+	readonly #deps: ControlExternalDependencies
 	readonly #controlEvents: EventEmitter<ControlCommonEvents>
 
 	/**
-	 * Actions runner
+	 * The control store (IControlStore implementation)
 	 */
-	readonly actionRunner: ActionRunner
-
-	/**
-	 * Actions recorder
-	 */
-	readonly actionRecorder: ActionRecorder
-
-	/**
-	 * The currently configured controls
-	 */
-	readonly #controls = new Map<string, SomeControl<any>>()
-
-	/**
-	 * Triggers events
-	 */
-	readonly triggers: TriggerEvents
+	readonly #store: ControlStore
 
 	/**
 	 * Active learning store
 	 */
 	readonly #activeLearningStore = new ActiveLearningStore()
-
-	readonly #dbTable: DataStoreTableView<Record<string, SomeControlModel>>
 
 	readonly #triggerCollections: TriggerCollections
 
@@ -104,31 +91,31 @@ export class ControlsController {
 
 	readonly #controlChangeEvents = new EventEmitter<ControlChangeEvents>()
 
-	constructor(registry: Registry, controlEvents: EventEmitter<ControlCommonEvents>) {
-		this.#registry = registry
+	constructor(
+		db: DataDatabase,
+		store: ControlStore,
+		controlEvents: EventEmitter<ControlCommonEvents>,
+		controlDeps: ControlExternalDependencies
+	) {
+		this.#store = store
+		this.#deps = controlDeps
 		this.#controlEvents = controlEvents
 
-		this.#dbTable = registry.db.getTableView('controls')
-
-		this.triggers = new TriggerEvents()
 		this.#triggerCollections = new TriggerCollections(
-			registry.db,
-			this.triggers,
+			db,
+			this.#store.triggerEvents,
 			(collectionIds) => this.#cleanUnknownTriggerCollectionIds(collectionIds),
 			(enabledCollectionIds) => this.#checkTriggerCollectionsEnabled(enabledCollectionIds)
 		)
 
-		this.#expressionVariableCollections = new ExpressionVariableCollections(registry.db, (validCollectionIds) =>
+		this.#expressionVariableCollections = new ExpressionVariableCollections(db, (validCollectionIds) =>
 			this.#cleanUnknownExpressionVariableCollectionIds(validCollectionIds)
 		)
-		this.#expressionVariableNamesMap = new ExpressionVariableNameMap(this.#registry.variables.values, this.#controls)
-
-		this.actionRunner = new ActionRunner(registry)
-		this.actionRecorder = new ActionRecorder(registry)
+		this.#expressionVariableNamesMap = new ExpressionVariableNameMap(this.#deps.variableValues, this.#store.controls)
 	}
 
 	#cleanUnknownTriggerCollectionIds(validCollectionIds: ReadonlySet<string>): void {
-		for (const control of this.#controls.values()) {
+		for (const control of this.#store.controls.values()) {
 			if (control instanceof ControlTrigger) {
 				control.checkCollectionIdIsValid(validCollectionIds)
 			}
@@ -136,7 +123,7 @@ export class ControlsController {
 	}
 
 	#checkTriggerCollectionsEnabled(enabledCollectionIds: ReadonlySet<string>): void {
-		for (const control of this.#controls.values()) {
+		for (const control of this.#store.controls.values()) {
 			if (control instanceof ControlTrigger) {
 				control.setCollectionEnabled(
 					!control.options.collectionId || enabledCollectionIds.has(control.options.collectionId)
@@ -146,7 +133,7 @@ export class ControlsController {
 	}
 
 	#cleanUnknownExpressionVariableCollectionIds(validCollectionIds: ReadonlySet<string>): void {
-		for (const control of this.#controls.values()) {
+		for (const control of this.#store.controls.values()) {
 			if (control instanceof ControlExpressionVariable) {
 				control.checkCollectionIdIsValid(validCollectionIds)
 			}
@@ -154,27 +141,37 @@ export class ControlsController {
 	}
 
 	/**
-	 * Abort all delayed actions across all controls
+	 * Delegation accessors for consumers that only have a ControlsController reference.
+	 * The authoritative implementations live on the ControlStore.
 	 */
+	get triggerEvents(): TriggerEvents {
+		return this.#store.triggerEvents
+	}
+
+	getControl(controlId: string): SomeControl<any> | undefined {
+		return this.#store.getControl(controlId)
+	}
+
+	getAllControls(): ReadonlyMap<string, SomeControl<any>> {
+		return this.#store.getAllControls()
+	}
+
+	pressControl(controlId: string, pressed: boolean, surfaceId: string | undefined, force?: boolean): boolean {
+		return this.#store.pressControl(controlId, pressed, surfaceId, force)
+	}
+
+	rotateControl(controlId: string, rightward: boolean, surfaceId: string | undefined): boolean {
+		return this.#store.rotateControl(controlId, rightward, surfaceId)
+	}
+
 	abortAllDelayedActions(exceptSignal: AbortSignal | null): void {
-		for (const control of this.#controls.values()) {
-			if (control.supportsActions) {
-				control.abortDelayedActions(false, exceptSignal)
-			}
-		}
+		this.#store.abortAllDelayedActions(exceptSignal)
 	}
 
 	#createControlDependencies(): ControlDependencies {
-		// This has to be done lazily for now, as the registry is not fully populated at the time of construction
 		return {
-			dbTable: this.#dbTable,
-			surfaces: this.#registry.surfaces,
-			pageStore: this.#registry.page.store,
-			internalModule: this.#registry.internalModule,
-			instance: this.#registry.instance,
-			variables: this.#registry.variables,
-			userconfig: this.#registry.userconfig,
-			actionRunner: this.actionRunner,
+			...this.#deps,
+			dbTable: this.#store.dbTable,
 			events: this.#controlEvents,
 			changeEvents: this.#controlChangeEvents,
 		}
@@ -185,7 +182,7 @@ export class ControlsController {
 	 */
 	checkAllStatus = debounceFn(
 		(): void => {
-			for (const control of this.#controls.values()) {
+			for (const control of this.#store.controls.values()) {
 				if (typeof control.checkButtonStatus === 'function') {
 					control.checkButtonStatus()
 				}
@@ -199,17 +196,6 @@ export class ControlsController {
 		}
 	)
 
-	/**
-	 * Remove any tracked state for a connection
-	 */
-	clearConnectionState(connectionId: string): void {
-		for (const control of this.#controls.values()) {
-			if (control.supportsEntities) {
-				control.entities.clearConnectionState(connectionId)
-			}
-		}
-	}
-
 	createTrpcRouter() {
 		const self = this
 		return router({
@@ -217,36 +203,33 @@ export class ControlsController {
 			triggers: createTriggersTrpcRouter(
 				this.#controlChangeEvents,
 				this.#triggerCollections,
-				this.#dbTable,
-				this.#controls,
-				this.triggers,
+				this.#store,
 				this.#createControlDependencies()
 			),
 			expressionVariables: createExpressionVariableTrpcRouter(
 				this.#controlChangeEvents,
 				this.#expressionVariableCollections,
-				this.#dbTable,
-				this.#controls,
+				this.#store,
 				this.#expressionVariableNamesMap,
 				this.#createControlDependencies()
 			),
-			events: createEventsTrpcRouter(this.#controls, this.#registry.instance.definitions),
+			events: createEventsTrpcRouter(this.#store.controls, this.#deps.instance.definitions),
 			entities: createEntitiesTrpcRouter(
-				this.#controls,
-				this.#registry.instance.definitions,
+				this.#store.controls,
+				this.#deps.instance.definitions,
 				this.#activeLearningStore
 			),
-			actionSets: createActionSetsTrpcRouter(this.#controls),
-			steps: createStepsTrpcRouter(this.#controls),
+			actionSets: createActionSetsTrpcRouter(this.#store.controls),
+			steps: createStepsTrpcRouter(this.#store.controls),
 
 			...createControlsTrpcRouter(
 				this.#logger,
-				this.#controls,
-				this.#registry.page,
-				this.#registry.instance.definitions,
+				this.#store.controls,
+				this.#deps.pageStore,
+				this.#deps.instance.definitions,
 				this.#controlEvents,
 				this,
-				this.#registry.instance.processManager
+				this.#deps.instance.processManager
 			),
 
 			watchControl: publicProcedure
@@ -306,7 +289,7 @@ export class ControlsController {
 			if (controlObj2?.type === 'trigger' || (controlType === 'trigger' && !controlObj2)) {
 				const trigger = new ControlTrigger(
 					this.#createControlDependencies(),
-					this.triggers,
+					this.triggerEvents,
 					controlId,
 					controlObj2,
 					isImport
@@ -339,21 +322,22 @@ export class ControlsController {
 	}
 
 	/**
-	 * Update all controls to forget a connection
+	 * Get all of the trigger controls
 	 */
-	forgetConnection(connectionId: string): void {
-		for (const control of this.#controls.values()) {
-			if (control.supportsEntities) {
-				control.entities.forgetConnection(connectionId)
+	getAllButtons(): Array<ControlButtonNormal | ControlButtonPageDown | ControlButtonPageNumber | ControlButtonPageUp> {
+		const buttons: Array<ControlButtonNormal | ControlButtonPageDown | ControlButtonPageNumber | ControlButtonPageUp> =
+			[]
+		for (const control of this.#store.controls.values()) {
+			if (
+				control instanceof ControlButtonNormal ||
+				control instanceof ControlButtonPageDown ||
+				control instanceof ControlButtonPageNumber ||
+				control instanceof ControlButtonPageUp
+			) {
+				buttons.push(control)
 			}
 		}
-	}
-
-	/**
-	 * Get all of the populated controls
-	 */
-	getAllControls(): ReadonlyMap<string, SomeControl<any>> {
-		return this.#controls // TODO - readonly?
+		return buttons
 	}
 
 	/**
@@ -361,7 +345,7 @@ export class ControlsController {
 	 */
 	getAllTriggers(): ControlTrigger[] {
 		const triggers: ControlTrigger[] = []
-		for (const control of this.#controls.values()) {
+		for (const control of this.#store.controls.values()) {
 			if (control instanceof ControlTrigger) {
 				triggers.push(control)
 			}
@@ -374,7 +358,7 @@ export class ControlsController {
 	 */
 	getAllExpressionVariables(): ControlExpressionVariable[] {
 		const variables: ControlExpressionVariable[] = []
-		for (const control of this.#controls.values()) {
+		for (const control of this.#store.controls.values()) {
 			if (control instanceof ControlExpressionVariable) {
 				variables.push(control)
 			}
@@ -392,19 +376,11 @@ export class ControlsController {
 	}
 
 	/**
-	 * Get a control if it has been populated
-	 */
-	getControl(controlId: string): SomeControl<any> | undefined {
-		if (!controlId) return undefined
-		return this.#controls.get(controlId)
-	}
-
-	/**
 	 * Get a Trigger control if it exists
 	 */
 	getTrigger(triggerId: string): ControlTrigger | undefined {
 		const controlId = CreateTriggerControlId(triggerId)
-		const control = this.#controls.get(controlId)
+		const control = this.#store.controls.get(controlId)
 		if (!control || !(control instanceof ControlTrigger)) return undefined
 		return control
 	}
@@ -419,7 +395,7 @@ export class ControlsController {
 		}
 
 		// Delete old control at the coordinate
-		const oldControlId = this.#registry.page.store.getControlIdAt(location)
+		const oldControlId = this.#deps.pageStore.getControlIdAt(location)
 		if (oldControlId) {
 			this.deleteControl(oldControlId)
 		}
@@ -427,9 +403,9 @@ export class ControlsController {
 		const newControlId = forceControlId || CreateBankControlId(nanoid())
 		const newControl = this.createClassForControl(newControlId, 'button', definition, true)
 		if (newControl) {
-			this.#controls.set(newControlId, newControl)
+			this.#store.controls.set(newControlId, newControl)
 
-			this.#registry.page.setControlIdAt(location, newControlId)
+			this.#controlEvents.emit('controlPlacedAt', location, newControlId)
 
 			newControl.triggerRedraw()
 
@@ -451,11 +427,11 @@ export class ControlsController {
 			return false
 		}
 
-		if (this.#controls.has(controlId)) throw new Error(`Trigger ${controlId} already exists`)
+		if (this.#store.controls.has(controlId)) throw new Error(`Trigger ${controlId} already exists`)
 
 		const newControl = this.createClassForControl(controlId, 'trigger', definition, true)
 		if (newControl) {
-			this.#controls.set(controlId, newControl)
+			this.#store.controls.set(controlId, newControl)
 
 			// Ensure it is stored to the db
 			newControl.commitChange()
@@ -478,11 +454,11 @@ export class ControlsController {
 			return undefined
 		}
 
-		if (this.#controls.has(controlId)) throw new Error(`ExpressionVariable ${controlId} already exists`)
+		if (this.#store.controls.has(controlId)) throw new Error(`ExpressionVariable ${controlId} already exists`)
 
 		const newControl = this.createClassForControl(controlId, 'expression-variable', definition, true)
 		if (newControl) {
-			this.#controls.set(controlId, newControl)
+			this.#store.controls.set(controlId, newControl)
 
 			// Add to names map
 			const expressionVariableControl = newControl as ControlExpressionVariable
@@ -502,11 +478,11 @@ export class ControlsController {
 	 */
 	init(): void {
 		// Init all the control classes
-		const config = this.#dbTable.all()
+		const config = this.#store.dbTable.all()
 		for (const [controlId, controlObj] of Object.entries(config)) {
 			if (controlObj && controlObj.type) {
 				const inst = this.createClassForControl(controlId, 'all', controlObj, false)
-				if (inst) this.#controls.set(controlId, inst)
+				if (inst) this.#store.controls.set(controlId, inst)
 			}
 		}
 
@@ -522,66 +498,18 @@ export class ControlsController {
 	/**
 	 * Propagate variable changes to the controls
 	 */
-	onVariablesChanged(allChangedVariablesSet: Set<string>, fromControlId: string | null): void {
+	onVariablesChanged(allChangedVariablesSet: ReadonlySet<string>, fromControlId: string | null): void {
 		// Inform triggers of the change
-		this.triggers.emit('variables_changed', allChangedVariablesSet, fromControlId)
+		this.#store.triggerEvents.emit('variables_changed', allChangedVariablesSet, fromControlId)
 
 		if (allChangedVariablesSet.size > 0) {
-			for (const control of this.#controls.values()) {
+			for (const control of this.#store.controls.values()) {
 				// If the changes are local variables and from another control, ignore them
 				if (fromControlId && fromControlId !== control.controlId) continue
 
-				if (control.supportsStyle) {
-					control.onVariablesChanged(allChangedVariablesSet)
-				}
+				if (control.supportsEntities) control.entities.onVariablesChanged(allChangedVariablesSet)
+				control.onVariablesChanged(allChangedVariablesSet)
 			}
-		}
-	}
-
-	/**
-	 * Execute a press of a control
-	 * @param controlId Id of the control
-	 * @param pressed Whether the control is pressed
-	 * @param surfaceId The surface that initiated this press
-	 * @param force Trigger actions even if already in the state
-	 */
-	pressControl(controlId: string, pressed: boolean, surfaceId: string | undefined, force?: boolean): boolean {
-		const control = this.getControl(controlId)
-		if (control) {
-			this.triggers.emit('control_press', controlId, pressed, surfaceId)
-
-			control.pressControl(pressed, surfaceId, force)
-
-			return true
-		}
-
-		return false
-	}
-
-	/**
-	 * Execute rotation of a control
-	 * @param controlId Id of the control
-	 * @param rightward Whether the control is rotated to the right
-	 * @param surfaceId The surface that initiated this rotate
-	 */
-	rotateControl(controlId: string, rightward: boolean, surfaceId: string | undefined): boolean {
-		const control = this.getControl(controlId)
-		if (control && control.supportsActionSets) {
-			control.rotateControl(rightward, surfaceId)
-			return true
-		}
-
-		return false
-	}
-
-	/**
-	 * Rename a connection for variables used in the controls
-	 * @param labelFrom - the old connection short name
-	 * @param labelTo - the new connection short name
-	 */
-	renameVariables(labelFrom: string, labelTo: string): void {
-		for (const control of this.#controls.values()) {
-			control.renameVariables(labelFrom, labelTo)
 		}
 	}
 
@@ -592,14 +520,13 @@ export class ControlsController {
 		const control = this.getControl(controlId)
 		if (control) {
 			control.destroy()
-			this.#controls.delete(controlId)
 
-			this.#dbTable.delete(controlId)
+			this.#store.deleteControl(controlId)
 		}
 
-		const location = this.#registry.page.store.getLocationOfControlId(controlId)
+		const location = this.#deps.pageStore.getLocationOfControlId(controlId)
 		if (location) {
-			this.#registry.page.setControlIdAt(location, null)
+			this.#controlEvents.emit('controlRemovedFrom', location)
 
 			// Notify interested parties
 			this.#controlEvents.emit('updateButtonState', location, false, undefined)
@@ -607,6 +534,9 @@ export class ControlsController {
 			// Force a redraw
 			this.#controlEvents.emit('invalidateLocationRender', location)
 		}
+
+		// Notify that control count has changed
+		this.#controlEvents.emit('controlCountChanged')
 	}
 
 	exportTriggerCollections(): TriggerCollection[] {
@@ -634,20 +564,23 @@ export class ControlsController {
 	 * @access public
 	 */
 	createButtonControl(location: ControlLocation, newType: string): string | null {
-		if (!this.#registry.page.store.isPageValid(location.pageNumber)) return null
+		if (!this.#deps.pageStore.isPageValid(location.pageNumber)) return null
 
 		const controlId = CreateBankControlId(nanoid())
 		const newControl = this.createClassForControl(controlId, 'button', newType, false)
 		if (!newControl) return null
 
-		this.#controls.set(controlId, newControl)
-		this.#registry.page.setControlIdAt(location, controlId)
+		this.#store.controls.set(controlId, newControl)
+		this.#controlEvents.emit('controlPlacedAt', location, controlId)
 
 		// Notify interested parties
 		this.#controlEvents.emit('updateButtonState', location, false, undefined)
 
 		// Force a redraw
 		this.#controlEvents.emit('invalidateLocationRender', location)
+
+		// Notify that control count has changed
+		this.#controlEvents.emit('controlCountChanged')
 
 		return controlId
 	}
@@ -663,19 +596,44 @@ export class ControlsController {
 	 * Find or create a preset temporary control
 	 * These are non-persistent controls that are used to perform the reactive drawing of a preset.
 	 */
-	getOrCreatePresetControl(connectionId: string, presetId: string): ControlButtonPreset | null {
-		// Check for an existing control that should be reused
-		const controlId = CreatePresetControlId(connectionId, presetId)
-		const control = this.#controls.get(controlId)
-		if (control) return control as ControlButtonPreset
-
-		const presetModel = this.#registry.instance.definitions.convertPresetToPreviewControlModel(connectionId, presetId)
+	getOrCreatePresetControl(
+		connectionId: string,
+		presetId: string,
+		variableValues: VariableValues | null
+	): ControlButtonPreset | null {
+		let presetModel = this.#deps.instance.definitions.convertPresetToPreviewControlModel(connectionId, presetId)
 		if (!presetModel) return null
 
-		const newControl = new ControlButtonPreset(this.#createControlDependencies(), connectionId, presetId, presetModel)
-		if (!newControl) return null
+		// Interleave the values into the preset
+		let usedVariableValues: VariableValues | undefined
+		if (variableValues) {
+			presetModel = {
+				...presetModel,
+				localVariables: structuredClone(presetModel.localVariables),
+			}
 
-		this.#controls.set(controlId, newControl)
+			usedVariableValues = injectOverriddenLocalVariableValues(presetModel.localVariables, variableValues)
+		}
+
+		const variablesHash =
+			usedVariableValues && Object.keys(usedVariableValues).length > 0
+				? crypto.createHash('sha256').update(createStableObjectHash(usedVariableValues)).digest('hex')
+				: 'default'
+
+		// Check for an existing control that should be reused
+		const controlId = CreatePresetControlId(connectionId, presetId, variablesHash)
+		const control = this.#store.controls.get(controlId)
+		if (control) return control as ControlButtonPreset
+
+		const newControl = new ControlButtonPreset(
+			this.#createControlDependencies(),
+			connectionId,
+			presetId,
+			variablesHash,
+			presetModel
+		)
+
+		this.#store.controls.set(controlId, newControl)
 
 		// Force a redraw
 		this.#controlEvents.emit('invalidateControlRender', controlId)
@@ -689,34 +647,15 @@ export class ControlsController {
 	 * @param result - object containing new values for the feedbacks that have changed
 	 */
 	updateFeedbackValues(connectionId: string, result: NewFeedbackValue[]): void {
-		if (result.length === 0) return
-
-		const values: Record<string, Record<string, any>> = {}
-
-		for (const item of result) {
-			if (!values[item.controlId]) values[item.controlId] = {}
-
-			values[item.controlId][item.id] = item.value
-		}
-
-		// Pass values to controls
-		for (const [controlId, newValues] of Object.entries(values)) {
-			const control = this.getControl(controlId)
-			if (control && control.supportsEntities) {
-				control.entities.updateFeedbackValues(connectionId, newValues)
-			}
-		}
+		this.#store.updateFeedbackValues(connectionId, result)
 	}
 
 	/**
 	 * Prune any items on controls which belong to an unknown connectionId
 	 * @access public
 	 */
-	verifyConnectionIds(): void {
-		const knownConnectionIds = new Set(this.#registry.instance.getAllConnectionIds())
-		knownConnectionIds.add('internal')
-
-		for (const control of this.#controls.values()) {
+	verifyConnectionIds(knownConnectionIds: ReadonlySet<string>): void {
+		for (const control of this.#store.controls.values()) {
 			if (!control.supportsEntities) continue
 			control.entities.verifyConnectionIds(knownConnectionIds)
 		}
@@ -724,23 +663,8 @@ export class ControlsController {
 
 	createVariablesAndExpressionParser(
 		controlId: string | null | undefined,
-		overrideVariableValues: CompanionVariableValues | null
+		overrideVariableValues: VariableValues | null
 	): VariablesAndExpressionParser {
-		const control = controlId && this.getControl(controlId)
-
-		const controlLocation = control ? this.#registry.page.store.getLocationOfControlId(control.controlId) : null
-		const variableEntities = control && control.supportsEntities ? control.entities.getLocalVariableEntities() : []
-
-		return this.#registry.variables.values.createVariablesAndExpressionParser(
-			controlLocation,
-			variableEntities,
-			overrideVariableValues
-		)
+		return this.#store.createVariablesAndExpressionParser(controlId, overrideVariableValues)
 	}
-}
-
-export interface NewFeedbackValue {
-	id: string
-	controlId: string
-	value: any
 }

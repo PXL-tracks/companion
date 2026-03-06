@@ -9,7 +9,7 @@
  * this program.
  */
 
-import { LRUCache } from 'lru-cache'
+import QuickLRU from 'quick-lru'
 import { GlobalFonts } from '@napi-rs/canvas'
 import { GraphicsRenderer } from './Renderer.js'
 import { ParseControlId, xyToOldBankIndex } from '@companion-app/shared/ControlId.js'
@@ -17,17 +17,18 @@ import type { ImageResult } from './ImageResult.js'
 import { ImageWriteQueue } from '../Resources/ImageWriteQueue.js'
 import workerPool from 'workerpool'
 import { isPackaged } from '../Resources/Util.js'
-import { fileURLToPath } from 'url'
 import path from 'path'
+import os from 'os'
 import debounceFn from 'debounce-fn'
-import type { CompanionButtonStyleProps, CompanionVariableValues } from '@companion-module/base'
+import type { CompanionButtonStyleProps } from '@companion-module/base'
+import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
 import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import { EventEmitter } from 'events'
 import LogController from '../Log/Controller.js'
 import type { DataUserConfig } from '../Data/UserConfig.js'
 import type { IPageStore } from '../Page/Store.js'
-import type { ControlsController } from '../Controls/Controller.js'
+import type { IControlStore } from '../Controls/IControlStore.js'
 import type { VariablesValues, VariableValueEntry } from '../Variables/Values.js'
 import { GraphicsThreadMethods } from './ThreadMethods.js'
 
@@ -36,6 +37,13 @@ const WORKER_TERMINATION_WINDOW_MS = 60_000 // 1 minute
 const WORKER_TERMINATION_THRESHOLD = 30 // High limit, to catch extreme cases
 
 const DEBUG_DISABLE_RENDER_THREADING = process.env.DEBUG_DISABLE_RENDER_THREADING === '1'
+
+// LRU cache sizing parameters
+const RENDER_CACHE_AVG_ACTIVE_STATES = 1.5 // Average number of frequently-used states per button
+const RENDER_CACHE_PER_BUTTON_RATIO = 0.1 // Proportion of states to keep cached
+const RENDER_CACHE_MIN_SIZE = 100
+const RENDER_CACHE_MAX_SIZE = 1000
+const RENDER_CACHE_RESIZE_DEBOUNCE_MS = 500
 
 export interface GraphicsOptions {
 	page_direction_flipped: boolean
@@ -49,7 +57,7 @@ export interface GraphicsOptions {
 function generateFontUrl(fontFilename: string): string {
 	const fontPath = isPackaged() ? 'assets/Fonts' : '../../../assets/Fonts'
 	// we could simplify by using import.meta.dirname
-	return fileURLToPath(new URL(path.join(fontPath, fontFilename), import.meta.url))
+	return path.join(import.meta.dirname, fontPath, fontFilename)
 }
 
 interface GraphicsControllerEvents {
@@ -71,7 +79,7 @@ type RenderArguments = RenderArgumentsButton | RenderArgumentsPreset
 export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	readonly #logger = LogController.createLogger('Graphics/Controller')
 
-	readonly #controlsController: ControlsController
+	readonly controlsStore: IControlStore
 	readonly #pageStore: IPageStore
 	readonly #userConfigController: DataUserConfig
 	readonly #variableValuesController: VariablesValues
@@ -89,26 +97,22 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	/**
 	 * Last recently used cache for button renders
 	 */
-	readonly #renderLRUCache = new LRUCache<string, ImageResult>({ max: 100 })
+	readonly #renderLRUCache: QuickLRU<string, ImageResult>
 
 	readonly #renderQueue: ImageWriteQueue<string, [RenderArguments, boolean]>
 
-	#pool = workerPool.pool(
-		// note: import.meta.url can be replaced with import.meta.directory as long as we use node v22.16 and later
-		fileURLToPath(new URL(isPackaged() ? './RenderThread.js' : './Thread.js', import.meta.url)),
-		{
-			minWorkers: 2,
-			maxWorkers: 6,
-			workerType: 'thread',
-			onCreateWorker: () => {
-				this.#logger.info('Render worker created')
-				return undefined
-			},
-			onTerminateWorker: () => {
-				this.#logger.info('Render worker terminated')
-			},
-		}
-	)
+	#pool = workerPool.pool(path.join(import.meta.dirname, isPackaged() ? './RenderThread.js' : './Thread.js'), {
+		minWorkers: 2,
+		maxWorkers: Math.max(4, Math.floor(os.cpus().length * 0.67)), // Use 2/3 of available CPUs, at least 4
+		workerType: 'thread',
+		onCreateWorker: () => {
+			this.#logger.info('Render worker created')
+			return undefined
+		},
+		onTerminateWorker: () => {
+			this.#logger.info('Render worker terminated')
+		},
+	})
 
 	// Track recent worker terminations (timestamps in ms)
 	#workerTerminationTimestamps: number[] = []
@@ -150,12 +154,7 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		})
 	}
 
-	/**
-	 * Generated pincode bitmaps
-	 */
-	#pincodeBuffersCache: Omit<PincodeBitmaps, 'code'> | null = null
-
-	#pendingVariables: CompanionVariableValues | null = null
+	#pendingVariables: VariableValues | null = null
 	/**
 	 * Debounce updating the variables, as buttons are often drawn in floods
 	 */
@@ -180,18 +179,40 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		}
 	)
 
+	/**
+	 * Debounced handler for resizing the render LRU cache when control count changes
+	 */
+	#debounceResizeRenderCache = debounceFn(
+		() => {
+			const newSize = this.#computeRenderCacheSize()
+			const currentSize = this.#renderLRUCache.maxSize
+			if (newSize !== currentSize) {
+				this.#renderLRUCache.resize(newSize)
+				this.#logger.debug(`Render LRU cache resized from ${currentSize} to ${newSize}`)
+			}
+		},
+		{
+			wait: RENDER_CACHE_RESIZE_DEBOUNCE_MS,
+		}
+	)
+
 	constructor(
-		controlsController: ControlsController,
+		controlsStore: IControlStore,
 		pageStore: IPageStore,
 		userConfigController: DataUserConfig,
 		variableValuesController: VariablesValues
 	) {
 		super()
 
-		this.#controlsController = controlsController
+		this.controlsStore = controlsStore
 		this.#pageStore = pageStore
 		this.#userConfigController = userConfigController
 		this.#variableValuesController = variableValuesController
+
+		// Initialize render LRU cache with dynamic size based on control count
+		const initialCacheSize = this.#computeRenderCacheSize()
+		this.#renderLRUCache = new QuickLRU({ maxSize: initialCacheSize })
+		this.#logger.debug(`Render LRU cache initialized with size ${initialCacheSize}`)
 
 		this.setMaxListeners(0)
 
@@ -206,7 +227,7 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 			async (_id: string, args: RenderArguments, skipInvalidation: boolean) => {
 				try {
 					if (args.type === 'preset') {
-						const control = this.#controlsController.getControl(args.controlId)
+						const control = this.controlsStore.getControl(args.controlId)
 						const buttonStyle = control?.getDrawStyle() ?? undefined
 
 						let render: ImageResult | undefined
@@ -224,6 +245,7 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 									CRASHED_WORKER_RETRY_COUNT
 								)
 								render = GraphicsRenderer.wrapDrawButtonImage(buffer, width, height, dataUrl, draw_style, buttonStyle)
+								this.#renderLRUCache.set(key, render)
 							}
 						} else {
 							render = GraphicsRenderer.drawBlank(this.#drawOptions, null)
@@ -245,13 +267,13 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 						location.row >= gridSize.minRow
 
 					const controlId = this.#pageStore.getControlIdAt(location)
-					const control = controlId ? this.#controlsController.getControl(controlId) : undefined
+					const control = controlId ? this.controlsStore.getControl(controlId) : undefined
 					const buttonStyle = control?.getDrawStyle() ?? undefined
 
 					if (location && locationIsInBounds) {
 						// Update the internal b_text_1_4 variable
 						setImmediate(() => {
-							const values: CompanionVariableValues = {}
+							const values: VariableValues = {}
 
 							// Update text, if it is present
 							values[`b_text_${location.pageNumber}_${location.row}_${location.column}`] =
@@ -298,6 +320,7 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 								CRASHED_WORKER_RETRY_COUNT
 							)
 							render = GraphicsRenderer.wrapDrawButtonImage(buffer, width, height, dataUrl, draw_style, buttonStyle)
+							this.#renderLRUCache.set(key, render)
 						}
 					} else {
 						render = GraphicsRenderer.drawBlank(this.#drawOptions, location)
@@ -384,8 +407,8 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	 * Redraw the page controls on every page
 	 */
 	invalidatePageControls(): void {
-		const allControls = this.#controlsController.getAllControls()
-		for (const control of Object.values(allControls)) {
+		const allControls = this.controlsStore.getAllControls()
+		for (const control of allControls.values()) {
 			if (control.type === 'pageup' || control.type === 'pagedown') {
 				this.invalidateControl(control.controlId)
 			}
@@ -530,24 +553,6 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	}
 
 	/**
-	 * Generate pincode images
-	 */
-	getImagesForPincode(pincode: string): PincodeBitmaps {
-		if (!this.#pincodeBuffersCache) {
-			this.#pincodeBuffersCache = {}
-
-			for (let i = 0; i < 10; i++) {
-				this.#pincodeBuffersCache[i] = GraphicsRenderer.drawPincodeNumber(i)
-			}
-		}
-
-		return {
-			...this.#pincodeBuffersCache,
-			code: GraphicsRenderer.drawPincodeEntry(pincode),
-		}
-	}
-
-	/**
 	 * Get the cached render of a button
 	 */
 	getCachedRender(location: ControlLocation): ImageResult | undefined {
@@ -562,6 +567,23 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		if (render) return render
 
 		return GraphicsRenderer.drawBlank(this.#drawOptions, location)
+	}
+
+	/**
+	 * Compute the target size for the render LRU cache based on control count
+	 */
+	#computeRenderCacheSize(): number {
+		const allControls = this.controlsStore.getAllControls()
+		const totalControls = allControls.size
+		const computed = Math.ceil(totalControls * RENDER_CACHE_AVG_ACTIVE_STATES * RENDER_CACHE_PER_BUTTON_RATIO)
+		return Math.max(RENDER_CACHE_MIN_SIZE, Math.min(computed, RENDER_CACHE_MAX_SIZE))
+	}
+
+	/**
+	 * Trigger a debounced resize of the render LRU cache (called when controls are added/removed)
+	 */
+	triggerCacheResize(): void {
+		this.#debounceResizeRenderCache()
 	}
 
 	/**
@@ -582,9 +604,4 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	}> {
 		return this.#poolExec('drawButtonImage', [this.#drawOptions, drawStyle, location, pagename], remainingAttempts)
 	}
-}
-
-type PincodeBitmaps = {
-	code: ImageResult
-	[index: number]: ImageResult
 }

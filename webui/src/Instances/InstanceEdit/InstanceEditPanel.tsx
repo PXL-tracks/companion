@@ -27,12 +27,15 @@ interface InstanceGenericEditPanelProps<TConfig extends ClientInstanceConfigBase
 	instanceInfo: TConfig
 	service: InstanceEditPanelService<TConfig>
 	changeModuleDangerMessage: React.ReactNode
+	cannotEnableReason?: string | null
 }
 
 export const InstanceGenericEditPanel = observer(function InstanceGenericEditPanel<
 	TConfig extends ClientInstanceConfigBase,
->({ instanceInfo, service, changeModuleDangerMessage }: InstanceGenericEditPanelProps<TConfig>) {
-	const { modules } = useContext(RootAppStoreContext)
+>({ instanceInfo, service, changeModuleDangerMessage, cannotEnableReason }: InstanceGenericEditPanelProps<TConfig>) {
+	const { modules, instanceStatuses } = useContext(RootAppStoreContext)
+
+	const isInstanceRunning = instanceStatuses.getStatus(instanceInfo.id)?.level ?? false
 
 	const panelStore = useMemo(() => new InstanceEditPanelStore(service, instanceInfo), [service, instanceInfo])
 
@@ -48,6 +51,7 @@ export const InstanceGenericEditPanel = observer(function InstanceGenericEditPan
 		panelStore.instanceInfo.enabled &&
 		instanceVersionExists &&
 		service.isCollectionEnabled(panelStore.instanceInfo.collectionId)
+	const instanceIsCrashed = instanceShouldBeRunning && isInstanceRunning === 'Crashed'
 
 	const isSaving = observable.box(false)
 	const [saveError, setSaveError] = useState<string | null>(null)
@@ -102,7 +106,7 @@ export const InstanceGenericEditPanel = observer(function InstanceGenericEditPan
 						)}
 
 						<InstanceLabelInputField panelStore={panelStore} />
-						<InstanceEnabledInputField panelStore={panelStore} />
+						<InstanceEnabledInputField panelStore={panelStore} cannotEnableReason={cannotEnableReason} />
 
 						<InstanceModuleVersionInputField
 							panelStore={panelStore}
@@ -123,7 +127,7 @@ export const InstanceGenericEditPanel = observer(function InstanceGenericEditPan
 							</CCol>
 						)}
 
-						{instanceShouldBeRunning && (panelStore.isLoading || panelStore.loadError) && (
+						{instanceShouldBeRunning && !instanceIsCrashed && (panelStore.isLoading || panelStore.loadError) && (
 							<CCol xs={12}>
 								<LoadingRetryOrError
 									error={panelStore.loadError}
@@ -134,7 +138,17 @@ export const InstanceGenericEditPanel = observer(function InstanceGenericEditPan
 							</CCol>
 						)}
 
-						{instanceShouldBeRunning && !panelStore.isLoading && <InstanceConfigFields panelStore={panelStore} />}
+						{instanceShouldBeRunning && !panelStore.isLoading && !instanceIsCrashed && (
+							<InstanceConfigFields panelStore={panelStore} />
+						)}
+
+						{instanceShouldBeRunning && instanceIsCrashed && (
+							<NonIdealState icon={faCircleExclamation}>
+								{capitalize(panelStore.service.moduleTypeDisplayName)} is not running.
+								<br />
+								Please check the logs for more information.
+							</NonIdealState>
+						)}
 					</div>
 				</div>
 
@@ -214,12 +228,32 @@ const InstanceModuleVersionInputField = observer(function InstanceModuleVersionI
 
 const InstanceEnabledInputField = observer(function InstanceEnabledInputField<
 	TConfig extends ClientInstanceConfigBase,
->({ panelStore }: { panelStore: InstanceEditPanelStore<TConfig> }): React.JSX.Element {
+>({
+	panelStore,
+	cannotEnableReason,
+}: {
+	panelStore: InstanceEditPanelStore<TConfig>
+	cannotEnableReason?: string | null
+}): React.JSX.Element {
+	const isEnabled = panelStore.enabled
+	const canToggle = !cannotEnableReason || isEnabled
+
 	return (
 		<>
 			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Enabled</CFormLabel>
 			<CCol className={`fieldtype-textinput`} sm={8}>
-				<CFormSwitch checked={panelStore.enabled} onChange={(e) => panelStore.setEnabled(e.target.checked)} size="xl" />
+				<CFormSwitch
+					checked={isEnabled}
+					onChange={(e) => panelStore.setEnabled(e.target.checked)}
+					size="xl"
+					disabled={!canToggle}
+					title={cannotEnableReason || undefined}
+				/>
+				{cannotEnableReason && !isEnabled && (
+					<div className="text-danger mt-1" style={{ fontSize: '0.875em' }}>
+						{cannotEnableReason}
+					</div>
+				)}
 			</CCol>
 		</>
 	)

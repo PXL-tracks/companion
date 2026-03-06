@@ -12,7 +12,7 @@ import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
 import { MissingVersionsWarning } from '../../Instances/MissingVersionsWarning.js'
 import type { ClientConnectionConfig, ConnectionCollection } from '@companion-app/shared/Model/Connections.js'
 import { useConnectionCollectionsApi } from './ConnectionListApi.js'
-import { useInstanceStatuses } from '../../Instances/useInstanceStatuses.js'
+
 import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
 import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable.js'
 import { ConnectionListContextProvider, useConnectionListContext } from './ConnectionListContext.js'
@@ -22,6 +22,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import { MyErrorBoundary } from '~/Resources/Error.js'
 import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 
 export interface VisibleConnectionsState {
 	disabled: boolean
@@ -35,9 +36,7 @@ interface ConnectionsListProps {
 }
 
 export const ConnectionsList = observer(function ConnectionsList({ selectedConnectionId }: ConnectionsListProps) {
-	const { connections } = useContext(RootAppStoreContext)
-
-	const connectionStatuses = useInstanceStatuses()
+	const { connections, instanceStatuses } = useContext(RootAppStoreContext)
 
 	const navigate = useNavigate({ from: '/connections' })
 	const doConfigureConnection = useCallback(
@@ -72,12 +71,12 @@ export const ConnectionsList = observer(function ConnectionsList({ selectedConne
 		const allConnections: ClientConnectionConfigWithId[] = []
 
 		for (const [connectionId, connection] of connections.connections) {
-			const status = connectionStatuses.get(connectionId)
+			const status = instanceStatuses.getStatus(connectionId)
 			allConnections.push({ ...connection, id: connectionId, status })
 		}
 
 		return allConnections
-	}, [connections.connections, connectionStatuses])
+	}, [connections.connections, instanceStatuses])
 
 	const ConnectionsItemRow = useCallback(
 		(item: ClientConnectionConfigWithId) =>
@@ -100,20 +99,18 @@ export const ConnectionsList = observer(function ConnectionsList({ selectedConne
 				<GenericConfirmModal ref={confirmModalRef} />
 				<ConnectionVariablesModal ref={variablesModalRef} />
 
-				<div className="connection-group-actions mb-2">
-					<CButtonGroup>
-						<CButton
-							color="primary"
-							size="sm"
-							className="d-xl-none"
-							onClick={() => void navigate({ to: '/connections/add' })}
-						>
-							<FontAwesomeIcon icon={faPlug} className="me-1" />
-							Add Connection
-						</CButton>
-						<CreateCollectionButton />
-					</CButtonGroup>
-				</div>
+				<CButtonGroup className="connection-group-actions mb-2">
+					<CButton
+						color="primary"
+						size="sm"
+						className="d-xl-none"
+						onClick={() => void navigate({ to: '/connections/add' })}
+					>
+						<FontAwesomeIcon icon={faPlug} className="me-1" />
+						Add Connection
+					</CButton>
+					<CreateCollectionButton />
+				</CButtonGroup>
 			</div>
 
 			<div className="connections-list-table-container scrollable-content">
@@ -187,8 +184,8 @@ function ConnectionGroupHeaderContent({ collection }: { collection: ConnectionCo
 		(e: React.ChangeEvent<HTMLInputElement>) => {
 			const enabled = e.target.checked
 
-			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e: any) => {
-				console.error('Failed to set collection enabled state', e)
+			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e) => {
+				console.error('Failed to set collection enabled state', stringifyError(e))
 			})
 		},
 		[setEnabledMutation, collection.id]

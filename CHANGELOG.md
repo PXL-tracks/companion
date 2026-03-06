@@ -1,5 +1,136 @@
 # Bitfocus Companion
 
+## Companion v4.2.5 - Release Notes
+
+- support stream deck + xl
+- improve import resiliency/performance for large configs
+- ux issues in the expression editor
+- better respect collections when ordering connections
+- incorrect urls into module docs
+- suppress some unnecessary errors
+- allow connection configs to use multiline input fields
+
+## Companion v4.2.4 - Release Notes
+
+### 🐞 BUG FIXES
+
+- support corsair galleon k100 sd
+- add SENTRY_DISABLE env var to disable sentry integration
+- fix: unable to clear local variable name
+- fix: reduce monaco suggest-details line-spacing (#3948)
+- fix: improve presentation of missing values in dropdowns
+- fix: surface table stretching
+- fix: 'internal: User Value' feedback field order refinement
+- fix: added TMPDIR to preserved env vars list (#3929)
+- fix: attempt to suppress mirabox stream dock error flood
+- fix: disable sentry http session tracking
+
+## Companion v4.2.3 - Release Notes
+
+### 🐞 BUG FIXES
+
+- local variables not invalidating module entities #3896
+- expression arrayLastIndexOf not working if no offset provided #3873
+- drag and drop previews showing more than the dragged element #3883
+- avoid invalid values being sent to a surface when referencing old jog/tbar variables (#3872)
+- improve scrolling behaviour of surfaces page
+- variables dropdown showing behind heading in settings
+- make connected network docks stick below the active surfaces in the list
+- respect DISABLE_IPV6 env var to disable admin interface binding to ipv6
+- respect collections when sorting connections for add entity dropdowns and variables page #3899
+- only report usage stats for published modules
+
+## Companion v4.2.2 - Release Notes
+
+### 🐞 BUG FIXES
+
+- add keepalive interval for client websocket
+- improve emulator behaviour when websocket closes
+- revert: limit environment variables exposed to internal actions
+- only search labels in dropdown fields
+- unable to edit color inputs as hex
+- bluetooth support for blackmagic controllers
+- open help links in a new windows
+- isVisibleExpression clone error
+- loupedeck ct bad key map
+- sidebar dom issues
+- better suppress some common/excessive errors
+
+## Companion v4.2.1 - Release Notes
+
+### 🐞 BUG FIXES
+
+- crash at launch on linux arm64 #3826
+- docs search urls incorrect #3824
+- expression variables not updating in ui #3825
+- emulator not showing pincode entry #3827
+- toggling never lock for surface not applying
+- support ajaz akp153 #3840
+- preserve additional environment variables for modules
+- limit environment variables exposed to internal actions
+- preserve sqlite wal when upgrading config #3835
+
+## Companion v4.2.0 - Release Notes
+
+### IMPORTANT CHANGES
+
+- Support for different surfaces is now using a module system, similar to connections. This means that as new Stream Deck models are released, you can enable support by updating just the module and not the whole of Companion.
+
+### 📣 CORE FEATURES AND IMPROVEMENTS
+
+- Surfaces are now implemented through a module system, similar to connections.
+- add internal variable for bind_port
+- add URI encode/decode expression functions #3771
+- improve drag and drop previews
+- add help icon header bar
+- preview local variable value next to editor
+- Ability to execute trigger at random intervals
+- Option to enable/disable individual surfaces
+  - This allows Companion to run alongside other software with each using just some of the connected stream decks
+- Support expressions in any action/feedback field
+  - This requires modules to opt into supporting it for now
+- Various styling refinement
+- Add `blink()` function to expressions. This can be used in feedbacks to provide customisable blinking behaviour
+- Extended time formatting options
+- Update app icon on macos
+- Add support for `SENTRY_DISABLE` environment variable, to disable sentry reporting
+- Rework various panels/lists to group connections by collections instead of as a flat list
+
+### 🐞 BUG FIXES
+
+- Improve presentation of missing values in dropdowns
+- improve text drawing performance (#3902)
+
+## Companion v4.2.4 - Release Notes
+
+### 🐞 BUG FIXES
+
+- support corsair galleon k100 sd
+- add SENTRY_DISABLE env var to disable sentry integration
+- fix: unable to clear local variable name
+- fix: reduce monaco suggest-details line-spacing (#3948)
+- fix: improve presentation of missing values in dropdowns
+- fix: surface table stretching
+- fix: 'internal: User Value' feedback field order refinement
+- fix: added TMPDIR to preserved env vars list (#3929)
+- fix: attempt to suppress mirabox stream dock error flood
+- fix: disable sentry http session tracking
+
+## Companion v4.2.3 - Release Notes
+
+### 🐞 BUG FIXES
+
+- local variables not invalidating module entities #3896
+- expression arrayLastIndexOf not working if no offset provided #3873
+- drag and drop previews showing more than the dragged element #3883
+- avoid invalid values being sent to a surface when referencing old jog/tbar variables (#3872)
+- improve scrolling behaviour of surfaces page
+- variables dropdown showing behind heading in settings
+- make connected network docks stick below the active surfaces in the list
+- respect DISABLE_IPV6 env var to disable admin interface binding to ipv6
+- respect collections when sorting connections for add entity dropdowns and variables page #3899
+- only report usage stats for published modules
+
 ## Companion v4.2.2 - Release Notes
 
 ### 🐞 BUG FIXES

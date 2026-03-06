@@ -9,11 +9,14 @@ import React, {
 	useState,
 	type CSSProperties,
 	type ReactNode,
+	type MouseEventHandler,
+	type ReactElement,
 } from 'react'
 import { CSidebarNav, CNavItem, CNavLink, CSidebarBrand, CSidebarHeader, CBackdrop } from '@coreui/react'
 import {
 	type IconDefinition,
 	faFileImport,
+	faCheck,
 	faCog,
 	faClipboardList,
 	faCloud,
@@ -23,19 +26,24 @@ import {
 	faDollarSign,
 	faGamepad,
 	faExternalLinkSquare,
-	faQuestionCircle,
-	faBug,
-	faUsers,
-	faComments,
+	faHeadset,
 	faSquareCaretRight,
 	faPuzzlePiece,
 	faInfo,
 	faStar,
 	faHatWizard,
 	faSquareRootVariable,
+	faArrowsUpToLine,
+	faArrowsDownToLine,
 } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { ConnectionsTabNotifyIcon, SurfacesTabNotifyIcon } from '~/Surfaces/TabNotifyIcon.js'
+import { faGithub, faFacebook, faSlack } from '@fortawesome/free-brands-svg-icons'
+import {
+	SurfacesConfiguredTabNotifyIcon,
+	ConnectionsTabNotifyIcon,
+	SurfacesTabNotifyIcon,
+	SurfacesInstancesTabNotifyIcon,
+} from '~/Surfaces/TabNotifyIcon.js'
 import { createPortal } from 'react-dom'
 import classNames from 'classnames'
 import { useLocalStorage, useMediaQuery } from 'usehooks-ts'
@@ -43,11 +51,18 @@ import { Link } from '@tanstack/react-router'
 import { Transition } from 'react-transition-group'
 import { observer } from 'mobx-react-lite'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { useSortedConnectionsThatHaveVariables } from '~/Stores/Util.js'
+import { useSortedConnectionsThatHaveVariables, type ClientConnectionConfigWithId } from '~/Stores/Util.js'
 import { makeAbsolutePath } from '~/Resources/util.js'
 import { trpc } from '~/Resources/TRPC'
 import { useQuery } from '@tanstack/react-query'
+import type { ConnectionCollection } from '@companion-app/shared/Model/Connections.js'
+import { ContextMenu } from '~/Components/ContextMenu'
+import { useContextMenuState, MenuSeparator } from '~/Components/useContextMenuProps'
+import { type MenuItemData } from '~/Components/ActionMenu'
 
+function foldableIcon(foldable: boolean): ReactElement {
+	return <FontAwesomeIcon icon={faArrowsDownToLine} style={{ rotate: foldable ? '-90deg' : '90deg' }} />
+}
 export interface SidebarStateProps {
 	showToggle: boolean
 	clickToggle: () => void
@@ -129,7 +144,7 @@ function SidebarMenuItem(item: SidebarMenuItemProps) {
 		item.onClick()
 	}
 	return (
-		<CNavItem idx={item.path ?? item.name}>
+		<CNavItem idx={item.path ?? item.name} className={item.subheading ? 'nav-two-line' : undefined}>
 			{item.path ? (
 				<CNavLink to={item.path} target={item.target} as={Link} onClick={onClick2} title={item.title}>
 					<SidebarMenuItemLabel {...item} />
@@ -144,12 +159,19 @@ function SidebarMenuItem(item: SidebarMenuItemProps) {
 }
 
 interface SidebarMenuItemGroupProps extends SidebarMenuItemProps {
-	children?: Array<React.ReactElement | null>
+	children?: React.ReactNode
+	groupVisible: boolean
+	groupSetVisible: (val: boolean) => void
 }
 
 function SidebarMenuItemGroup(item: SidebarMenuItemGroupProps) {
 	return (
-		<CNavGroup toggler={<SidebarMenuItemLabel {...item} />} to={item.path}>
+		<CNavGroup
+			toggler={<SidebarMenuItemLabel {...item} />}
+			to={item.path}
+			visible={item.groupVisible}
+			setVisible={item.groupSetVisible}
+		>
 			{item.children}
 		</CNavGroup>
 	)
@@ -157,14 +179,103 @@ function SidebarMenuItemGroup(item: SidebarMenuItemGroupProps) {
 
 export const MySidebar = memo(function MySidebar() {
 	const { whatsNewModal, showWizard } = useContext(RootAppStoreContext)
+	// unfold-able, not un-foldable! Unfortunately "unfoldable" is CoreUI terminology, so probably shouldn't be changed.
 	const [unfoldable, setUnfoldable] = useLocalStorage('sidebar-foldable', false)
+	const sidebarState = useSidebarState()
+
+	const [hideHelp, setHideHelp] = useLocalStorage('hide_sidebar_help', false)
+	const showHelpButtons = !hideHelp
+	const [accordionMode, setAccordionMode] = useLocalStorage('sidebar_auto_collapse', false)
+
+	const [surfacesGroupVis, setSurfacesGroupVis] = useState(false)
+	const [variablesGroupVis, setVariablesGroupVis] = useState(false)
+	const [settingsGroupVis, setSettingsGroupVis] = useState(false)
+	const [ibuttonsGroupVis, setIbuttonsGroupVis] = useState(false)
+	const [supportGroupVis, setSupportGroupVis] = useState(false)
 
 	const doToggle = useCallback(() => setUnfoldable((val) => !val), [setUnfoldable])
 
 	const whatsNewOpen = useCallback(() => whatsNewModal.current?.show(), [whatsNewModal])
 
+	const expandAllGroups = useCallback(
+		(expand: boolean) => {
+			const setGroupFns = [
+				setSurfacesGroupVis,
+				setVariablesGroupVis,
+				setSettingsGroupVis,
+				setIbuttonsGroupVis,
+				setSupportGroupVis,
+			]
+			for (const setVis of setGroupFns) setVis(expand)
+		},
+		[setSurfacesGroupVis, setVariablesGroupVis, setSettingsGroupVis, setIbuttonsGroupVis, setSupportGroupVis]
+	)
+
+	const smartExpand = useCallback(
+		(setter: (val: boolean) => void, expand: boolean) => {
+			if (accordionMode && expand) expandAllGroups(false)
+			setter(expand)
+		},
+		[accordionMode, expandAllGroups]
+	)
+
+	// note: the context menu has to be defined inside the component to use the internal states as well as `whatsNewOpen` which is a useCallback
+	const contextMenuItems: MenuItemData[] = useMemo(
+		() => [
+			{
+				id: 'collapse-all',
+				label: 'Collapse All Groups',
+				to: () => expandAllGroups(false),
+				tooltip: 'Collapse all top-level groups in the sidebar.',
+			},
+			{
+				// not sure this is useful
+				id: 'expand-all',
+				label: 'Expand All Groups',
+				to: () => {
+					expandAllGroups(true)
+					setAccordionMode(false)
+				},
+				tooltip: 'Expand all top-level groups in the sidebar. (Tip: this works best with the sidebar-help hidden.)',
+			},
+			{
+				id: 'accordion-mode',
+				label: 'Auto-Collapse Groups',
+				icon: accordionMode ? faCheck : undefined,
+				to: () => setAccordionMode(!accordionMode),
+				tooltip:
+					'Allow only one top-level group to be expanded at a time: opening one top-level group closes all others.',
+			},
+			MenuSeparator,
+			...(sidebarState.showToggle
+				? []
+				: [
+						{
+							id: 'hide-sidebar',
+							label: unfoldable ? 'Fixed-width Sidebar' : 'Folding Sidebar',
+							icon: () => foldableIcon(unfoldable),
+							to: doToggle,
+							tooltip:
+								'Toggle between a static, fixed-width sidebar and dynamic-width sidebar that expands when the mouse is over it.',
+						},
+					]),
+			{
+				id: 'hide-help',
+				label: hideHelp ? 'Show Sidebar Help' : 'Hide Sidebar Help',
+				icon: hideHelp ? faArrowsUpToLine : faArrowsDownToLine,
+				to: () => setHideHelp(!hideHelp),
+				tooltip: 'Free up some space: the help items are available from the help menu in the top-right corner.',
+			},
+		],
+		[unfoldable, doToggle, hideHelp, expandAllGroups, accordionMode, setHideHelp, setAccordionMode, sidebarState]
+	)
+
+	// we need the following primarily to provide the onContextMenu callback, which resides in the parent, not the component.
+	const contextState = useContextMenuState(contextMenuItems)
+
 	return (
-		<CSidebar unfoldable={unfoldable}>
+		<CSidebar unfoldable={unfoldable} onContextMenu={contextState.onContextMenu}>
+			<ContextMenu {...contextState} />
 			<CSidebarHeader className="brand">
 				<CSidebarBrand>
 					<div className="sidebar-brand-full">
@@ -185,19 +296,49 @@ export const MySidebar = memo(function MySidebar() {
 					path="/connections"
 				/>
 				<SidebarMenuItem name="Buttons" icon={faTh} path="/buttons" />
-				<SidebarMenuItemGroup name="Surfaces" icon={faGamepad} notifications={SurfacesTabNotifyIcon} path="/surfaces">
-					<SidebarMenuItem name="Configured" icon={null} path="/surfaces/configured" />
+				<SidebarMenuItemGroup
+					name="Surfaces"
+					icon={faGamepad}
+					notifications={SurfacesTabNotifyIcon}
+					path="/surfaces"
+					groupVisible={surfacesGroupVis}
+					groupSetVisible={(expand) => smartExpand(setSurfacesGroupVis, expand)}
+				>
+					<SidebarMenuItem
+						name="Configured"
+						icon={null}
+						notifications={SurfacesConfiguredTabNotifyIcon}
+						path="/surfaces/configured"
+					/>
+					<SidebarMenuItem
+						name="Integrations"
+						notifications={SurfacesInstancesTabNotifyIcon}
+						icon={null}
+						path="/surfaces/integrations"
+					/>
 					<SidebarMenuItem name="Remote" icon={null} path="/surfaces/remote" />
 				</SidebarMenuItemGroup>
 				<SidebarMenuItem name="Triggers" icon={faClock} path="/triggers" />
-				<SidebarMenuItemGroup name="Variables" icon={faDollarSign} path="/variables">
+				<SidebarMenuItemGroup
+					name="Variables"
+					icon={faDollarSign}
+					path="/variables"
+					groupVisible={variablesGroupVis}
+					groupSetVisible={(expand) => smartExpand(setVariablesGroupVis, expand)}
+				>
 					<SidebarMenuItem name="Custom Variables" icon={faDollarSign} path="/variables/custom" />
 					<SidebarMenuItem name="Expression Variables" icon={faSquareRootVariable} path="/variables/expression" />
 					<SidebarMenuItem name="Internal" icon={null} path="/variables/connection/internal" />
 					<SidebarVariablesGroups />
 				</SidebarMenuItemGroup>
 				<SidebarMenuItem name="Modules" icon={faPuzzlePiece} path="/modules" />
-				<SidebarMenuItemGroup name="Settings" icon={faCog} path="/settings">
+				<SidebarMenuItemGroup
+					name="Settings"
+					icon={faCog}
+					path="/settings"
+					groupVisible={settingsGroupVis}
+					groupSetVisible={(expand) => smartExpand(setSettingsGroupVis, expand)}
+				>
 					<SidebarMenuItem name="Configuration Wizard" icon={faHatWizard} onClick={showWizard} />
 					<SidebarMenuItem name="General" icon={null} path="/settings/general" />
 					<SidebarMenuItem name="Buttons" icon={null} path="/settings/buttons" />
@@ -211,7 +352,12 @@ export const MySidebar = memo(function MySidebar() {
 				{window.localStorage.getItem('show_companion_cloud') === '1' && (
 					<SidebarMenuItem name="Cloud" icon={faCloud} path="/cloud" />
 				)}
-				<SidebarMenuItemGroup name="Interactive Buttons" icon={faSquareCaretRight}>
+				<SidebarMenuItemGroup
+					name="Interactive Buttons"
+					icon={faSquareCaretRight}
+					groupVisible={ibuttonsGroupVis}
+					groupSetVisible={(expand) => smartExpand(setIbuttonsGroupVis, expand)}
+				>
 					<SidebarMenuItem name="Emulator" icon={null} path="/emulator" target="_blank" />
 					<SidebarMenuItem name="Web buttons" icon={null} path="/tablet" target="_blank" />
 				</SidebarMenuItemGroup>
@@ -219,16 +365,47 @@ export const MySidebar = memo(function MySidebar() {
 			<div className="sidebar-bottom-shadow-container">
 				<div className="sidebar-bottom-shadow" />
 			</div>
-			<CSidebarNav className="nav-secondary border-top">
-				<SidebarMenuItem name="What's New" icon={faStar} onClick={whatsNewOpen} />
-				<SidebarMenuItem name="User Guide" icon={faInfo} path="/user-guide/" target="_blank" />
-				<SidebarMenuItemGroup name="Help & Community" icon={faQuestionCircle}>
-					<SidebarMenuItem name="Bugs & Features" icon={faBug} path="https://bfoc.us/fiobkz0yqs" target="_blank" />
-					<SidebarMenuItem name="Community Forum" icon={faUsers} path="https://bfoc.us/qjk0reeqmy" target="_blank" />
-					<SidebarMenuItem name="Slack Chat" icon={faComments} path="https://bfoc.us/ke7e9dqgaz" target="_blank" />
-					<SidebarMenuItem name="Donate" icon={faDollarSign} path="https://bfoc.us/ccfbf8wm2x" target="_blank" />
-				</SidebarMenuItemGroup>
-			</CSidebarNav>
+			{showHelpButtons && (
+				<CSidebarNav className="nav-secondary border-top">
+					<SidebarMenuItem name="What's New" icon={faStar} onClick={whatsNewOpen} />
+					<SidebarMenuItem name="User Guide" icon={faInfo} path="/user-guide/" target="_blank" />
+					<SidebarMenuItemGroup
+						name="Support"
+						icon={faHeadset}
+						groupVisible={supportGroupVis}
+						groupSetVisible={(expand) => smartExpand(setSupportGroupVis, expand)}
+					>
+						<SidebarMenuItem
+							name="Report an Issue"
+							title="Report bugs or request features on GitHub."
+							icon={faGithub}
+							path="https://l.companion.free/q/QZbI6mdNd"
+							target="_blank"
+						/>
+						<SidebarMenuItem
+							name="Community Forum"
+							title="Share your experience or ask questions to your Companions."
+							icon={faFacebook}
+							path="https://l.companion.free/q/6pc9ciJR5"
+							target="_blank"
+						/>
+						<SidebarMenuItem
+							name="Slack Chat"
+							title="Discuss technical issues on Slack."
+							icon={faSlack}
+							path="https://l.companion.free/q/OWxbBnDKG"
+							target="_blank"
+						/>
+						<SidebarMenuItem
+							name="Sponsor"
+							title="Contribute funds to Bitfocus Companion."
+							icon={faDollarSign}
+							path="https://l.companion.free/q/6PtdAvZab"
+							target="_blank"
+						/>
+					</SidebarMenuItemGroup>
+				</CSidebarNav>
+			)}
 			<CSidebarHeader className="border-top d-none d-lg-flex sidebar-header-toggler">
 				<SidebarTogglerAndVersion doToggle={doToggle} />
 			</CSidebarHeader>
@@ -237,22 +414,87 @@ export const MySidebar = memo(function MySidebar() {
 })
 
 const SidebarVariablesGroups = observer(function SidebarVariablesGroups() {
-	const { modules } = useContext(RootAppStoreContext)
+	const { modules, connections } = useContext(RootAppStoreContext)
 
 	const sortedConnections = useSortedConnectionsThatHaveVariables()
 
+	// Group connections
+	const { rootConnections, connectionsByCollection } = useMemo(() => {
+		const root: ClientConnectionConfigWithId[] = []
+		const byCol = new Map<string, ClientConnectionConfigWithId[]>()
+
+		for (const conn of sortedConnections) {
+			if (conn.collectionId) {
+				const existing = byCol.get(conn.collectionId)
+				if (existing) existing.push(conn)
+				else byCol.set(conn.collectionId, [conn])
+			} else {
+				root.push(conn)
+			}
+		}
+		return { rootConnections: root, connectionsByCollection: byCol }
+	}, [sortedConnections])
+
+	const renderConnection = (connectionInfo: ClientConnectionConfigWithId) => (
+		<SidebarMenuItem
+			key={connectionInfo.id}
+			name={connectionInfo.label}
+			subheading={modules.getModuleFriendlyName(connectionInfo.moduleType, connectionInfo.moduleId)}
+			icon={null}
+			path={`/variables/connection/${connectionInfo.label}`}
+		/>
+	)
+
+	// Recursive render
+	const renderCollection = (collection: ConnectionCollection): React.ReactNode => {
+		const childConnections = connectionsByCollection.get(collection.id)
+
+		const childCollectionsRendered = (collection.children || [])
+			.slice()
+			.sort((a, b) => a.sortOrder - b.sortOrder)
+			.map((c) => renderCollection(c))
+			.filter((c): c is NonNullable<typeof c> => !!c) // Filter nulls
+
+		const hasChildren = (childConnections && childConnections.length > 0) || childCollectionsRendered.length > 0
+
+		if (!hasChildren) return null
+
+		return (
+			<SidebarMenuItemSubGroup key={collection.id} name={collection.label} icon={null} path={undefined}>
+				{childCollectionsRendered}
+				{childConnections?.map(renderConnection)}
+			</SidebarMenuItemSubGroup>
+		)
+	}
+
 	return (
 		<>
-			{sortedConnections.map((connectionInfo) => (
-				<SidebarMenuItem
-					key={connectionInfo.id}
-					name={connectionInfo.label}
-					subheading={modules.getModuleFriendlyName(connectionInfo.moduleType, connectionInfo.moduleId)}
-					icon={null}
-					path={`/variables/connection/${connectionInfo.label}`}
-				/>
-			))}
+			{connections.rootCollections().map((c) => renderCollection(c))}
+			{rootConnections.map(renderConnection)}
 		</>
+	)
+})
+
+interface SidebarMenuItemSubGroupProps extends SidebarMenuItemProps {
+	children?: React.ReactNode
+	// groupVisible: boolean
+	// groupSetVisible: (val: boolean) => void
+}
+
+const SidebarMenuItemSubGroup = observer(function SidebarMenuItemSubGroup(props: SidebarMenuItemSubGroupProps) {
+	// for the moment these won't be controlled by the context menu, which seems more appropriate anyway.
+	const [visible, setVisible] = useState(true)
+
+	return (
+		<SidebarMenuItemGroup
+			name={props.name}
+			icon={props.icon}
+			path={props.path}
+			groupVisible={visible}
+			groupSetVisible={setVisible}
+		>
+			{props.children}
+		</SidebarMenuItemGroup>
 	)
 })
 
@@ -303,8 +545,9 @@ interface CSidebarProps {
 	 * Expand narrowed sidebar on hover.
 	 */
 	unfoldable?: boolean
+	onContextMenu?: MouseEventHandler<HTMLDivElement>
 }
-function CSidebar({ children, unfoldable }: React.PropsWithChildren<CSidebarProps>) {
+function CSidebar({ children, unfoldable, onContextMenu }: React.PropsWithChildren<CSidebarProps>) {
 	const sidebarRef = useRef<HTMLDivElement>(null)
 
 	const [visibleMobile, setVisibleMobile] = useState<boolean>(false)
@@ -328,14 +571,15 @@ function CSidebar({ children, unfoldable }: React.PropsWithChildren<CSidebarProp
 	}, [sidebarState.showToggle])
 
 	const handleOnClick = useCallback(
-		(event: Event) => {
-			const target = event.target as HTMLAnchorElement
-			if (
-				target &&
-				target.classList.contains('nav-link') &&
-				!target.classList.contains('nav-group-toggle') &&
-				sidebarState.showToggle
-			) {
+		(event: MouseEvent) => {
+			const target = event.target
+			if (!(target instanceof Element) || event.button === 2) return // leave context menu alone (note button# is OS-independent)
+
+			// If the user clicked on the text, it's not a nav-link so the original code failed to close the navbar
+			// Instead we search up the DOM for a nav-link.
+			const navLink = target.closest('.nav-link')
+			const navGroupToggle = navLink?.closest('.nav-group-toggle')
+			if (navLink && !navGroupToggle && sidebarState.showToggle) {
 				setVisibleMobile(false)
 			}
 		},
@@ -385,11 +629,12 @@ function CSidebar({ children, unfoldable }: React.PropsWithChildren<CSidebarProp
 					// [`sidebar-${placement}`]: placement,
 					// [`sidebar-${position}`]: position,
 					// [`sidebar-${size}`]: size,
-					'sidebar-narrow-unfoldable': unfoldable,
+					'sidebar-narrow-unfoldable': unfoldable, // // unfold-able. This is a CoreUI class so can't be renamed.
 					show: sidebarState.showToggle && visibleMobile,
 					// hide: visibleDesktop === false && !sidebarState.showToggle && !overlaid,
 				})}
 				ref={sidebarRef}
+				onContextMenu={onContextMenu}
 			>
 				{children}
 			</div>
@@ -421,7 +666,8 @@ interface CNavGroupProps {
 	/**
 	 * Show nav group items.
 	 */
-	visible?: boolean
+	visible: boolean
+	setVisible: (val: boolean) => void
 }
 
 /*
@@ -434,16 +680,18 @@ function CNavGroup({
 	compact,
 	toggler,
 	visible,
+	setVisible,
 	...rest
 }: React.PropsWithChildren<CNavGroupProps>) {
 	const [height, setHeight] = useState<number | string>()
 	const navItemsRef = useRef<HTMLUListElement>(null)
 
-	const [_visible, setVisible] = useState(Boolean(visible))
+	//const [_visible, setVisible] = useState(Boolean(visible))
 
 	const handleTogglerOnCLick = (event: React.MouseEvent<HTMLElement>) => {
 		event.preventDefault()
-		setVisible(!_visible)
+		// but don't stop propagation, or it will prevent context-menus
+		setVisible(!visible)
 	}
 
 	const style: CSSProperties = {
@@ -482,20 +730,13 @@ function CNavGroup({
 	}
 
 	return (
-		<li className={classNames('nav-group', { show: _visible }, className)} {...rest}>
+		<li className={classNames('nav-group', { show: visible }, className)} {...rest}>
 			{to ? (
 				<div
 					className="nav-link nav-group-toggle nav-group-toggle-link"
 					onClick={(event) => handleTogglerOnCLick(event)}
 				>
-					<Link
-						to={to}
-						className="nav-link"
-						onClick={(e) => {
-							e.stopPropagation()
-							setVisible(!_visible)
-						}}
-					>
+					<Link to={to} className="nav-link">
 						{toggler}
 					</Link>
 				</div>
@@ -509,7 +750,7 @@ function CNavGroup({
 			)}
 
 			<Transition
-				in={_visible}
+				in={visible}
 				nodeRef={navItemsRef}
 				onEntering={onEntering}
 				onEntered={onEntered}
