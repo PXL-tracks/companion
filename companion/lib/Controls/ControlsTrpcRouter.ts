@@ -10,8 +10,8 @@ import { nanoid } from 'nanoid'
 import type { Logger } from '../Log/Controller.js'
 import type { ControlCommonEvents } from './ControlDependencies.js'
 import type EventEmitter from 'node:events'
-import { JsonValueSchema } from '@companion-app/shared/Model/Options.js'
-import { EntityModelType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import { JsonValueSchema, type ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import { EntityModelType, type ActionEntityModel, type FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
 import type { InstanceProcessManager } from '../Instance/ProcessManager.js'
 
@@ -386,15 +386,15 @@ export function createControlsTrpcRouter(
 						continue
 					}
 					
-					const feedbackEntity = {
-						type: EntityModelType.Feedback,
+					const feedbackEntity: FeedbackEntityModel = {
+						type: EntityModelType.Feedback as const,
 						id: nanoid(),
 						connectionId: query.connectionId,
 						definitionId: query.feedbackId,
-						options: query.options || {},
+						options: (query.options || {}) as ExpressionableOptionsObject,
 						disabled: false,
 						upgradeIndex: undefined,
-						isInverted: false,
+						isInverted: { value: false, isExpression: false },
 					}
 					
 					try {
