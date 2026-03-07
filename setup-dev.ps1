@@ -17,44 +17,58 @@ $CompanionData = Join-Path $ScriptDir "companion-data"
 $NodeRuntimeCache = Join-Path $ScriptDir ".cache\node-runtime"
 $AppDataConfig = "$env:APPDATA\companion-nodejs\Config\v4.2"
 
-# Step 1: Check node-runtime cache
+# Step 1: Check node-runtime cache (read versions from assets/nodejs-versions.json)
 Write-Host "`n[1/4] Checking node-runtime cache..." -ForegroundColor Yellow
 if (-not (Test-Path $NodeRuntimeCache)) {
     Write-Host "  Creating .cache/node-runtime directory..." -ForegroundColor Gray
     New-Item -ItemType Directory -Path $NodeRuntimeCache -Force | Out-Null
 }
 
-$node18 = Join-Path $NodeRuntimeCache "win32-x64-18.20.8"
-$node22 = Join-Path $NodeRuntimeCache "win32-x64-22.21.1"
+$versionsFile = Join-Path $ScriptDir "assets\nodejs-versions.json"
+if (-not (Test-Path $versionsFile)) {
+    Write-Host "  ERROR: assets/nodejs-versions.json not found!" -ForegroundColor Red
+    exit 1
+}
+$versions = Get-Content $versionsFile | ConvertFrom-Json
+$node18Version = $versions.node18
+$node22Version = $versions.node22
+Write-Host "  Required: Node 18 = $node18Version, Node 22 = $node22Version" -ForegroundColor Gray
 
-if (-not (Test-Path "$node18\node.exe") -or -not (Test-Path "$node22\node.exe")) {
+$arch = "win32-x64"
+$node18Dir = Join-Path $NodeRuntimeCache "$arch-$node18Version"
+$node22Dir = Join-Path $NodeRuntimeCache "$arch-$node22Version"
+
+function Download-NodeRuntime($version, $destDir) {
+    $dlArch = "win-x64"
+    $url = "https://nodejs.org/dist/v$version/node-v$version-$dlArch.zip"
+    $zipPath = Join-Path $env:TEMP "node-$version.zip"
+    Write-Host "  Downloading Node.js $version from $url" -ForegroundColor Gray
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $wc = New-Object System.Net.WebClient
+    $wc.DownloadFile($url, $zipPath)
+    $fileSize = (Get-Item $zipPath).Length
+    Write-Host "  Downloaded $fileSize bytes" -ForegroundColor Gray
+    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+    $extractedDir = Join-Path $env:TEMP "node-v$version-$dlArch"
+    if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
+    Move-Item -Path $extractedDir -Destination $destDir -Force
+    Remove-Item $zipPath -Force
+}
+
+if (-not (Test-Path "$node18Dir\node.exe") -or -not (Test-Path "$node22Dir\node.exe")) {
     Write-Host "  Node runtimes missing! Downloading..." -ForegroundColor Red
 
-    # Download Node 18
-    if (-not (Test-Path "$node18\node.exe")) {
-        Write-Host "  Downloading Node.js 18.20.8..." -ForegroundColor Gray
-        $node18Url = "https://nodejs.org/dist/v18.20.8/node-v18.20.8-win-x64.zip"
-        $node18Zip = Join-Path $env:TEMP "node18.zip"
-        Invoke-WebRequest -Uri $node18Url -OutFile $node18Zip
-        Expand-Archive -Path $node18Zip -DestinationPath $env:TEMP -Force
-        Move-Item -Path "$env:TEMP\node-v18.20.8-win-x64" -Destination $node18 -Force
-        Remove-Item $node18Zip -Force
+    if (-not (Test-Path "$node18Dir\node.exe")) {
+        Download-NodeRuntime $node18Version $node18Dir
     }
 
-    # Download Node 22
-    if (-not (Test-Path "$node22\node.exe")) {
-        Write-Host "  Downloading Node.js 22.21.1..." -ForegroundColor Gray
-        $node22Url = "https://nodejs.org/dist/v22.21.1/node-v22.21.1-win-x64.zip"
-        $node22Zip = Join-Path $env:TEMP "node22.zip"
-        Invoke-WebRequest -Uri $node22Url -OutFile $node22Zip
-        Expand-Archive -Path $node22Zip -DestinationPath $env:TEMP -Force
-        Move-Item -Path "$env:TEMP\node-v22.21.1-win-x64" -Destination $node22 -Force
-        Remove-Item $node22Zip -Force
+    if (-not (Test-Path "$node22Dir\node.exe")) {
+        Download-NodeRuntime $node22Version $node22Dir
     }
 
     Write-Host "  Node runtimes downloaded!" -ForegroundColor Green
 } else {
-    Write-Host "  Node runtimes already present" -ForegroundColor Green
+    Write-Host "  Node runtimes already present ($node18Version + $node22Version)" -ForegroundColor Green
 }
 
 # Step 2: Copy module environment data
