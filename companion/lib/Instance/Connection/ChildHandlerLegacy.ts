@@ -67,6 +67,7 @@ import type { CompanionOptionValues as CompanionOptionValuesNew } from '@compani
 import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
 import type { IControlStore } from '../../Controls/IControlStore.js'
 import LogController, { type Logger } from '../../Log/Controller.js'
+import { handlePxlIpcMessage } from '../../Service/Timeline/IpcBridge.js'
 import type { ChildProcessHandlerBase } from '../ProcessManager.js'
 import {
 	doesModuleExpectLabelUpdates,
@@ -194,6 +195,9 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 			: null
 
 		const messageHandler = (msg: any) => {
+			// PXL-tracks: Timeline Sequencer IPC fast path
+			if (handlePxlIpcMessage(msg, (reply) => monitor.child?.send(reply as any), this.logger)) return
+
 			this.#ipcWrapper.receivedMessage(msg)
 		}
 		monitor.on('message', messageHandler)

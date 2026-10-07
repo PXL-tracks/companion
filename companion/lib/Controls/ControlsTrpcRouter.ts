@@ -2,8 +2,16 @@ import type EventEmitter from 'node:events'
 import { nanoid } from 'nanoid'
 import z from 'zod'
 import { CreateBankControlId, formatLocation } from '@companion-app/shared/ControlId.js'
-import { EntityModelType, type ActionEntityModel, type FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import { JsonValueSchema, type ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import {
+	EntityModelType,
+	type ActionEntityModel,
+	type FeedbackEntityModel,
+} from '@companion-app/shared/Model/EntityModel.js'
+import {
+	convertExpressionOptionsWithoutParsing,
+	JsonValueSchema,
+	optionsObjectToExpressionOptions,
+} from '@companion-app/shared/Model/Options.js'
 import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
 import type { InstanceDefinitions } from '../Instance/Definitions.js'
 import type { InstanceProcessManager } from '../Instance/ProcessManager.js'
@@ -322,35 +330,36 @@ export function createControlsTrpcRouter(
 			)
 			.mutation(async ({ input }) => {
 				logger.silly(`pxlFire: ${input.actions.length} actions`)
-				
+
 				const results = []
-				
+
 				for (const actionInput of input.actions) {
 					const instance = processManager.getConnectionChild(actionInput.connectionId)
 					if (!instance) {
 						results.push({ success: false, error: `Connection "${actionInput.connectionId}" not found` })
 						continue
 					}
-					
+
 					const action: ActionEntityModel = {
 						type: EntityModelType.Action,
 						id: nanoid(),
 						connectionId: actionInput.connectionId,
 						definitionId: actionInput.actionId,
-						options: actionInput.options,
+						// The module sends raw values, entities expect { value, isExpression } since Companion 4.3
+						options: optionsObjectToExpressionOptions(actionInput.options, false),
 						disabled: false,
 						upgradeIndex: undefined,
 					}
-					
+
 					const controller = new AbortController()
 					const extras: RunActionExtras = {
-						controlId: "timeline-direct",
-						surfaceId: "timeline",
+						controlId: 'timeline-direct',
+						surfaceId: 'timeline',
 						location: undefined,
 						abortDelayed: controller.signal,
-						executionMode: "concurrent",
+						executionMode: 'concurrent',
 					}
-					
+
 					try {
 						await instance.actionRun(action, extras)
 						results.push({ success: true })
@@ -358,7 +367,7 @@ export function createControlsTrpcRouter(
 						results.push({ success: false, error: error.message })
 					}
 				}
-				
+
 				return results
 			}),
 
@@ -376,35 +385,39 @@ export function createControlsTrpcRouter(
 			)
 			.query(async ({ input }) => {
 				logger.silly(`pxlSniff: ${input.queries.length} queries`)
-				
+
 				const results = []
-				
+
 				for (const query of input.queries) {
 					const instance = processManager.getConnectionChild(query.connectionId)
 					if (!instance) {
 						results.push({ success: false, error: `Connection "${query.connectionId}" not found` })
 						continue
 					}
-					
+
 					const feedbackEntity: FeedbackEntityModel = {
 						type: EntityModelType.Feedback as const,
 						id: nanoid(),
 						connectionId: query.connectionId,
 						definitionId: query.feedbackId,
-						options: (query.options || {}) as ExpressionableOptionsObject,
+						options: optionsObjectToExpressionOptions(query.options || {}, false),
 						disabled: false,
 						upgradeIndex: undefined,
 						isInverted: { value: false, isExpression: false },
 					}
-					
+
 					try {
-						const learnedOptions = await instance.entityLearnValues(feedbackEntity, "timeline-learn")
-						results.push({ success: true, value: learnedOptions })
+						const learnedOptions = await instance.entityLearnValues(feedbackEntity, 'timeline-learn')
+						// Keep returning raw values to the module, as before Companion 4.3
+						results.push({
+							success: true,
+							value: learnedOptions ? convertExpressionOptionsWithoutParsing(learnedOptions) : learnedOptions,
+						})
 					} catch (error: any) {
 						results.push({ success: false, error: error.message })
 					}
 				}
-				
+
 				return results
 			}),
 
@@ -421,24 +434,24 @@ export function createControlsTrpcRouter(
 			)
 			.query(async ({ input }) => {
 				logger.silly(`pxlPeek: ${input.queries.length} queries`)
-				
+
 				const results = []
-				
+
 				for (const query of input.queries) {
 					const actionDef = instanceDefinitions.getEntityDefinition(
 						EntityModelType.Action,
 						query.connectionId,
 						query.actionId
 					)
-					
+
 					if (!actionDef) {
-						results.push({ 
-							success: false, 
-							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"` 
+						results.push({
+							success: false,
+							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"`,
 						})
 						continue
 					}
-					
+
 					results.push({
 						success: true,
 						actionId: query.actionId,
@@ -459,7 +472,7 @@ export function createControlsTrpcRouter(
 						})),
 					})
 				}
-				
+
 				return results
 			}),
 	}

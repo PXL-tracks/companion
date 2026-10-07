@@ -21,12 +21,12 @@ export class ServiceTimeline {
 
 	constructor(instanceController: InstanceController) {
 		this.#logger = LogController.createLogger('Service/Timeline')
-		
+
 		this.#logger.info('🚀 Initializing PXL Timeline Direct Executor...')
-		
+
 		// Create executor with access to processManager
 		this.#executor = new TimelineExecutor(this.#logger, instanceController)
-		
+
 		this.#logger.info('✅ PXL Timeline Direct Executor ready')
 		this.#logger.info('   Method: direct processManager')
 		this.#logger.info('   Latency: < 1ms batch execution')
@@ -35,7 +35,7 @@ export class ServiceTimeline {
 	/**
 	 * Get current status
 	 */
-	getStatus() {
+	getStatus(): ReturnType<TimelineExecutor['getStatus']> {
 		return this.#executor.getStatus()
 	}
 }

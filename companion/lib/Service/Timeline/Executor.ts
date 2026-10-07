@@ -1,18 +1,19 @@
 import { nanoid } from 'nanoid'
-import type { Logger } from '../../Log/Controller.js'
-import type { InstanceController } from '../../Instance/Controller.js'
 import { EntityModelType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import { optionsObjectToExpressionOptions } from '@companion-app/shared/Model/Options.js'
+import type { InstanceController } from '../../Instance/Controller.js'
+import type { Logger } from '../../Log/Controller.js'
 
 /**
  * PXL Timeline Sequencer - Direct Executor
  * Ultra-fast direct access to processManager for frame-accurate control
- * 
+ *
  * @author Eliott Paris / DeeJayMX
  * @since 3.5.0
  * @copyright 2025 PixelMasters
  */
 
-interface TimelineAction {
+export interface TimelineAction {
 	connectionId: string
 	actionId: string
 	options: Record<string, any>
@@ -33,12 +34,12 @@ export class TimelineExecutor {
 	constructor(logger: Logger, instanceController: InstanceController) {
 		this.#logger = logger
 		this.#instanceController = instanceController
-		
+
 		// Register global executor for IPC access
 		;(global as any).pxlCore = {
-			executeActions: this.executeActions.bind(this)
+			executeActions: this.executeActions.bind(this),
 		}
-		
+
 		// Cleanup on exit
 		const cleanup = () => {
 			if ((global as any).pxlCore) {
@@ -46,7 +47,7 @@ export class TimelineExecutor {
 				this.#logger.info('🧹 PXL Timeline Direct Executor - Cleaned up')
 			}
 		}
-		
+
 		process.on('exit', cleanup)
 		process.on('SIGINT', cleanup)
 		process.on('SIGTERM', cleanup)
@@ -75,8 +76,9 @@ export class TimelineExecutor {
 					id: nanoid(),
 					connectionId: connectionId,
 					definitionId: actionId,
-					options: options || {},
-					upgradeIndex: undefined
+					// The module sends raw values, entities expect { value, isExpression } since Companion 4.3
+					options: optionsObjectToExpressionOptions(options || {}, false),
+					upgradeIndex: undefined,
 				}
 
 				// Build extras
@@ -85,7 +87,7 @@ export class TimelineExecutor {
 					surfaceId: undefined,
 					location: undefined,
 					abortDelayed: new AbortController().signal,
-					executionMode: 'concurrent' as const
+					executionMode: 'concurrent' as const,
 				}
 
 				// Execute via processManager DIRECT
@@ -100,8 +102,8 @@ export class TimelineExecutor {
 		)
 
 		const elapsed = Date.now() - startTime
-		const succeeded = results.filter(r => r.status === 'fulfilled').length
-		const failed = results.filter(r => r.status === 'rejected').length
+		const succeeded = results.filter((r) => r.status === 'fulfilled').length
+		const failed = results.filter((r) => r.status === 'rejected').length
 
 		this.#logger.debug(`⚡ Executed ${actions.length} actions in ${elapsed}ms (${succeeded} ok, ${failed} fail)`)
 
@@ -110,7 +112,7 @@ export class TimelineExecutor {
 			count: actions.length,
 			elapsed: elapsed,
 			succeeded: succeeded,
-			failed: failed
+			failed: failed,
 		}
 	}
 
@@ -121,7 +123,7 @@ export class TimelineExecutor {
 		return {
 			ready: true,
 			registered: !!(global as any).pxlCore,
-			method: 'direct-processManager'
+			method: 'direct-processManager',
 		}
 	}
 }
