@@ -1,23 +1,25 @@
-import React from 'react'
-import type { ObservableMap, ObservableSet } from 'mobx'
+import type { IObservableValue, ObservableMap, ObservableSet } from 'mobx'
+import { createContext } from 'react'
 import type { NotificationsManagerRef } from '~/Components/Notifications.js'
-import type { PagesStore } from './PagesStore.js'
+import type { HelpModalRef } from '~/Instances/HelpModal.js'
+import type { WhatsNewModalRef } from '~/WhatsNewModal/WhatsNew.js'
+import type { CompositeElementDefinitionsStore } from './CompositeElementDefinitionsStore.js'
+import type { ConnectionsStore } from './ConnectionsStore.js'
 import type { EntityDefinitionsStore } from './EntityDefinitionsStore.js'
 import type { EventDefinitionsStore } from './EventDefinitionsStore.js'
+import type { ExpressionVariablesListStore } from './ExpressionVariablesListStore.js'
+import type { ImageLibraryStore } from './ImageLibraryStore.js'
+import type { InstanceStatusesStore } from './InstanceStatusesStore.js'
 import type { ModuleInfoStore } from './ModuleInfoStore.js'
-import type { TriggersListStore } from './TriggersListStore.js'
+import type { PagesStore } from './PagesStore.js'
+import type { SurfaceInstancesStore } from './SurfaceInstancesStore.js'
 import type { SurfacesStore } from './SurfacesStore.js'
+import type { TriggersListStore } from './TriggersListStore.js'
 import type { UserConfigStore } from './UserConfigStore.js'
 import type { VariablesStore } from './VariablesStore.js'
-import type { ConnectionsStore } from './ConnectionsStore.js'
-import type { HelpModalRef } from '~/Instances/HelpModal.js'
 import type { ViewControlStore } from './ViewControlStore.js'
-import type { WhatsNewModalRef } from '~/WhatsNewModal/WhatsNew.js'
-import type { ExpressionVariablesListStore } from './ExpressionVariablesListStore.js'
-import type { SurfaceInstancesStore } from './SurfaceInstancesStore.js'
-import type { InstanceStatusesStore } from './InstanceStatusesStore.js'
 
-export const RootAppStoreContext = React.createContext<RootAppStore>(null as any) // TODO - fix this?
+export const RootAppStoreContext = createContext<RootAppStore>(null as any) // TODO - fix this?
 
 export interface RootAppStore {
 	readonly notifier: NotificationsManagerRef
@@ -35,6 +37,7 @@ export interface RootAppStore {
 
 	readonly entityDefinitions: EntityDefinitionsStore
 	readonly eventDefinitions: EventDefinitionsStore
+	readonly compositeElementDefinitions: CompositeElementDefinitionsStore
 
 	readonly pages: PagesStore
 	readonly surfaces: SurfacesStore
@@ -45,10 +48,15 @@ export interface RootAppStore {
 
 	readonly userConfig: UserConfigStore
 
+	readonly imageLibrary: ImageLibraryStore
+
 	readonly moduleStoreRefreshProgress: ObservableMap<string | null, number>
 
-	readonly showWizardEvent: EventTarget
-	readonly showWizard: () => void
+	/**
+	 * The setup wizard modal's open state. Set to `true` to open it; the modal sets it back to `false` on close.
+	 * Doubles as the signal the What's New modal watches so it can wait its turn.
+	 */
+	readonly wizardOpen: IObservableValue<boolean>
 
 	readonly viewControl: ViewControlStore
 }

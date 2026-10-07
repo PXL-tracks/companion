@@ -10,28 +10,28 @@
  *
  */
 
-import { rotateXYForPanel, unrotateXYForPanel } from './Util.js'
-import { SurfaceGroup } from './Group.js'
-import { EventEmitter } from 'events'
-import type { ImageResult } from '../Graphics/ImageResult.js'
-import LogController, { type Logger } from '../Log/Controller.js'
+import { EventEmitter } from 'node:events'
+import debounceFn from 'debounce-fn'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import type {
-	SurfaceGroupConfig,
 	GridSize,
 	SurfaceConfig,
+	SurfaceGroupConfig,
 	SurfacePanelConfig,
 } from '@companion-app/shared/Model/Surfaces.js'
-import type { IControlStore } from '../Controls/IControlStore.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { IPageStore } from '../Page/Store.js'
-import type { SurfaceController } from './Controller.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { VariablesController } from '../Variables/Controller.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { DrawButtonItem, SurfaceHandlerDependencies, SurfacePanel, UpdateEvents } from './Types.js'
 import type { VariableValue } from '@companion-app/shared/Model/Variables.js'
-import { PanelDefaults } from './Config.js'
-import debounceFn from 'debounce-fn'
+import type { IControlStore } from '../Controls/IControlStore.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import type { ImageResult } from '../Graphics/ImageResult.js'
+import LogController, { type Logger } from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import type { VariablesController } from '../Variables/Controller.js'
+import { createDefaultSurfacePanelConfig } from './Config.js'
+import type { SurfaceController } from './Controller.js'
+import { SurfaceGroup } from './Group.js'
+import type { DrawButtonItem, SurfaceHandlerDependencies, SurfacePanel, UpdateEvents } from './Types.js'
+import { rotateXYForPanel, unrotateXYForPanel } from './Util.js'
 
 /**
  * Get the display name of a surface
@@ -107,7 +107,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 */
 	readonly #graphics: GraphicsController
 	/**
-	 * The core page controller
+	 * The core page store
 	 */
 	readonly #pageStore: IPageStore
 	/**
@@ -155,11 +155,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 		// Setup logger to use the name
 		this.#recreateLogger()
-
-		if (this.#surfaceConfig.config.never_lock) {
-			// if device can't be locked, then make sure it isnt already locked
-			this.#isSurfaceLocked = false
-		}
 
 		this.#graphics.on('button_drawn', this.#onButtonDrawn)
 
@@ -242,13 +237,19 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 				for (let y = 0; y < gridSize.rows; y++) {
 					for (let x = 0; x < gridSize.columns; x++) {
-						const image = this.#graphics.getCachedRenderOrGeneratePlaceholder({
+						const location: ControlLocation = {
 							pageNumber: pageNumber ?? 0,
 							column: x + xOffset,
 							row: y + yOffset,
-						})
+						}
+						const image = this.#graphics.getCachedRenderOrGeneratePlaceholder(location)
 
-						rawEntries.push({ x, y, image })
+						rawEntries.push({
+							x,
+							y,
+							defaultRender: image,
+							location,
+						})
 					}
 				}
 
@@ -271,9 +272,9 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 			)
 
 			return {
+				...entry,
 				x: transformedX,
 				y: transformedY,
-				image: entry.image,
 			}
 		})
 	}
@@ -298,9 +299,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 * Set the surface as locked
 	 */
 	setLocked(locked: boolean, skipDraw = false): boolean {
-		// skip if surface can't be locked
-		if (this.#surfaceConfig.config.never_lock && locked) return false
-
 		if (this.#isSurfaceLocked === !!locked) return false
 
 		this.#isSurfaceLocked = !!locked
@@ -333,7 +331,8 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 				{
 					x: location.column - xOffset,
 					y: location.row - yOffset,
-					image: render,
+					defaultRender: render,
+					location,
 				},
 			]
 			const transformedEntries = this.#transformButtonRenders(rawEntries)
@@ -346,18 +345,30 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 * @param brightness 0-100
 	 */
 	setBrightness(brightness: number): void {
-		if (this.panel) {
-			if (this.panel.setConfig) {
-				const config = {
-					...this.#surfaceConfig.config,
-					brightness: brightness,
-				}
+		if (!Number.isFinite(brightness)) return
 
-				setImmediate(() => {
-					this.panel.setConfig(config)
-				})
-			}
+		const config = {
+			...this.#surfaceConfig.config,
+			brightness: brightness,
 		}
+		this.#surfaceConfig.config = config
+
+		this.#saveConfig()
+
+		if (this.panel && this.panel.setConfig) {
+			setImmediate(() => {
+				this.panel.setConfig(config)
+			})
+		}
+	}
+
+	/**
+	 * Adjust the brightness of the panel by a relative amount
+	 * @param adjustment -100 to 100
+	 */
+	adjustBrightness(adjustment: number): void {
+		const newBrightness = Math.min(100, Math.max(0, this.#surfaceConfig.config.brightness + adjustment))
+		this.setBrightness(newBrightness)
 	}
 
 	/**
@@ -390,7 +401,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 		if (!this.panel) return
 
 		try {
-			this.#surfaces.removeDevice(this.panel.info.surfaceId)
+			this.#surfaces.removeDevice(this.panel.info.surfaceId, { physicallyGone: true })
 		} catch (e) {
 			this.#logger.error(`Remove failed: ${e}`)
 		}
@@ -555,7 +566,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 			startup_page_id: this.#pageStore.getFirstPageId(),
 		}
 		this.#surfaceConfig.groupId = null
-		this.setPanelConfig(structuredClone(PanelDefaults))
+		this.setPanelConfig(createDefaultSurfacePanelConfig(this.panel))
 	}
 
 	/**
@@ -604,11 +615,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 		)
 			redraw = true
 		if (newconfig.rotation != this.#surfaceConfig.config.rotation) redraw = true
-
-		if (newconfig.never_lock && newconfig.never_lock != this.#surfaceConfig.config.never_lock) {
-			this.setLocked(false, true)
-			redraw = true
-		}
 
 		// if this is an import, the config file may have been missing fields:
 		//  (note: import does not call `createOrSanitizeSurfaceHandlerConfig`, which might be a better option?)

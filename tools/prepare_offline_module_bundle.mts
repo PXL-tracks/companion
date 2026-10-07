@@ -1,22 +1,21 @@
 #!/usr/bin/env zx
-
-import { $, fs, usePowerShell } from 'zx'
-import type { components, paths as ModuleStoreOpenApiPaths } from '@companion-app/shared/OpenApi/ModuleStore.js'
+import crypto from 'crypto'
+import path from 'path'
+import { Readable } from 'stream'
+import { promisify } from 'util'
+import { gunzip } from 'zlib'
 import createClient from 'openapi-fetch'
 import pQueue from 'p-queue'
 import pRetry, { AbortError } from 'p-retry'
-import path from 'path'
+import * as tarfs from 'tar-fs'
+import { $, fs, usePowerShell } from 'zx'
 import {
 	isModuleApiVersionCompatible,
 	isSurfaceApiVersionCompatible,
 } from '@companion-app/shared/ModuleApiVersionCheck.js'
+import type { components, paths as ModuleStoreOpenApiPaths } from '@companion-app/shared/OpenApi/ModuleStore.js'
+import { MAX_DECOMPRESSED_MODULE_TAR_SIZE, MAX_MODULE_TAR_SIZE } from '../companion/lib/Instance/Constants.js'
 import { generateVersionString } from './lib.mjs'
-import crypto from 'crypto'
-import { gunzip } from 'zlib'
-import { promisify } from 'util'
-import { Readable } from 'stream'
-import * as tarfs from 'tar-fs'
-import { MAX_MODULE_TAR_SIZE } from '../companion/lib/Instance/Constants.js'
 
 const gunzipP = promisify(gunzip)
 
@@ -119,6 +118,14 @@ const processModule = async (
 					return
 				}
 
+				if (
+					latestCompatibleVersion.licenseCategory === 'COPYLEFT' ||
+					latestCompatibleVersion.licenseCategory === 'UNKNOWN'
+				) {
+					console.log(`Skipping ${moduleInfo.id} (${latestCompatibleVersion.licenseCategory} license)`)
+					return
+				}
+
 				const tarUrl = latestCompatibleVersion.tarUrl! // Note: asserted in the find above
 
 				const abortControl = new AbortController()
@@ -149,7 +156,7 @@ const processModule = async (
 					throw new Error('Download did not match checksum')
 				}
 
-				const decompressedData = await gunzipP(fullTarBuffer)
+				const decompressedData = await gunzipP(fullTarBuffer, { maxOutputLength: MAX_DECOMPRESSED_MODULE_TAR_SIZE })
 				if (!decompressedData) {
 					throw new Error('Failed to decompress data')
 				}

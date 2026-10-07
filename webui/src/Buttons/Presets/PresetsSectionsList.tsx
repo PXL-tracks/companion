@@ -1,16 +1,18 @@
-import React, { useMemo, useState } from 'react'
-import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
-import { CAlert, CButton, CButtonGroup, CCallout } from '@coreui/react'
+import { faArrowLeft, faSearch } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { observer } from 'mobx-react-lite'
+import { useMemo, useState } from 'react'
 import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
 import type { UIPresetSection } from '@companion-app/shared/Model/Presets.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowLeft, faSearch } from '@fortawesome/free-solid-svg-icons'
-import { observer } from 'mobx-react-lite'
-import { PresetSectionCollapse } from './PresetSectionCollapse.js'
-import { SearchBox } from '../../Components/SearchBox.js'
-import { NonIdealState } from '../../Components/NonIdealState.js'
-import { fuzzyMatch } from './fuzzyMatch.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { Callout } from '~/Components/Callout.js'
+import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
 import { useComputed } from '~/Resources/util.js'
+import { NonIdealState } from '../../Components/NonIdealState.js'
+import { SearchBox } from '../../Components/SearchBox.js'
+import { fuzzyMatch } from './fuzzyMatch.js'
+import { PresetSectionCollapse } from './PresetSectionCollapse.js'
 
 interface PresetsSectionsListProps {
 	presets: Record<string, UIPresetSection | undefined> | undefined
@@ -114,30 +116,31 @@ export const PresetsSectionsList = observer(function PresetsCategoryList({
 			storageId={`preset-sections-${selectedConnectionId}`}
 			knownPanelIds={allSectionIds}
 			defaultCollapsed={true}
+			evictionOwner={{ kind: 'connection', id: selectedConnectionId }}
 		>
 			<div>
 				<h5>Presets</h5>
 				<div style={{ marginBottom: 10 }}>
-					<CButtonGroup size="sm">
-						<CButton color="primary" onClick={clearSelectedConnectionId}>
+					<ButtonGroup>
+						<Button color="primary" size="sm" onClick={clearSelectedConnectionId}>
 							<FontAwesomeIcon icon={faArrowLeft} />
 							&nbsp; Go back
-						</CButton>
-						<CButton color="secondary" disabled>
+						</Button>
+						<Button color="secondary" size="sm" disabled>
 							{connectionInfo?.label || selectedConnectionId}
-						</CButton>
-					</CButtonGroup>
+						</Button>
+					</ButtonGroup>
 				</div>
-				<SearchBox filter={searchQuery} setFilter={setSearchQuery} />
+				<SearchBox filter={searchQuery} setFilter={setSearchQuery} className="mb-2" />
 				{allSections.length === 0 ? (
-					<CAlert color="primary">Connection has no presets.</CAlert>
+					<StaticAlert color="primary">Connection has no presets.</StaticAlert>
 				) : visibleSections.length === 0 && searchQuery ? (
 					<NonIdealState icon={faSearch} text="No matching presets" />
 				) : (
 					<>
-						<CCallout color="info" className="my-2">
+						<Callout color="info" className="my-2">
 							<strong>Drag and drop</strong> the preset buttons below into your buttons-configuration.
-						</CCallout>
+						</Callout>
 						<div className="collapsible-tree">{sections}</div>
 					</>
 				)}

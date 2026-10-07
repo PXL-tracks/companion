@@ -1,11 +1,10 @@
-import { CRow } from '@coreui/react'
 import { createFileRoute, Outlet } from '@tanstack/react-router'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import React, { useCallback } from 'react'
+import { useCallback } from 'react'
 import { useDocumentTitle } from 'usehooks-ts'
+import { StandalonePageError } from '~/Components/StandalonePageError'
 import { TRPCConnectionStatus, useTRPCConnectionStatus } from '~/Hooks/useTRPCConnectionStatus'
 import { trpc } from '~/Resources/TRPC'
-import { LoadingRetryOrError } from '~/Resources/Loading'
 
 export const Route = createFileRoute('/_standalone/emulator')({
 	component: RouteComponent,
@@ -29,15 +28,11 @@ function RouteComponent() {
 			{status.status === TRPCConnectionStatus.Connected || !emulatorPageConfig.data ? (
 				<Outlet />
 			) : (
-				<CRow className={'loading'}>
-					<LoadingRetryOrError
-						dataReady={false}
-						error={status.error || emulatorPageConfig.error || 'test'}
-						doRetry={doRetry}
-						retryLabel="Reload Emulator"
-						design="pulse-xl"
-					/>
-				</CRow>
+				<StandalonePageError
+					dataReady={false}
+					error={status.error || 'Lost connection to Companion'}
+					doRetry={doRetry}
+				/>
 			)}
 		</div>
 	)

@@ -1,22 +1,25 @@
-import React, { useMemo, useRef } from 'react'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import classNames from 'classnames'
 import { observer } from 'mobx-react-lite'
+import { useMemo, useRef } from 'react'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import {
 	stringifySocketEntityLocation,
 	type EntityModelType,
 	type SomeEntityModel,
 	type SomeSocketEntityLocation,
 } from '@companion-app/shared/Model/EntityModel.js'
-import { findAllEntityIdsDeep } from './Util.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
 import { useControlEntitiesEditorService } from '~/Services/Controls/ControlEntitiesService.js'
-import { EditableEntityList } from './Components/EntityList.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { LocalVariablesStore } from './LocalVariablesStore.js'
 import { EntityEditorContextProvider } from './Components/EntityEditorContext.js'
+import { EditableEntityList } from './Components/EntityList.js'
+import { useEntityListReorderMonitor } from './Components/useEntityListReorderMonitor.js'
+import type { LocalVariablesStore } from './LocalVariablesStore.js'
+import { findAllEntityIdsDeep } from './Util.js'
 
 interface ControlEntitiesEditorProps {
+	className?: string
 	controlId: string
 	location: ControlLocation | undefined
 	listId: SomeSocketEntityLocation
@@ -32,6 +35,7 @@ interface ControlEntitiesEditorProps {
 }
 
 export const ControlEntitiesEditor = observer(function ControlEntitiesEditor({
+	className,
 	controlId,
 	location,
 	listId,
@@ -51,8 +55,10 @@ export const ControlEntitiesEditor = observer(function ControlEntitiesEditor({
 
 	const entityIds = useMemo(() => findAllEntityIdsDeep(entities ?? []), [entities])
 
+	useEntityListReorderMonitor(controlId, entityType, serviceFactory)
+
 	return (
-		<div className="entity-category">
+		<div className={classNames('entity-category', className)}>
 			<EntityEditorContextProvider
 				controlId={controlId}
 				location={location}
@@ -64,6 +70,7 @@ export const ControlEntitiesEditor = observer(function ControlEntitiesEditor({
 				<PanelCollapseHelperProvider
 					storageId={`${entityType}_${controlId}_${stringifySocketEntityLocation(listId)}`}
 					knownPanelIds={entityIds}
+					evictionOwner={{ kind: 'control', id: controlId }}
 				>
 					<GenericConfirmModal ref={confirmModal} />
 

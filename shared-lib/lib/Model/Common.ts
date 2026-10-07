@@ -1,5 +1,5 @@
-import type { SomeCompanionInputField } from './Options.js'
 import type { Operation as JsonPatchOperation } from 'fast-json-patch'
+import type { SomeCompanionInputField } from './Options.js'
 
 export interface ObjectsDiff<T> {
 	added: Record<string, T>
@@ -15,6 +15,27 @@ export interface AppUpdateInfo {
 	message: string
 	message2: string | undefined
 	link: string | undefined
+}
+
+/**
+ * Status of the Linux udev rules that grant access to USB surfaces.
+ * On non-Linux platforms `supported` is false and nothing else is meaningful.
+ */
+export interface UdevRulesStatus {
+	/** Whether udev rules are relevant here (linux, and not inside a container) */
+	supported: boolean
+	/** Which build/file is in use */
+	mode: 'desktop' | 'headless'
+	/** Whether the installed rules are out of date and need (re)applying */
+	needsApply: boolean
+	/** Absolute path to the generated rules file */
+	generatedPath: string
+	/** Absolute path the rules should be installed to */
+	installedPath: string
+	/** A shell command the user can run manually to apply the rules */
+	applyCommand: string
+	/** Whether Companion can apply the rules itself (desktop, pkexec available, local client) */
+	canAutoApply: boolean
 }
 
 export interface ControlLocation {
@@ -74,12 +95,23 @@ export interface WrappedImage {
 	isUsed: boolean
 }
 
-export interface ClientEditInstanceConfig {
-	fields: Array<SomeCompanionInputField>
-	useNewLayout: boolean
-	config: unknown
-	secrets: unknown
-}
+/**
+ * The state of the config-fields editor for a connection/surface, as streamed to the UI.
+ * A single subscription emits one of these whenever anything relevant changes (config saved,
+ * module changed, enable/disable, child process ready/stopped/crashed), so the UI does not have
+ * to reconcile a query, the instance-status subscription and derived running-state separately.
+ */
+export type ClientEditInstanceConfigState =
+	| { type: 'loading' } // child exists but the config fields are not available yet
+	| {
+			type: 'config' // running: config fields are loaded
+			fields: Array<SomeCompanionInputField>
+			useNewLayout: boolean
+			config?: unknown
+			secrets?: unknown
+	  }
+	| { type: 'notRunning'; reason: 'disabled' | 'missing' | 'starting' | 'crashed' }
+	| { type: 'error'; message: string } // failed to load the config fields (threw/timed out)
 
 export type DropdownChoiceId = string | number
 /**

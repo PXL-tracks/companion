@@ -1,7 +1,7 @@
+import net, { type Socket } from 'node:net'
 import { stringifyError } from '@companion-app/shared/Stringify.js'
 import { GLOBAL_BIND_ADDRESS } from '../Resources/Constants.js'
 import { ServiceBase } from './Base.js'
-import net, { type Socket } from 'net'
 
 /**
  * Abstract class providing base functionality for TCP services.
@@ -18,6 +18,13 @@ import net, { type Socket } from 'net'
  * Individual Contributor License Agreement for Companion along with
  * this program.
  */
+/**
+ * Maximum length a single line (command) may reach in the receive buffer before the connection is
+ * dropped. This bounds per-connection memory and closes off a "buffer bomb" where a client streams
+ * data forever without ever sending a newline. 2MB is far more than any line-based tcp api needs.
+ */
+export const MAX_TCP_RECEIVE_BUFFER = 2 * 1024 * 1024
+
 export abstract class ServiceTcpBase extends ServiceBase {
 	protected server: net.Server | undefined = undefined
 
@@ -55,6 +62,8 @@ export abstract class ServiceTcpBase extends ServiceBase {
 
 					this.clients.add(client)
 
+					client.setNoDelay(true)
+
 					this.logger.debug('Client connected: ' + clientInfo.name)
 
 					client.on('data', this.processIncoming.bind(this, clientInfo))
@@ -91,6 +100,22 @@ export abstract class ServiceTcpBase extends ServiceBase {
 	 * Process an incoming message from a client
 	 */
 	protected abstract processIncoming(client: TcpClientInfo, chunk: string | Buffer): void
+
+	/**
+	 * Drop the connection if the client's receive buffer has grown beyond the maximum line length,
+	 * to guard against a "buffer bomb" (data streamed forever without a newline). Subclasses that
+	 * accumulate into `receiveBuffer` should call this after consuming any complete lines.
+	 * @returns true if the connection was dropped
+	 */
+	protected enforceReceiveBufferLimit(client: TcpClientInfo): boolean {
+		if (client.receiveBuffer.length > MAX_TCP_RECEIVE_BUFFER) {
+			this.logger.warn(`Closing connection ${client.name}: line exceeded ${MAX_TCP_RECEIVE_BUFFER} bytes`)
+			client.receiveBuffer = ''
+			client.socket.destroy()
+			return true
+		}
+		return false
+	}
 }
 
 export interface TcpClientInfo {

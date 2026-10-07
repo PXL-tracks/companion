@@ -1,26 +1,30 @@
-import type { DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
+import { Combobox } from '@base-ui/react/combobox'
 import classNames from 'classnames'
-import React, { useContext, useMemo, useCallback } from 'react'
-import Select, { createFilter } from 'react-select'
-import CreatableSelect, { type CreatableProps } from 'react-select/creatable'
-import { WindowedMenuList } from 'react-windowed-select'
-import { MenuPortalContext } from './MenuPortalContext.js'
+import { prepare as fuzzyPrepare } from 'fuzzysort'
+import { ChevronDownIcon, XIcon } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useDropdownChoicesForSelect, type DropdownChoiceInt, type DropdownChoicesOrGroups } from './DropdownChoices.js'
+import { useCallback, useState } from 'react'
+import type { DropdownChoice, DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
+import { DropdownInputPopup } from '~/Components/DropdownInputField/Popup.js'
+import { useFuzzyChoices, type FuzzyChoice, type FuzzyGroup } from '~/Components/DropdownInputField/useFuzzyChoices.js'
+import { useComputed } from '~/Resources/util.js'
+import { fuzzyFilterSort } from '~/util/fuzzy.js'
+import type { DropdownChoicesOrGroups } from './DropdownChoices.js'
+import { useRegex } from './useRegex.js'
 
 interface MultiDropdownInputFieldProps {
-	htmlName?: string
+	htmlName: string | undefined
 	className?: string
 	choices: DropdownChoicesOrGroups
 	allowCustom?: boolean
 	minSelection?: number
-	minChoicesForSearch?: number
 	maxSelection?: number
+	sortSelection?: boolean
 	tooltip?: string
 	regex?: string
 	value: DropdownChoiceId[]
 	setValue: (value: DropdownChoiceId[]) => void
-	checkValid?: (value: DropdownChoiceId[]) => boolean
+	checkValid?: (value: DropdownChoiceId[]) => boolean | undefined
 	disabled?: boolean
 	onBlur?: () => void
 }
@@ -31,8 +35,8 @@ export const MultiDropdownInputField = observer(function MultiDropdownInputField
 	choices,
 	allowCustom,
 	minSelection,
-	minChoicesForSearch,
 	maxSelection,
+	sortSelection,
 	tooltip,
 	regex,
 	value,
@@ -41,133 +45,168 @@ export const MultiDropdownInputField = observer(function MultiDropdownInputField
 	disabled,
 	onBlur,
 }: MultiDropdownInputFieldProps) {
-	const menuPortal = useContext(MenuPortalContext)
+	if (value === undefined) value = []
 
-	const { options, flatOptions } = useDropdownChoicesForSelect(choices)
+	// Convert DropdownChoicesOrGroups -> base-ui Combobox format (choices may be mobx proxies)
+	// Always search labels only for multi-dropdown (no id-based search needed)
+	const { allItems, flatItems } = useFuzzyChoices(choices, true)
 
-	if (value === undefined) value = [] as any
+	// The popup doesn't handle groups when virtualised, so detect if there are any groups
+	const hasGroups = allItems.some((item) => 'items' in item)
 
-	const currentValue = useMemo(() => {
+	// Compile the regex (and cache)
+	const compiledRegex = useRegex(regex)
+
+	const currentValue = useComputed(() => {
 		const selectedValue = Array.isArray(value) ? value : [value]
-		const res: DropdownChoiceInt[] = []
+		const res: DropdownChoice[] = []
 		for (const val of selectedValue) {
-			const entry = flatOptions.find((o) => o.value == val) // Intentionally loose for compatibility
+			const entry = flatItems.find((o) => o.id == val) // Intentionally loose for compatibility
 			if (entry) {
 				res.push(entry)
 			} else if (allowCustom) {
-				res.push({ value: val, label: String(val) })
+				res.push({ id: val, label: String(val) })
 			} else {
-				res.push({ value: val, label: allowCustom ? String(val) : `?? (${val})` })
+				res.push({ id: val, label: `?? (${val})` })
 			}
+		}
+		if (sortSelection) {
+			res.sort((a, b) => {
+				const aIndex = flatItems.findIndex((o) => o.id == a.id)
+				const bIndex = flatItems.findIndex((o) => o.id == b.id)
+				if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
+				if (aIndex !== -1) return -1
+				if (bIndex !== -1) return 1
+				return String(a.label).localeCompare(String(b.label))
+			})
 		}
 		return res
-	}, [value, flatOptions, allowCustom])
+	}, [value, flatItems, allowCustom, sortSelection])
 
-	// Compile the regex (and cache)
-	const compiledRegex = useMemo(() => {
-		if (regex) {
-			// Compile the regex string
-			const match = regex.match(/^\/(.*)\/(.*)$/)
-			if (match) {
-				return new RegExp(match[1], match[2])
+	const [inputValue, setInputValue] = useState('')
+
+	const isValidCustom = useCallback((input: string) => !compiledRegex || !!input.match(compiledRegex), [compiledRegex])
+
+	const syntheticItem = useComputed((): FuzzyChoice | null => {
+		if (!allowCustom || !inputValue || !isValidCustom(inputValue)) return null
+		if (flatItems.some((o) => o.id == inputValue)) return null
+		return {
+			id: inputValue,
+			label: `Create "${inputValue}"`,
+			fuzzy: fuzzyPrepare(inputValue),
+			plusIndicator: true,
+		}
+	}, [allowCustom, inputValue, isValidCustom, flatItems])
+
+	// Items master list — must include the synthetic item so base-ui can resolve it on selection
+	const effectiveItems = useComputed(
+		(): Array<FuzzyChoice | FuzzyGroup> => (syntheticItem ? [syntheticItem, ...allItems] : allItems),
+		[syntheticItem, allItems]
+	)
+
+	const filteredItems = useComputed((): Array<FuzzyChoice | FuzzyGroup> => {
+		if (!inputValue) return allItems
+
+		const result: Array<FuzzyChoice | FuzzyGroup> = []
+
+		// Batch root-level choices between groups so they get sorted together by score
+		const pendingRoot: FuzzyChoice[] = []
+		for (const item of allItems) {
+			if ('items' in item) {
+				if (pendingRoot.length > 0) {
+					result.push(...fuzzyFilterSort(pendingRoot, inputValue))
+					pendingRoot.length = 0
+				}
+				const filtered = fuzzyFilterSort(item.items, inputValue)
+				if (filtered.length > 0) result.push({ ...item, items: filtered })
+			} else {
+				pendingRoot.push(item)
 			}
 		}
-		return null
-	}, [regex])
+		if (pendingRoot.length > 0) result.push(...fuzzyFilterSort(pendingRoot, inputValue))
 
-	const onChange = useCallback(
-		(e: DropdownChoiceInt[]) => {
-			const newValue = e?.map((v) => v.value) ?? []
+		if (syntheticItem) result.unshift(syntheticItem)
 
-			const valueArr = value as DropdownChoiceId[] | undefined
-			if (
-				typeof minSelection === 'number' &&
-				newValue.length < minSelection &&
-				newValue.length <= (valueArr || []).length
-			) {
-				// Block change if too few are selected
+		return result
+	}, [allItems, syntheticItem, inputValue])
+
+	const onValueChange = useCallback(
+		(newIds: DropdownChoiceId[]) => {
+			if (typeof minSelection === 'number' && newIds.length < minSelection && newIds.length <= value.length) {
 				return
 			}
-
-			if (
-				typeof maxSelection === 'number' &&
-				newValue.length > maxSelection &&
-				newValue.length >= (valueArr || []).length
-			) {
-				// Block change if too many are selected
+			if (typeof maxSelection === 'number' && newIds.length > maxSelection && newIds.length >= value.length) {
 				return
 			}
-
-			setValue(newValue)
+			setValue(newIds)
 		},
 		[setValue, value, minSelection, maxSelection]
 	)
 
-	const minChoicesForSearch2 = typeof minChoicesForSearch === 'number' ? minChoicesForSearch : 10
-
-	// const selectRef = useRef<any>(null)
-
-	const selectProps: Partial<CreatableProps<any, any, any>> = {
-		name: htmlName,
-		isDisabled: disabled,
-		classNamePrefix: 'select-control',
-		className: 'select-control',
-		menuPortalTarget: menuPortal || document.body,
-		menuShouldBlockScroll: !!menuPortal, // The dropdown doesn't follow scroll when in a modal
-		menuPosition: 'fixed',
-		menuPlacement: 'auto',
-		isClearable: false,
-		isSearchable: minChoicesForSearch2 <= flatOptions.length,
-		isMulti: true,
-		options: options,
-		value: currentValue,
-		onChange: onChange,
-		filterOption: createFilter({ ignoreAccents: false }),
-		components: { MenuList: WindowedMenuList },
-		onBlur: onBlur,
-	}
-
-	const isValidNewOption = useCallback(
-		(newValue: string | number) => typeof newValue === 'string' && (!compiledRegex || !!newValue.match(compiledRegex)),
-		[compiledRegex]
-	)
-	const noOptionsMessage = useCallback(
-		({ inputValue }: { inputValue: string | number }) => {
-			if (!isValidNewOption(inputValue)) {
-				return 'Input is not a valid value'
-			} else {
-				return 'Begin typing to use a custom value'
-			}
+	const removeValue = useCallback(
+		(id: DropdownChoiceId) => {
+			const isAtMinimum = typeof minSelection === 'number' && value.length <= minSelection
+			if (isAtMinimum) return
+			setValue(value.filter((v) => v != id)) // Intentionally loose for compatibility
 		},
-		[isValidNewOption]
+		[setValue, value, minSelection]
 	)
-	const formatCreateLabel = useCallback((v: string | number) => `Use "${v}"`, [])
+
+	const isAtMinimum = typeof minSelection === 'number' && currentValue.length <= minSelection
+	const isMaxReached = typeof maxSelection === 'number' && value.length >= maxSelection
 
 	return (
 		<div
 			className={classNames(
-				{
-					'select-tooltip': true,
-					'select-invalid': !!checkValid && !checkValid(currentValue.map((v) => v.value) ?? []),
-				},
+				'dropdown-field',
+				{ 'dropdown-field-invalid': checkValid?.(currentValue.map((v) => v.id)) === false },
 				className
 			)}
 			title={tooltip}
 		>
-			{allowCustom ? (
-				<CreatableSelect
-					{...selectProps}
-					// ref={selectRef}
-					className={`${selectProps.className} select-control-editable`}
-					isSearchable={true}
-					noOptionsMessage={noOptionsMessage}
-					createOptionPosition="first"
-					formatCreateLabel={formatCreateLabel}
-					isValidNewOption={isValidNewOption}
+			<Combobox.Root<DropdownChoiceId, true>
+				multiple={true}
+				virtualized={!hasGroups}
+				autoHighlight
+				value={value}
+				items={effectiveItems}
+				filteredItems={filteredItems}
+				disabled={disabled}
+				onValueChange={onValueChange}
+				onInputValueChange={setInputValue}
+			>
+				<Combobox.InputGroup className="dropdown-field-input-group dropdown-field-multi-input-group">
+					{currentValue.map((item) => (
+						<span className="dropdown-field-pill" key={String(item.id)}>
+							<span className="dropdown-field-pill-label">{item.label}</span>
+							<button
+								type="button"
+								className="dropdown-field-pill-remove"
+								disabled={isAtMinimum || disabled}
+								onClick={(e) => {
+									e.stopPropagation()
+									removeValue(item.id)
+								}}
+								tabIndex={-1}
+								aria-label={`Remove ${item.label}`}
+							>
+								<XIcon className="dropdown-field-pill-remove-icon" />
+							</button>
+						</span>
+					))}
+					<Combobox.Input className="dropdown-field-input" name={htmlName} onBlur={onBlur} />
+					<Combobox.Trigger className="dropdown-field-trigger">
+						<ChevronDownIcon className="dropdown-field-icon" />
+					</Combobox.Trigger>
+				</Combobox.InputGroup>
+
+				<DropdownInputPopup
+					noOptionsMessage={allowCustom ? 'Begin typing to use a custom value' : undefined}
+					showIndicator
+					disableUnselected={isMaxReached}
+					virtualized={!hasGroups}
 				/>
-			) : (
-				<Select {...selectProps} />
-			)}
+			</Combobox.Root>
 		</div>
 	)
-}) as (props: MultiDropdownInputFieldProps) => JSX.Element
+})

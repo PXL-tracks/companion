@@ -1,11 +1,11 @@
-import { CButton, CButtonGroup, CPopover } from '@coreui/react'
 import { faPlus } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { useNavigate } from '@tanstack/react-router'
 import { observer } from 'mobx-react-lite'
-import React, { useCallback, useContext } from 'react'
+import { useCallback, useContext } from 'react'
 import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
-import { useMutationExt, trpc } from '~/Resources/TRPC'
+import { Popover } from '~/Components/Popover.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC'
 import { useComputed } from '~/Resources/util'
 import { RootAppStoreContext } from '~/Stores/RootAppStore'
 
@@ -29,17 +29,26 @@ export const AddRemoteSurfaceButton = observer(function AddRemoteSurfaceButton()
 	}, [surfaceInstances])
 
 	return (
-		<CPopover
-			content={<AddRemoteSurfacePopoverContent sortedInstances={sortedInstances} />}
-			trigger="focus"
-			animation={false}
-			placement="bottom"
-			style={{ backgroundColor: 'white' }}
-		>
-			<CButton color="primary" size="sm" title="Add Remote Surface Connection" disabled={sortedInstances.length === 0}>
+		<Popover.Root>
+			<Popover.Trigger
+				color="primary"
+				size="sm"
+				caret
+				title="Add Remote Surface Connection"
+				disabled={sortedInstances.length === 0}
+			>
 				<FontAwesomeIcon icon={faPlus} /> Add Remote Surface Connection
-			</CButton>
-		</CPopover>
+			</Popover.Trigger>
+			<Popover.Popup arrow align="center">
+				{sortedInstances.map((instance) => (
+					<AddRemoteSurfacePopoverButton
+						key={instance.value}
+						instanceId={String(instance.value)}
+						label={instance.label}
+					/>
+				))}
+			</Popover.Popup>
+		</Popover.Root>
 	)
 })
 
@@ -69,29 +78,8 @@ function AddRemoteSurfacePopoverButton({ instanceId, label }: { instanceId: stri
 	}, [addOutboundMutation, instanceId, navigate, notifier])
 
 	return (
-		<CButton onMouseDown={addCallback} color="secondary" title={`Add ${label}`} style={{ textAlign: 'left' }}>
-			{label}
-		</CButton>
+		<Popover.Item onClick={addCallback} title={`Add ${label} connection`}>
+			<FontAwesomeIcon icon={faPlus} /> {label}
+		</Popover.Item>
 	)
 }
-
-const AddRemoteSurfacePopoverContent = observer(function AddRemoteSurfacePopoverContent({
-	sortedInstances,
-}: {
-	sortedInstances: DropdownChoiceInt[]
-}) {
-	return (
-		<>
-			{/* Note: the popover closing due to focus loss stops mouseup/click events propagating */}
-			<CButtonGroup vertical>
-				{sortedInstances.map((instance) => (
-					<AddRemoteSurfacePopoverButton
-						key={instance.value}
-						instanceId={String(instance.value)}
-						label={instance.label}
-					/>
-				))}
-			</CButtonGroup>
-		</>
-	)
-})

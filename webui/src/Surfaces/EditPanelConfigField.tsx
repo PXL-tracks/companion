@@ -1,23 +1,29 @@
-import type { CompanionSurfaceConfigField } from '@companion-app/shared/Model/Surfaces.js'
-import { CFormSwitch, CFormLabel, CCol } from '@coreui/react'
-import { faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import classNames from 'classnames'
 import { observer } from 'mobx-react-lite'
-import React, { useCallback } from 'react'
-import { TextInputField, NumberInputField, DropdownInputField } from '~/Components'
-import { ExpressionInputField } from '~/Components/ExpressionInputField'
-import { InlineHelp } from '~/Components/InlineHelp'
-import { InternalCustomVariableDropdown } from '~/Controls/InternalModuleField'
-import { InputFeatureIcons, type InputFeatureIconsProps } from '~/Controls/OptionsInputField'
+import { useCallback, useId } from 'react'
+import type { JsonValue } from 'type-fest'
+import type { CompanionSurfaceConfigField } from '@companion-app/shared/Model/Surfaces.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
 import { validateInputValue } from '@companion-app/shared/ValidateInputValue.js'
 import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
-import type { JsonValue } from 'type-fest'
-import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { DropdownInputField } from '~/Components/DropdownInputField'
+import { ExpressionInputField } from '~/Components/ExpressionInputField'
+import { FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { InlineHelpIcon } from '~/Components/InlineHelp'
+import { NumberInputField } from '~/Components/NumberInputField'
+import { SwitchInputField } from '~/Components/SwitchInputField'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
+import { InputFeatureIcons, type InputFeatureIconsProps } from '~/Controls/InputFeatures'
+import { InternalCustomVariableDropdown } from '~/Controls/InternalModuleField'
+import { StaticTextFieldText } from '~/Controls/StaticTextField'
+import { assertNever } from '~/Resources/util'
 
 interface EditPanelConfigFieldProps {
 	setValue: (key: string, value: JsonValue | undefined) => void
 	definition: CompanionSurfaceConfigField
 	value: JsonValue | undefined
+	isVisible: boolean
 }
 
 const SurfaceLocalVariables: DropdownChoiceInt[] = [
@@ -39,22 +45,38 @@ export const EditPanelConfigField = observer(function EditPanelConfigField({
 	setValue,
 	definition,
 	value,
+	isVisible,
 }: EditPanelConfigFieldProps) {
 	const id = definition.id
+	// Tri-state validity (valid/invalid/unknown) used by every field's validation indicator/styling
 	const checkValid = useCallback(
-		(value: JsonValue | undefined) => validateInputValue(definition, value).validationError === undefined,
+		(value: JsonValue | undefined) => validateInputValue(definition, value).validity,
 		[definition]
 	)
 	const setValue2 = useCallback((val: JsonValue | undefined) => setValue(id, val), [setValue, id])
+
+	const inputId = useId()
 
 	let control: JSX.Element | string | undefined = undefined
 	let features: InputFeatureIconsProps | undefined
 
 	const fieldType = definition.type
 	switch (definition.type) {
+		case 'static-text':
+			control = (
+				<StaticTextFieldText
+					id={inputId}
+					value={definition.value}
+					label={definition.label}
+					tooltip={definition.tooltip}
+					allowImages
+				/>
+			)
+			break
 		case 'textinput':
 			control = (
-				<TextInputField
+				<TextInputFieldSimple
+					id={inputId}
 					value={stringifyVariableValue(value) ?? ''}
 					placeholder={definition.placeholder}
 					multiline={definition.multiline}
@@ -72,6 +94,7 @@ export const EditPanelConfigField = observer(function EditPanelConfigField({
 
 			control = (
 				<ExpressionInputField
+					id={inputId}
 					value={stringifyVariableValue(value) ?? ''}
 					localVariables={SurfaceLocalVariables}
 					setValue={setValue2}
@@ -82,6 +105,7 @@ export const EditPanelConfigField = observer(function EditPanelConfigField({
 		case 'number':
 			control = (
 				<NumberInputField
+					id={inputId}
 					min={definition.min}
 					max={definition.max}
 					step={definition.step}
@@ -97,16 +121,16 @@ export const EditPanelConfigField = observer(function EditPanelConfigField({
 		case 'checkbox':
 			control = (
 				<div style={{ marginRight: 40, marginTop: 2 }}>
-					<CFormSwitch color="success" checked={!!value} size="xl" onChange={() => setValue2(!value)} />
+					<SwitchInputField id={inputId} value={!!value} setValue={setValue2} tooltip={definition.tooltip} />
 				</div>
 			)
 			break
 		case 'dropdown':
 			control = (
 				<DropdownInputField
+					htmlName={inputId}
 					choices={definition.choices}
 					allowCustom={definition.allowCustom}
-					minChoicesForSearch={definition.minChoicesForSearch}
 					regex={definition.regex}
 					value={value as any}
 					setValue={setValue2}
@@ -115,25 +139,28 @@ export const EditPanelConfigField = observer(function EditPanelConfigField({
 			)
 			break
 		case 'custom-variable':
-			control = <InternalCustomVariableDropdown value={value} setValue={setValue2} includeNone={true} />
+			control = <InternalCustomVariableDropdown id={inputId} value={value} setValue={setValue2} includeNone={true} />
 			break
 		default:
+			assertNever(definition)
 			control = <p>Unknown field "{fieldType}"</p>
 			break
 	}
 
 	return (
 		<>
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">
+			<FormLabel
+				htmlFor={inputId}
+				className={classNames('col-sm-4 col-form-label col-form-label-sm', { displayNone: !isVisible })}
+			>
 				{definition.label}
 				<InputFeatureIcons {...features} />
-				{definition.tooltip && (
-					<InlineHelp help={definition.tooltip}>
-						<FontAwesomeIcon style={{ marginLeft: '5px' }} icon={faQuestionCircle} />
-					</InlineHelp>
-				)}
-			</CFormLabel>
-			<CCol sm={8}>{control}</CCol>
+				{definition.tooltip && <InlineHelpIcon className="ms-1">{definition.tooltip}</InlineHelpIcon>}
+			</FormLabel>
+			<Grid.Col sm={8} className={classNames({ displayNone: !isVisible })}>
+				{control}
+				{definition.description && <div className="form-text">{definition.description}</div>}
+			</Grid.Col>
 		</>
 	)
 })

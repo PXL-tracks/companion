@@ -1,30 +1,31 @@
-import React, { useCallback, useContext, useRef } from 'react'
-import { CButton, CButtonGroup, CFormSwitch } from '@coreui/react'
+import { faLayerGroup, faPlug } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlug, faLayerGroup } from '@fortawesome/free-solid-svg-icons'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
-import { NonIdealState } from '~/Components/NonIdealState.js'
-import { useTableVisibilityHelper, VisibilityButton } from '~/Components/TableVisibility.js'
-import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
-import { MissingVersionsWarning } from '~/Instances/MissingVersionsWarning.js'
-import { useSurfaceInstanceCollectionsApi } from './SurfaceInstanceCollectionsApi.js'
-
-import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
-import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable.js'
-import { SurfaceInstancesListContextProvider, useSurfaceInstancesListContext } from './SurfaceInstancesListContext.js'
-import { useComputed } from '~/Resources/util.js'
-import { SurfaceInstanceTableRow } from './SurfaceInstanceTableRow.js'
 import { useNavigate } from '@tanstack/react-router'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import { MyErrorBoundary } from '~/Resources/Error.js'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useRef } from 'react'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
 import type {
 	ClientSurfaceInstanceConfig,
 	SurfaceInstanceCollection,
 } from '@companion-app/shared/Model/SurfaceInstance.js'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { NonIdealState } from '~/Components/NonIdealState.js'
+import { SwitchInputField } from '~/Components/SwitchInputField.js'
+import { useTableVisibilityHelper, VisibilityButton } from '~/Components/TableVisibility.js'
+import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
+import { MissingVersionsWarning } from '~/Instances/MissingVersionsWarning.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons.js'
+import { MyErrorBoundary } from '~/Resources/Error.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { useSurfaceInstanceCollectionsApi } from './SurfaceInstanceCollectionsApi.js'
+import { SurfaceInstancesListContextProvider, useSurfaceInstancesListContext } from './SurfaceInstancesListContext.js'
+import { SurfaceInstanceTableRow } from './SurfaceInstanceTableRow.js'
 
 export interface VisibleSurfaceInstancesState {
 	disabled: boolean
@@ -42,7 +43,8 @@ export const SurfaceInstancesList = observer(function SurfaceInstancesList({
 }: SurfaceInstancesListProps) {
 	const { surfaceInstances, instanceStatuses } = useContext(RootAppStoreContext)
 
-	const navigate = useNavigate({ from: '/surfaces/integrations' })
+	const navigate = useNavigate()
+
 	const doConfigureInstance = useCallback(
 		(instanceId: string | null) => {
 			if (!instanceId) {
@@ -84,33 +86,30 @@ export const SurfaceInstancesList = observer(function SurfaceInstancesList({
 
 	return (
 		<div className="connections-list-container flex-column-layout">
-			<div className="connections-list-header fixed-header">
-				<h4>Surface Integrations</h4>
-
-				<p>
-					Similar to connections, surface integrations represent the ability to use different hardware or virtual
-					surfaces to trigger buttons in Companion. Here you enable and configure the types of surfaces you want to use.
-				</p>
-
+			<div className="connections-list-header fixed-header d-flex flex-column">
 				<MissingVersionsWarning moduleType={ModuleInstanceType.Surface} instances={surfaceInstances.instances} />
 
 				<GenericConfirmModal ref={confirmModalRef} />
 
-				<CButtonGroup className="connection-group-actions mb-2">
-					<CButton
-						color="primary"
-						size="sm"
-						className="d-xl-none"
-						onClick={() => void navigate({ to: '/surfaces/integrations/add' })}
-					>
-						<FontAwesomeIcon icon={faPlug} className="me-1" />
-						Add Surface Integration
-					</CButton>
-					<CreateCollectionButton />
-				</CButtonGroup>
+				<div className="d-flex align-items-center help-button-float">
+					<ButtonGroup className="connection-group-actions m-1 me-auto">
+						<Button color="primary" size="sm" onClick={() => void navigate({ to: '/surfaces/integrations/add' })}>
+							<FontAwesomeIcon icon={faPlug} className="me-1" />
+							Add Surface Integration
+						</Button>
+						<CreateCollectionButton />
+					</ButtonGroup>
+					<ContextHelpButton action="/user-guide/surfaces">
+						<p>
+							Surface integrations are like connections but for input surfaces: they provide the ability to use
+							different hardware or virtual surfaces to trigger buttons in Companion.
+						</p>
+						<p>Click on any row to configure the integration. Click this icon for further help.</p>
+					</ContextHelpButton>
+				</div>
 			</div>
 
-			<div className="connections-list-table-container scrollable-content">
+			<div className="connections-list-table-container scrollable-content mt-2">
 				<PanelCollapseHelperProvider
 					storageId="connection-collections"
 					knownPanelIds={surfaceInstances.allCollectionIds}
@@ -150,14 +149,14 @@ function SurfaceInstancesListTableHeading() {
 
 	return (
 		<div className="flex flex-row">
-			<div className="grow">Instance</div>
+			<div className="grow">Surface Integrations </div>
 			<div className="no-break">
-				<CButtonGroup className="table-header-buttons">
+				<ButtonGroup className="table-header-buttons">
 					<VisibilityButton {...visibleInstances} keyId="disabled" color="secondary" label="Disabled" />
 					<VisibilityButton {...visibleInstances} keyId="ok" color="success" label="OK" />
 					<VisibilityButton {...visibleInstances} keyId="warning" color="warning" label="Warning" />
 					<VisibilityButton {...visibleInstances} keyId="error" color="danger" label="Error" />
-				</CButtonGroup>
+				</ButtonGroup>
 			</div>
 		</div>
 	)
@@ -177,9 +176,7 @@ function SurfaceInstancesGroupHeaderContent({ collection }: { collection: Surfac
 	const setEnabledMutation = useMutationExt(trpc.instances.surfaces.collections.setEnabled.mutationOptions())
 
 	const setEnabled = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const enabled = e.target.checked
-
+		(enabled: boolean) => {
 			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e) => {
 				console.error('Failed to set collection enabled state', stringifyError(e))
 			})
@@ -188,14 +185,14 @@ function SurfaceInstancesGroupHeaderContent({ collection }: { collection: Surfac
 	)
 
 	return (
-		<CFormSwitch
-			className="ms-1"
-			color="success"
-			checked={collection.metaData.enabled}
-			onChange={setEnabled}
-			title={collection.metaData.enabled ? 'Disable collection' : 'Enable collection'}
-			size="xl"
-		/>
+		<div className="ms-1">
+			<SwitchInputField
+				id={undefined}
+				value={collection.metaData.enabled}
+				setValue={setEnabled}
+				tooltip={collection.metaData.enabled ? 'Disable collection' : 'Enable collection'}
+			/>
+		</div>
 	)
 }
 
@@ -234,8 +231,8 @@ function CreateCollectionButton() {
 	}, [createMutation])
 
 	return (
-		<CButton color="info" size="sm" onClick={doCreateCollection}>
+		<Button color="info" size="sm" onClick={doCreateCollection}>
 			<FontAwesomeIcon icon={faLayerGroup} /> Create Collection
-		</CButton>
+		</Button>
 	)
 }

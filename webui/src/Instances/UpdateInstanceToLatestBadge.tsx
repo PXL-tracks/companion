@@ -1,12 +1,12 @@
-import React from 'react'
+import { faCircleUp } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
+import semver from 'semver'
+import { InstanceVersionUpdatePolicy, type ClientInstanceConfigBase } from '@companion-app/shared/Model/Instance.js'
+import { InlineHelpCustom } from '~/Components/InlineHelp.js'
 import { useModuleStoreInfo } from '~/Modules/useModuleStoreInfo.js'
 import { useModuleUpgradeToVersions } from '~/Modules/useModuleUpgradeToVersions.js'
 import { getLatestVersion } from './VersionUtil.js'
-import semver from 'semver'
-import { InstanceVersionUpdatePolicy, type ClientInstanceConfigBase } from '@companion-app/shared/Model/Instance.js'
-import { faCircleUp } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 
 interface UpdateInstanceToLatestBadgeProps {
 	instance: ClientInstanceConfigBase
@@ -35,8 +35,8 @@ const UpdateInstanceToLatestBadgeInner = observer(function UpdateInstanceToLates
 		if (upgradeToVersions.length > 0 && instance.updatePolicy !== InstanceVersionUpdatePolicy.Manual) {
 			message = 'A replacement for this module is available'
 		} else {
-			const latestStableVersion = getLatestVersion(moduleStoreInfo?.versions, false)
-			const latestBetaVersion = getLatestVersion(moduleStoreInfo?.versions, true)
+			const latestStableVersion = getLatestVersion(instance.moduleType, moduleStoreInfo?.versions, false)
+			const latestBetaVersion = getLatestVersion(instance.moduleType, moduleStoreInfo?.versions, true)
 
 			let latestVersion: string | null = instance.moduleVersionId
 
@@ -66,9 +66,8 @@ const UpdateInstanceToLatestBadgeInner = observer(function UpdateInstanceToLates
 	if (!message) return null
 
 	return (
-		<>
-			&nbsp;
-			<FontAwesomeIcon icon={faCircleUp} title={message} />
-		</>
+		<InlineHelpCustom help={message} className="ms-1">
+			<FontAwesomeIcon icon={faCircleUp} aria-label={message} />
+		</InlineHelpCustom>
 	)
 })

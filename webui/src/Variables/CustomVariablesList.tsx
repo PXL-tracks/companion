@@ -1,34 +1,39 @@
-import React, { useCallback, useContext, useRef, useState } from 'react'
-import { CButton, CButtonGroup, CForm, CFormInput, CInputGroup } from '@coreui/react'
-import { useComputed } from '~/Resources/util.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
 	faArrowLeft,
 	faCompressArrowsAlt,
 	faExpandArrowsAlt,
 	faLayerGroup,
 	faList,
-	faTimes,
 } from '@fortawesome/free-solid-svg-icons'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { isCustomVariableValid } from '@companion-app/shared/CustomVariable.js'
-import { PanelCollapseHelperProvider, usePanelCollapseHelperContext } from '~/Helpers/CollapseHelper.js'
-import type { CustomVariableDefinition } from '@companion-app/shared/Model/CustomVariableModel.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import { NonIdealState } from '~/Components/NonIdealState.js'
-import { Link } from '@tanstack/react-router'
-import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable'
+import { useCallback, useContext, useRef, useState } from 'react'
+import { isCustomVariableValid } from '@companion-app/shared/CustomVariable.js'
+import type { CustomVariableDefinition } from '@companion-app/shared/Model/CustomVariableModel.js'
+import { Button, ButtonGroup, LinkButton } from '~/Components/Button'
+import {
+	CollectionsNestingTable,
+	UNGROUPED_PANEL_ID,
+} from '~/Components/CollectionsNestingTable/CollectionsNestingTable'
 import type {
 	CollectionsNestingTableCollection,
 	CollectionsNestingTableItem,
 } from '~/Components/CollectionsNestingTable/Types'
-import { useCustomVariablesCollectionsApi } from './CustomVariablesCollectionsApi'
+import { Form, InputGroup } from '~/Components/Form.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { NonIdealState } from '~/Components/NonIdealState.js'
+import { SearchBox } from '~/Components/SearchBox'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
+import { PanelCollapseHelperProvider, usePanelCollapseHelperContext } from '~/Helpers/CollapseHelper.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons'
+import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { useCustomVariablesApi } from './CustomVariablesApi'
+import { useCustomVariablesCollectionsApi } from './CustomVariablesCollectionsApi'
+import { CustomVariableRow } from './CustomVariablesListRow'
 import { CustomVariablesTableContextProvider } from './CustomVariablesTableContext'
 import { useVariablesValuesForLabel } from './useVariablesValuesForLabel'
-import { CustomVariableRow } from './CustomVariablesListRow'
-import { trpc, useMutationExt } from '~/Resources/TRPC'
 
 export type CustomVariableDefinitionExt = Omit<CustomVariableDefinition, 'collectionId'> & CollectionsNestingTableItem
 type CustomVariableCollectionExt = CollectionsNestingTableCollection
@@ -39,13 +44,15 @@ export const CustomVariablesListPage = observer(function CustomVariablesList() {
 	const customVariableValues = useVariablesValuesForLabel('custom')
 
 	const allVariableNames = useComputed(
-		() => [...Array.from(customVariables.customVariables.keys()), ...customVariables.allCustomVariableCollectionIds],
+		() => [
+			...Array.from(customVariables.customVariables.keys()),
+			...customVariables.allCustomVariableCollectionIds,
+			UNGROUPED_PANEL_ID,
+		],
 		[customVariables]
 	)
 
 	const [filter, setFilter] = useState('')
-	const clearFilter = useCallback(() => setFilter(''), [])
-	const updateFilter = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setFilter(e.currentTarget.value), [])
 
 	let filterRegexp: RegExp | null = null
 	if (filter) {
@@ -86,38 +93,30 @@ export const CustomVariablesListPage = observer(function CustomVariablesList() {
 
 			<PanelCollapseHelperProvider storageId="custom_variables" knownPanelIds={allVariableNames}>
 				<div>
-					<h4>Custom Variables</h4>
+					<h4 className="button-inline">
+						Custom Variables
+						<ContextHelpButton action="/user-guide/config/variables#custom-variables" />
+					</h4>
 					<p className="mb-2">
 						Here you can create some variables which you can define the values of, and update with actions
 					</p>
 
-					<CButtonGroup size="sm">
-						<CButton color="primary" as={Link} to="/variables">
+					<ButtonGroup>
+						<LinkButton color="primary" size="sm" to="/variables">
 							<FontAwesomeIcon icon={faArrowLeft} />
 							&nbsp; Go back
-						</CButton>
-						<CButton color="secondary" disabled>
+						</LinkButton>
+						<Button color="secondary" size="sm" disabled>
 							Custom Variables
-						</CButton>
+						</Button>
 						<CreateCollectionButton />
 						{(customVariables.customVariables.size > 0 || customVariables.customVariableCollections.size > 0) && (
 							<ExpandCollapseButtons />
 						)}
-					</CButtonGroup>
+					</ButtonGroup>
 				</div>
 
-				<CInputGroup className="variables-table-filter">
-					<CFormInput
-						type="text"
-						placeholder="Filter ..."
-						onChange={updateFilter}
-						value={filter}
-						style={{ fontSize: '1.2em' }}
-					/>
-					<CButton color="danger" onClick={clearFilter}>
-						<FontAwesomeIcon icon={faTimes} />
-					</CButton>
-				</CInputGroup>
+				<SearchBox placeholder="Filter ..." filter={filter} setFilter={setFilter} className="mb-1 mt-2" />
 
 				<div className="variables-table-scroller ">
 					<CustomVariablesTableContextProvider
@@ -129,6 +128,7 @@ export const CustomVariablesListPage = observer(function CustomVariablesList() {
 								// Heading={TriggerListTableHeading}
 								NoContent={CustomVariableListNoContent}
 								ItemRow={CustomVariableItemRow}
+								showCollapseButtons
 								itemName="custom variable"
 								dragId="custom-variable"
 								collectionsApi={collectionsApi}
@@ -159,29 +159,35 @@ const ExpandCollapseButtons = observer(function ExpandCollapseButtons() {
 	const { variablesStore: customVariables } = useContext(RootAppStoreContext)
 
 	const rootCustomVariables = Array.from(customVariables.customVariables.keys()) // TODO - filter
-	const rootPanels = [...customVariables.rootCustomVariableCollections().map((c) => c.id), ...rootCustomVariables]
+	const rootPanels = [
+		...customVariables.rootCustomVariableCollections().map((c) => c.id),
+		...rootCustomVariables,
+		UNGROUPED_PANEL_ID,
+	]
 
 	const panelCollapseHelper = usePanelCollapseHelperContext()
 
 	return (
 		<>
 			{panelCollapseHelper.canExpandAll(null, rootPanels) && (
-				<CButton
+				<Button
 					color="secondary"
+					size="sm"
 					onClick={() => panelCollapseHelper.setAllExpanded(null, rootPanels)}
 					title="Expand all"
 				>
 					<FontAwesomeIcon icon={faExpandArrowsAlt} /> Expand All
-				</CButton>
+				</Button>
 			)}
 			{panelCollapseHelper.canCollapseAll(null, rootPanels) && (
-				<CButton
+				<Button
 					color="secondary"
+					size="sm"
 					onClick={() => panelCollapseHelper.setAllCollapsed(null, rootPanels)}
 					title="Collapse all"
 				>
 					<FontAwesomeIcon icon={faCompressArrowsAlt} /> Collapse All
-				</CButton>
+				</Button>
 			)}
 		</>
 	)
@@ -223,19 +229,20 @@ function AddVariablePanel() {
 	)
 
 	return (
-		<CForm onSubmit={doCreateNew}>
-			<CInputGroup>
-				<CFormInput
-					type="text"
+		<Form onSubmit={doCreateNew}>
+			<InputGroup>
+				<TextInputFieldSimple
+					id={undefined}
+					setValue={setNewName}
 					value={newName}
-					onChange={(e) => setNewName(e.currentTarget.value)}
 					placeholder="variableName"
+					immediateValue
 				/>
-				<CButton color="primary" onClick={doCreateNew} disabled={!isCustomVariableValid(newName)}>
+				<Button color="primary" onClick={doCreateNew} disabled={!isCustomVariableValid(newName)}>
 					Add
-				</CButton>
-			</CInputGroup>
-		</CForm>
+				</Button>
+			</InputGroup>
+		</Form>
 	)
 }
 
@@ -249,8 +256,8 @@ function CreateCollectionButton() {
 	}, [createMutation])
 
 	return (
-		<CButton color="info" size="sm" onClick={doCreateCollection}>
+		<Button color="info" size="sm" onClick={doCreateCollection}>
 			<FontAwesomeIcon icon={faLayerGroup} /> Create Collection
-		</CButton>
+		</Button>
 	)
 }

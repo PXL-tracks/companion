@@ -9,57 +9,59 @@
  * this program.
  */
 
+import type EventEmitter from 'node:events'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import {
+	EntityModelType,
+	type ActionEntityModel,
+	type FeedbackEntityModel,
+	type FeedbackValue,
+	type SomeEntityModel,
+} from '@companion-app/shared/Model/EntityModel.js'
+import { convertExpressionOptionsWithoutParsing } from '@companion-app/shared/Model/Options.js'
+import type { VariableValue, VariableValues } from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
+import type { CompanionOptionValues, Complete } from '@companion-module/base'
+import type { JsonValue } from '@companion-module/host'
+import type { ActionRunner } from '../Controls/ActionRunner.js'
+import type { ControlCommonEvents } from '../Controls/ControlDependencies.js'
+import type { ControlsController } from '../Controls/Controller.js'
+import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
+import type { NewFeedbackValue } from '../Controls/Entities/Types.js'
+import type { IControlStore } from '../Controls/IControlStore.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import type { InstanceController } from '../Instance/Controller.js'
+import type { InstanceDefinitions } from '../Instance/Definitions.js'
+import LogController from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import type { AppInfo } from '../Registry.js'
+import type { SurfaceController } from '../Surface/Controller.js'
+import type { VariablesController } from '../Variables/Controller.js'
+import type { LocalVariablesController } from '../Variables/LocalVariablesController.js'
+import type { VariableValueEntry } from '../Variables/Values.js'
+import { InternalActionRecorder } from './ActionRecorder.js'
 import { InternalBuildingBlocks } from './BuildingBlocks.js'
+import { InternalControls } from './Controls.js'
+import { InternalCustomVariables } from './CustomVariables.js'
+import { InternalInstance } from './Instance.js'
+import { InternalPage } from './Page.js'
+import { InternalSurface } from './Surface.js'
+import { InternalSystem } from './System.js'
+import { InternalTime } from './Time.js'
+import { InternalTriggers } from './Triggers.js'
 import type {
+	ActionForInternalExecution,
 	ActionForVisitor,
+	FeedbackForInternalExecution,
 	FeedbackForVisitor,
 	InternalModuleFragment,
 	InternalVisitor,
-	FeedbackForInternalExecution,
-	ActionForInternalExecution,
 } from './Types.js'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
-import type { VariableValue, VariableValues } from '@companion-app/shared/Model/Variables.js'
-import type { ControlsController } from '../Controls/Controller.js'
-import type { IControlStore } from '../Controls/IControlStore.js'
-import type { VariablesController } from '../Variables/Controller.js'
-import type { InstanceDefinitions } from '../Instance/Definitions.js'
-import type { IPageStore } from '../Page/Store.js'
-import LogController from '../Log/Controller.js'
-import {
-	EntityModelType,
-	type FeedbackValue,
-	type ActionEntityModel,
-	type FeedbackEntityModel,
-	type SomeEntityModel,
-} from '@companion-app/shared/Model/EntityModel.js'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import { assertNever } from '@companion-app/shared/Util.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { CompanionOptionValues, Complete } from '@companion-module/base'
-import { InternalSystem } from './System.js'
-import type { VariableValueEntry } from '../Variables/Values.js'
-import type { InstanceController } from '../Instance/Controller.js'
-import type { SurfaceController } from '../Surface/Controller.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import { InternalActionRecorder } from './ActionRecorder.js'
-import { InternalInstance } from './Instance.js'
-import { InternalTime } from './Time.js'
-import { InternalControls } from './Controls.js'
-import { InternalCustomVariables } from './CustomVariables.js'
-import { InternalPage } from './Page.js'
-import { InternalSurface } from './Surface.js'
-import { InternalTriggers } from './Triggers.js'
 import { InternalVariables } from './Variables.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { ControlCommonEvents } from '../Controls/ControlDependencies.js'
-import type EventEmitter from 'node:events'
-import type { AppInfo } from '../Registry.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { stringifyError } from '@companion-app/shared/Stringify.js'
-import { convertExpressionOptionsWithoutParsing } from '@companion-app/shared/Model/Options.js'
-import type { NewFeedbackValue } from '../Controls/Entities/Types.js'
-import type { ActionRunner } from '../Controls/ActionRunner.js'
 
 interface FeedbackEntityState {
 	controlId: string
@@ -107,6 +109,7 @@ export class InternalController {
 		surfaceController: SurfaceController,
 		graphicsController: GraphicsController,
 		userConfigController: DataUserConfig,
+		localVariablesController: LocalVariablesController,
 		controlEvents: EventEmitter<ControlCommonEvents>,
 		actionRunner: ActionRunner,
 		requestExit: (fromInternal: boolean, restart: boolean) => void
@@ -120,14 +123,14 @@ export class InternalController {
 			this.#buildingBlocksFragment,
 			new InternalActionRecorder(instanceController.actionRecorder, this.#pageStore),
 			new InternalInstance(instanceController),
-			new InternalTime(),
+			new InternalTime(userConfigController),
 			new InternalControls(graphicsController, this.#controlsStore, this.#pageStore, controlEvents),
 			new InternalCustomVariables(this.#variablesController),
 			new InternalPage(this.#pageStore),
 			new InternalSurface(surfaceController, this.#controlsStore, this.#pageStore),
 			new InternalSystem(appInfo, userConfigController, this.#variablesController, requestExit),
 			new InternalTriggers(controls),
-			new InternalVariables(this.#controlsStore, this.#pageStore)
+			new InternalVariables(localVariablesController)
 		)
 
 		// Listen for events from the fragments
@@ -318,6 +321,8 @@ export class InternalController {
 			let parsedOptions: CompanionOptionValues
 			if (entityDefinition.optionsSupportExpressions) {
 				const parseRes = parser.parseEntityOptions(entityDefinition, feedbackState.entityModel.options)
+				feedbackState.referencedVariables = parseRes.referencedVariableIds
+
 				if (!parseRes.ok) {
 					this.#logger.warn(
 						`Failed to parse options for feedback ${feedbackState.entityModel.definitionId} in control ${feedbackState.controlId}: ${JSON.stringify(parseRes.optionErrors)}`
@@ -327,7 +332,6 @@ export class InternalController {
 					)
 				} else {
 					parsedOptions = parseRes.parsedOptions
-					feedbackState.referencedVariables = parseRes.referencedVariableIds
 				}
 			} else {
 				parsedOptions = convertExpressionOptionsWithoutParsing(feedbackState.entityModel.options)
@@ -445,7 +449,7 @@ export class InternalController {
 	/**
 	 * Run a single internal action
 	 */
-	async executeAction(action: ControlEntityInstance, extras: RunActionExtras): Promise<void> {
+	async executeAction(action: ControlEntityInstance, extras: RunActionExtras): Promise<JsonValue | undefined> {
 		if (!this.#initialized) throw new Error(`InternalController is not initialized`)
 
 		if (action.type !== EntityModelType.Action)
@@ -460,7 +464,7 @@ export class InternalController {
 			if (!entityDefinition) return
 
 			const overrideVariableValues: VariableValues = {
-				'$(this:surface_id)': extras.surfaceId,
+				'this:surface_id': extras.surfaceId,
 			}
 			const parser = this.#controlsStore.createVariablesAndExpressionParser(extras.controlId, overrideVariableValues)
 
@@ -490,13 +494,13 @@ export class InternalController {
 
 			for (const fragment of this.#fragments) {
 				if ('executeAction' in fragment && typeof fragment.executeAction === 'function') {
-					let value = fragment.executeAction(executionAction, extras, parser)
+					let result = fragment.executeAction(executionAction, extras, parser)
 					// Only await if it is a promise, to avoid unnecessary async pauses
-					value = value instanceof Promise ? await value : value
+					result = result instanceof Promise ? await result : result
 
-					if (value) {
+					if (result) {
 						// It was handled, so break
-						return
+						return result.result
 					}
 				}
 			}
@@ -507,6 +511,8 @@ export class InternalController {
 				)}`
 			)
 		}
+
+		return undefined
 	}
 
 	/**
@@ -590,6 +596,8 @@ export class InternalController {
 						hasLearn: action.hasLearn ?? false,
 						learnTimeout: action.learnTimeout,
 
+						actionHasResult: !!action.actionHasResult,
+
 						showButtonPreview: action.showButtonPreview ?? false,
 						supportsChildGroups: action.supportsChildGroups ?? [],
 
@@ -597,6 +605,8 @@ export class InternalController {
 						showInvert: false,
 						feedbackType: null,
 						feedbackStyle: undefined,
+						feedbackAffectedProperties: undefined,
+						feedbackDisableStyleOverrides: false,
 
 						optionsSupportExpressions: action.optionsSupportExpressions ?? false,
 
@@ -624,9 +634,13 @@ export class InternalController {
 						hasLearn: feedback.hasLearn ?? false,
 						learnTimeout: feedback.learnTimeout,
 
+						actionHasResult: undefined,
+
 						entityType: EntityModelType.Feedback,
 						showButtonPreview: feedback.showButtonPreview ?? false,
 						supportsChildGroups: feedback.supportsChildGroups ?? [],
+						feedbackAffectedProperties: feedback.feedbackAffectedProperties ?? undefined,
+						feedbackDisableStyleOverrides: feedback.feedbackDisableStyleOverrides ?? false,
 
 						optionsSupportExpressions: feedback.optionsSupportExpressions ?? false,
 

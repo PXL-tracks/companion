@@ -1,5 +1,4 @@
 import './Resources/Sentry.js'
-
 import '@fontsource/roboto'
 import '@fontsource/fira-code'
 import './App.scss'
@@ -8,25 +7,32 @@ import alignmentImg from '~/scss/img/alignment.png'
 import checkImg from '~/scss/img/check.svg?no-inline'
 import indeterminateImg from '~/scss/img/indeterminate.svg?no-inline' // This doesn't embed if being inlined
 
+// polyfills
+import 'intersection-observer'
+// Iterator helpers (Iterator.prototype.map/filter/etc) - can't be usage-detected by plugin-legacy, so import explicitly
+import 'core-js/proposals/iterator-helpers'
+// -------
+import { createRouter, RouterProvider } from '@tanstack/react-router'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { evictBySizeIfNeeded } from '~/Helpers/CollapseStorage.js'
+import { makeAbsolutePath } from '~/Resources/util.js'
+import './Resources/TRPC.js' // Ensure TRPC is loaded ASAP
+
+// Import the generated route tree
+import { routeTree } from './routeTree.gen.js'
+
+// Relieve any pre-existing collapse-state bloat in localStorage before first render, so that
+// writes don't immediately fail with QuotaExceededError. (The owner-based sweep runs later,
+// once the stores have loaded.)
+evictBySizeIfNeeded()
+
 if (process.env.NODE_ENV === 'development') {
 	const defineProperties = Object.defineProperties
 	Object.defineProperties = function (o, props) {
 		return o === console ? o : defineProperties(o, props)
 	}
 }
-
-// polyfills
-import 'intersection-observer'
-
-import React from 'react'
-import { createRoot } from 'react-dom/client'
-import { RouterProvider, createRouter } from '@tanstack/react-router'
-
-import { makeAbsolutePath } from '~/Resources/util.js'
-import './Resources/TRPC.js' // Ensure TRPC is loaded ASAP
-
-// Import the generated route tree
-import { routeTree } from './routeTree.gen.js'
 
 // Create a new router instance
 const router = createRouter({

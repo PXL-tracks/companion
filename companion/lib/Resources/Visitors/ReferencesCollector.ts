@@ -1,6 +1,6 @@
-import { isExpressionOrValue } from '@companion-app/shared/Model/Options.js'
-import type { InternalController } from '../../Internal/Controller.js'
+import { isExpressionOrValue, type ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
 import { TrySplitVariableId } from '@companion-app/shared/Variables.js'
+import type { InternalController } from '../../Internal/Controller.js'
 import { VisitorReferencesBase } from './VisitorReferencesBase.js'
 
 export class VisitorReferencesCollector extends VisitorReferencesBase<VisitorReferencesCollectorVisitor> {
@@ -8,11 +8,17 @@ export class VisitorReferencesCollector extends VisitorReferencesBase<VisitorRef
 		internalModule: InternalController,
 		foundConnectionIds: Set<string> | undefined,
 		foundConnectionLabels: Set<string> | undefined,
-		foundVariables: Set<string> | undefined
+		foundVariables: Set<string> | undefined,
+		foundOutboundSurfaceIds: Set<string> | undefined
 	) {
 		super(
 			internalModule,
-			new VisitorReferencesCollectorVisitor(foundConnectionIds, foundConnectionLabels, foundVariables)
+			new VisitorReferencesCollectorVisitor(
+				foundConnectionIds,
+				foundConnectionLabels,
+				foundVariables,
+				foundOutboundSurfaceIds
+			)
 		)
 	}
 }
@@ -36,14 +42,31 @@ export class VisitorReferencesCollectorVisitor {
 	 */
 	readonly variables: Set<string>
 
+	/**
+	 * Referenced outbound surface ids
+	 */
+	readonly outboundSurfaceIds: Set<string>
+
 	constructor(
 		foundConnectionIds: Set<string> | undefined,
 		foundConnectionLabels: Set<string> | undefined,
-		foundVariables: Set<string> | undefined
+		foundVariables: Set<string> | undefined,
+		foundOutboundSurfaceIds: Set<string> | undefined
 	) {
 		this.connectionLabels = foundConnectionLabels || new Set()
 		this.connectionIds = foundConnectionIds || new Set()
 		this.variables = foundVariables || new Set()
+		this.outboundSurfaceIds = foundOutboundSurfaceIds || new Set()
+	}
+
+	/**
+	 * Visit an outbound surface id property
+	 */
+	visitOutboundSurfaceId(obj: Record<string, any>, propName: string, _feedbackId?: string): void {
+		const surfaceId = this.#getAndUnwrapPropertyValue(obj, propName)
+		if (surfaceId.isExpression || typeof surfaceId.value !== 'string') return
+
+		this.outboundSurfaceIds.add(surfaceId.value)
 	}
 
 	/**
@@ -51,18 +74,18 @@ export class VisitorReferencesCollectorVisitor {
 	 */
 	visitConnectionId(obj: Record<string, any>, propName: string, _feedbackId?: string): void {
 		const connectionId = this.#getAndUnwrapPropertyValue(obj, propName)
-		if (typeof connectionId !== 'string') return
+		if (connectionId.isExpression || typeof connectionId.value !== 'string') return
 
-		this.connectionIds.add(connectionId)
+		this.connectionIds.add(connectionId.value)
 	}
 	/**
 	 * Visit a connection id array property
 	 */
 	visitConnectionIdArray(obj: Record<string, any>, propName: string, _feedbackId?: string): void {
 		const connectionIds = this.#getAndUnwrapPropertyValue(obj, propName)
-		if (!Array.isArray(connectionIds)) return
+		if (connectionIds.isExpression || !Array.isArray(connectionIds.value)) return
 
-		for (const id of connectionIds) {
+		for (const id of connectionIds.value) {
 			if (typeof id === 'string') this.connectionIds.add(id)
 		}
 	}
@@ -71,7 +94,7 @@ export class VisitorReferencesCollectorVisitor {
 	 * Visit a property containing variables
 	 */
 	visitString(obj: Record<string, any>, propName: string): void {
-		const rawStr = this.#getAndUnwrapPropertyValue(obj, propName)
+		const rawStr = this.#getAndUnwrapPropertyValue(obj, propName).value
 		if (typeof rawStr !== 'string') return
 
 		// Everybody stand back. I know regular expressions. - xckd #208 /ck/kc/
@@ -89,20 +112,20 @@ export class VisitorReferencesCollectorVisitor {
 	 */
 	visitVariableName(obj: Record<string, any>, propName: string): void {
 		const variableName = this.#getAndUnwrapPropertyValue(obj, propName)
-		if (typeof variableName !== 'string') return
+		if (variableName.isExpression || typeof variableName.value !== 'string') return
 
-		const label = TrySplitVariableId(variableName)
+		const label = TrySplitVariableId(variableName.value)
 		if (label) {
 			this.connectionLabels.add(label[0])
-			this.variables.add(variableName)
+			this.variables.add(variableName.value)
 		}
 	}
 
-	#getAndUnwrapPropertyValue(obj: Record<string, any>, propName: string): any {
+	#getAndUnwrapPropertyValue(obj: Record<string, any>, propName: string): ExpressionOrValue<any> {
 		const value = obj[propName]
 		if (isExpressionOrValue(value)) {
-			return value.value
+			return value
 		}
-		return value
+		return { value, isExpression: false }
 	}
 }

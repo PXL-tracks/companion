@@ -1,5 +1,5 @@
-import type { Logger } from '../../Log/Controller.js'
 import { validateActionSetId } from '@companion-app/shared/ControlId.js'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type { ActionStepOptions } from '@companion-app/shared/Model/ActionModel.js'
 import type { NormalButtonSteps } from '@companion-app/shared/Model/ButtonModel.js'
 import type {
@@ -13,12 +13,15 @@ import type {
 	CompanionPresetAction,
 	CompanionPresetDefinition,
 } from '@companion-module/base-old'
+import type { Complete } from '@companion-module/host'
+import type { Logger } from '../../Log/Controller.js'
+import { ConvertLegacyStyleToElements } from '../../Resources/ConvertLegacyStyleToElements.js'
+import type { PresetEntryConversionContext } from './Thread/PresetInternalEntities.js'
 import {
 	convertActionsDelay,
 	convertPresetFeedbacksToEntities,
 	ConvertPresetStyleToDrawStyle,
 } from './Thread/PresetUtils.js'
-import type { Complete } from '@companion-module/host'
 
 const DefaultStepOptions: Complete<ActionStepOptions> = {
 	runWhileHeld: [],
@@ -57,6 +60,7 @@ export function ConvertPresetDefinitions(
 
 	const sortedCategories = new Set<string>(rawPresets.map((p) => p.category)).values().toArray().sort()
 	sortedCategories.forEach((category, i) => {
+		if (BANNED_PROPS.has(category)) return
 		// This is not very efficient, but probably good enough?
 		const presetsInCategory = rawPresets.filter((p) => p.category === category)
 
@@ -100,6 +104,7 @@ function splitPresetsIntoGroups(presets: (CompanionPresetDefinition & { id: stri
 			currentIndex = 0
 			groups.push(currentGroup)
 		} else if (preset.type === 'button') {
+			if (BANNED_PROPS.has(preset.id)) continue
 			// Add to current group, or create a new group without heading if needed
 			if (!currentGroup) {
 				currentGroup = {
@@ -139,22 +144,44 @@ function ConvertPresetDefinition(
 	try {
 		if (rawPreset.type !== 'button') return null
 
+		// Legacy modules predate `internal:*` preset entries and have no host-side validation of them,
+		// so they must never be translated to internal entities
+		const entryCtx: PresetEntryConversionContext = {
+			logger,
+			connectionId,
+			connectionUpgradeIndex,
+			allowInternalEntities: false,
+		}
+
+		const parsedStyle = ConvertLegacyStyleToElements(
+			ConvertPresetStyleToDrawStyle(rawPreset.style),
+			convertPresetFeedbacksToEntities(rawPreset.feedbacks, entryCtx),
+			rawPreset.previewStyle,
+			// Legacy (pre-2.0) modules do not declare per-feedback affectedProperties
+			null
+		)
+
 		const presetDefinition: PresetDefinition = {
 			id: presetId,
 			name: rawPreset.name,
 			type: rawPreset.type,
-			previewStyle: rawPreset.previewStyle,
 			model: {
-				type: 'button',
+				type: 'button-layered',
 				options: {
 					rotaryActions: rawPreset.options?.rotaryActions ?? false,
 					stepProgression: (rawPreset.options?.stepAutoProgress ?? true) ? 'auto' : 'manual',
+					canModifyStyleInApis: false,
 				},
-				style: ConvertPresetStyleToDrawStyle(rawPreset.style),
-				feedbacks: convertPresetFeedbacksToEntities(rawPreset.feedbacks, connectionId, connectionUpgradeIndex),
+
+				feedbacks: parsedStyle.feedbacks,
+				style: {
+					layers: parsedStyle.layers,
+				},
+
 				steps: {},
 				localVariables: [],
 			},
+			presetExtraFeedbacks: parsedStyle.previewStyleFeedbacks,
 			keywords: undefined,
 		}
 
@@ -189,12 +216,7 @@ function ConvertPresetDefinition(
 					if (!isNaN(Number(setId)) && set.options?.runWhileHeld) newStep.options.runWhileHeld.push(Number(setId))
 
 					if (setActions) {
-						newStep.action_sets[setIdSafe] = convertActionsDelay(
-							setActions,
-							connectionId,
-							rawPreset.options?.relativeDelay,
-							connectionUpgradeIndex
-						)
+						newStep.action_sets[setIdSafe] = convertActionsDelay(setActions, rawPreset.options?.relativeDelay, entryCtx)
 					}
 				}
 			}

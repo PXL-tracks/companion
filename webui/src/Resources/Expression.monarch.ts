@@ -1,6 +1,7 @@
-import type { languages, IRange } from 'monaco-editor'
-import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
+import type { IRange, languages } from 'monaco-editor'
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api.d.ts' // In theory importable with import type { Monaco } from '@monaco-editor/react'
+import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
+import { companionExpressionColorProvider } from './Expression.colors.js'
 
 export const COMPANION_EXPRESSION_LANGUAGE_ID = 'companionExpression'
 
@@ -14,6 +15,8 @@ export function registerCompanionExpressionLanguage(monaco: typeof Monaco): void
 		COMPANION_EXPRESSION_LANGUAGE_ID,
 		companionExpressionCompletionItemProvider
 	)
+	// Replaces Monaco's built-in colour detection, which is unsafe here - see Expression.colors.ts
+	monaco.languages.registerColorProvider(COMPANION_EXPRESSION_LANGUAGE_ID, companionExpressionColorProvider)
 
 	// Define custom theme for Companion Expression language (based on JavaScript colors)
 	monaco.editor.defineTheme('companion-expression-light', {
@@ -76,8 +79,15 @@ export const builtinFunctionCompletions: Array<{
 		detail: 'randomInt(min, max)',
 		documentation: 'Returns a random integer between min and max',
 	},
-	{ name: 'log', detail: 'log(number)', documentation: 'Returns the natural logarithm of a number' },
+	{
+		name: 'log',
+		detail: 'log(number, [base])',
+		documentation: 'Returns the logarithm of a number (natural log if no base given)',
+	},
 	{ name: 'log10', detail: 'log10(number)', documentation: 'Returns the base-10 logarithm of a number' },
+	{ name: 'exp', detail: 'exp(number)', documentation: 'Returns e raised to the power of a number' },
+	{ name: 'sqrt', detail: 'sqrt(number)', documentation: 'Returns the square root of a number' },
+	{ name: 'pow', detail: 'pow(base, exponent)', documentation: 'Returns the base raised to the power of the exponent' },
 
 	// String operations
 	{ name: 'trim', detail: 'trim(string)', documentation: 'Removes whitespace from both ends of a string' },
@@ -119,6 +129,12 @@ export const builtinFunctionCompletions: Array<{
 		name: 'replaceAll',
 		detail: 'replaceAll(string, find, replace)',
 		documentation: 'Replaces all occurrences of find with replace',
+	},
+	{
+		name: 'stringCompare',
+		detail: 'stringCompare(a, b)',
+		documentation:
+			'Compares two strings for sorting. Returns a negative number if a sorts before b, 0 if they are equal, or a positive number if a sorts after b. Useful as a comparator for arraySort',
 	},
 	{
 		name: 'decode',
@@ -200,6 +216,74 @@ export const builtinFunctionCompletions: Array<{
 		detail: 'arrayLastIndexOf(array, value, offset)',
 		documentation: 'Returns the last index of value in array',
 	},
+	{
+		name: 'arraySlice',
+		detail: 'arraySlice(array, start, end)',
+		documentation:
+			'Returns a shallow copy of a portion of an array between the start and end indices, without changing the original',
+	},
+	{
+		name: 'arrayConcat',
+		detail: 'arrayConcat(...arrays)',
+		documentation: 'Combines multiple arrays into one, wrapping any non-array values as single elements',
+	},
+	{
+		name: 'arrayFlat',
+		detail: 'arrayFlat(array)',
+		documentation: 'Flattens a nested array by one level',
+	},
+	{
+		name: 'arrayMap',
+		detail: 'arrayMap(array, fn)',
+		documentation: 'Returns a new array with fn applied to each element',
+	},
+	{
+		name: 'arrayFilter',
+		detail: 'arrayFilter(array, fn)',
+		documentation: 'Returns the elements for which fn returns true',
+	},
+	{
+		name: 'arrayReduce',
+		detail: 'arrayReduce(array, fn, initial)',
+		documentation: 'Reduces the array to a single value using fn(acc, value)',
+	},
+	{
+		name: 'arrayForEach',
+		detail: 'arrayForEach(array, fn)',
+		documentation: 'Runs fn for each element (no return value)',
+	},
+	{
+		name: 'arrayFind',
+		detail: 'arrayFind(array, fn)',
+		documentation: 'Returns the first element for which fn returns true',
+	},
+	{
+		name: 'arrayFindIndex',
+		detail: 'arrayFindIndex(array, fn)',
+		documentation: 'Returns the index of the first element for which fn returns true',
+	},
+	{
+		name: 'arraySome',
+		detail: 'arraySome(array, fn)',
+		documentation: 'Returns true if fn returns true for any element',
+	},
+	{
+		name: 'arrayEvery',
+		detail: 'arrayEvery(array, fn)',
+		documentation: 'Returns true if fn returns true for all elements',
+	},
+	{
+		name: 'arraySort',
+		detail: 'arraySort(array, fn)',
+		documentation: 'Returns a sorted copy of the array (optional comparator fn(a, b))',
+	},
+	{ name: 'arrayReverse', detail: 'arrayReverse(array)', documentation: 'Returns a reversed copy of the array' },
+	{ name: 'objectKeys', detail: 'objectKeys(object)', documentation: 'Returns the keys of an object as an array' },
+	{
+		name: 'objectValues',
+		detail: 'objectValues(object)',
+		documentation: 'Returns the values of an object as an array',
+	},
 
 	// Time operations
 	{ name: 'unixNow', detail: 'unixNow()', documentation: 'Returns the current Unix timestamp in milliseconds' },
@@ -228,10 +312,67 @@ export const builtinFunctionCompletions: Array<{
 		detail: 'timeDiff(from, to)',
 		documentation: 'Calculates the difference between two times in seconds',
 	},
+
+	// Date operations
+	{
+		name: 'parseDate',
+		detail: 'parseDate(value)',
+		documentation:
+			'Parses a date value and returns Unix timestamp in milliseconds. Accepts numbers (Unix ms), ISO 8601 strings, or other parseable date strings.',
+	},
+	{
+		name: 'dateYear',
+		detail: 'dateYear(value, timezone?)',
+		documentation:
+			'Returns the year (e.g. 2024) from a date value. Optional IANA timezone (e.g. "UTC", "America/New_York").',
+	},
+	{
+		name: 'dateMonth',
+		detail: 'dateMonth(value, timezone?)',
+		documentation: 'Returns the month (1-12) from a date value. 1 = January, 12 = December. Optional IANA timezone.',
+	},
+	{
+		name: 'dateDay',
+		detail: 'dateDay(value, timezone?)',
+		documentation: 'Returns the day of the month (1-31) from a date value. Optional IANA timezone.',
+	},
+	{
+		name: 'dateHour',
+		detail: 'dateHour(value, timezone?)',
+		documentation: 'Returns the hour (0-23) from a date value. Optional IANA timezone.',
+	},
+	{
+		name: 'dateMinute',
+		detail: 'dateMinute(value, timezone?)',
+		documentation: 'Returns the minute (0-59) from a date value. Optional IANA timezone.',
+	},
+	{
+		name: 'dateSecond',
+		detail: 'dateSecond(value, timezone?)',
+		documentation: 'Returns the second (0-59) from a date value. Optional IANA timezone.',
+	},
+	{
+		name: 'dateWeekday',
+		detail: 'dateWeekday(value, timezone?)',
+		documentation:
+			'Returns the day of the week (0-6) from a date value. 0 = Sunday, 6 = Saturday. Optional IANA timezone.',
+	},
+	{
+		name: 'dateFormat',
+		detail: 'dateFormat(value, formatString, timezone?)',
+		documentation:
+			"Formats a date using dayjs-compatible tokens: YYYY, YY, MMMM, MMM, MM, M, dddd, ddd, DD, D, HH, H, hh, h, mm, m, ss, s, SSS, A, a. Pass 'iso' for ISO 8601. Optional IANA timezone.",
+	},
+	{
+		name: 'dateAdd',
+		detail: 'dateAdd(value, amount, unit)',
+		documentation:
+			'Adds a duration to a date and returns Unix ms. Units: seconds, minutes, hours, days, weeks, months, years. Use negative amount to subtract.',
+	},
 ]
 
-const keywords = ['return', 'undefined']
-const typeKeywords = ['true', 'false', 'null']
+const keywords = ['return', 'undefined', 'if', 'else', 'for', 'while', 'of', 'let', 'const', 'break', 'continue']
+const typeKeywords = ['true', 'false', 'null', 'PI']
 
 const companionExpressionLanguageConfiguration: languages.LanguageConfiguration = {
 	comments: {

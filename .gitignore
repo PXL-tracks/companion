@@ -46,6 +46,9 @@ lib-cov
 /coverage
 /html
 
+# Image snapshot test failure artefacts (visual debugging, not golden files)
+companion/test/Graphics/__failures__/
+
 # nyc test coverage
 .nyc_output
 
@@ -86,6 +89,8 @@ typings/
 
 # dotenv environment variables file
 .env
+.devcontainer/docker-compose.override.yml
+.devcontainer/devcontainer-lock.json
 
 # next.js build output
 .next
@@ -105,6 +110,8 @@ typings/
 
 #ignore copilot files
 .github/copilot-instructions.md
+.claude/
+/AGENTS.md
 
 # PXL Dev - ignore runtime data but keep templates
 /companion-data/

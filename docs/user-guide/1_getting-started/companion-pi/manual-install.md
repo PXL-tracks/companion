@@ -43,11 +43,16 @@ The install script performs the following steps:
 - Create a `companion` user
 - Install any required system dependencies
 - Download the latest beta build of Companion
-- Setup udev rules to allow using Streamdecks and other supported surfaces
+- Setup udev rules to allow using Stream Decks and other supported surfaces
 - Setup sudo rules to allow Companion to shutdown and restart the system
 - Install scripts such as `companion-update`
 
 If you want to understand the full scope of the changes, you can read the [install script](https://github.com/bitfocus/companion-pi/blob/main/install.sh).
+
+## Configuring the server
+
+Launch-level options such as the admin port, logging and the security features are managed with the
+`config-tool`. See [Headless configuration](./config-tool.md) for details.
 
 ## Customisation
 

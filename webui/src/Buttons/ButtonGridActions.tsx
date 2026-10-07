@@ -1,12 +1,13 @@
-import { CButton, CCol } from '@coreui/react'
-import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react'
+import type { IconProp } from '@fortawesome/fontawesome-svg-core'
+import { faArrowsAlt, faArrowsLeftRight, faCompass, faCopy, faEraser, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowsLeftRight, faArrowsAlt, faCompass, faCopy, faEraser, faTrash } from '@fortawesome/free-solid-svg-icons'
 import classnames from 'classnames'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react'
 import { useResizeObserver } from 'usehooks-ts'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { IconProp } from '@fortawesome/fontawesome-svg-core'
+import { Button, type ButtonColor } from '~/Components/Button'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
 
 export interface ButtonGridActionsRef {
@@ -57,10 +58,10 @@ export const ButtonGridActions = forwardRef<ButtonGridActionsRef, ButtonGridActi
 
 	const setSizeRef = useRef(null)
 	const holderSize = useResizeObserver({ ref: setSizeRef })
-	const useCompactButtons = (holderSize.width ?? 0) < 650 // Cutoff for what of the action buttons fit in their large mode
+	const useCompactButtons = (holderSize.width ?? 0) < 670 // Cutoff for what of the action buttons fit in their large mode
 
 	const getButton = (label: string, icon: IconProp, func: string) => {
-		let color = 'light'
+		let color: ButtonColor = 'light'
 		let disabled = false
 		if (activeFunction === func) {
 			color = 'success'
@@ -70,9 +71,9 @@ export const ButtonGridActions = forwardRef<ButtonGridActionsRef, ButtonGridActi
 
 		return (
 			!disabled && (
-				<CButton color={color} disabled={disabled} onClick={() => startFunction(func)} title={label}>
+				<Button color={color} disabled={disabled} onClick={() => startFunction(func)} title={label}>
 					<FontAwesomeIcon icon={icon} /> {useCompactButtons ? '' : label}
-				</CButton>
+				</Button>
 			)
 		)
 	}
@@ -129,13 +130,6 @@ export const ButtonGridActions = forwardRef<ButtonGridActionsRef, ButtonGridActi
 				if (isDown) {
 					switch (activeFunction) {
 						case 'delete':
-							resetRef.current?.show('Clear button', `Clear style and actions for this button?`, 'Clear', () => {
-								resetControlMutation.mutateAsync({ location }).catch((e) => {
-									console.error(`Reset failed: ${e}`)
-								})
-							})
-
-							stopFunction()
 							return true
 						case 'copy':
 							if (activeFunctionButton) {
@@ -175,7 +169,15 @@ export const ButtonGridActions = forwardRef<ButtonGridActionsRef, ButtonGridActi
 							return false
 					}
 				} else {
-					if (activeFunction) {
+					if (activeFunction === 'delete') {
+						resetRef.current?.show('Clear button', `Clear style and actions for this button?`, 'Clear', () => {
+							resetControlMutation.mutateAsync({ location }).catch((e) => {
+								console.error(`Reset failed: ${e}`)
+							})
+						})
+						stopFunction()
+						return true
+					} else if (activeFunction) {
 						return true
 					} else {
 						return false
@@ -198,7 +200,7 @@ export const ButtonGridActions = forwardRef<ButtonGridActionsRef, ButtonGridActi
 		<>
 			<GenericConfirmModal ref={resetRef} />
 
-			<CCol sm={12} className={classnames({ out: isHot, fadeinout: true })}>
+			<Grid.Col sm={12} className={classnames({ out: isHot, fadeinout: true })}>
 				<div className="button-grid-controls" ref={setSizeRef}>
 					<div>
 						{getButton('Copy', faCopy, 'copy')}
@@ -211,23 +213,23 @@ export const ButtonGridActions = forwardRef<ButtonGridActionsRef, ButtonGridActi
 						&nbsp;
 					</div>
 					<div style={{ display: activeFunction ? '' : 'none' }}>
-						<CButton color="danger" onClick={() => stopFunction()} title="Cancel">
+						<Button color="danger" onClick={() => stopFunction()} title="Cancel">
 							Cancel
-						</CButton>
+						</Button>
 						&nbsp;
-						<CButton color="disabled">{hintText}</CButton>
+						<Button color="disabled">{hintText}</Button>
 					</div>
 					<div style={{ display: activeFunction ? 'none' : undefined }} title="Reset page buttons">
-						<CButton color="light" onClick={() => resetPageNav()}>
+						<Button color="light" onClick={() => resetPageNav()}>
 							<FontAwesomeIcon icon={faCompass} /> {useCompactButtons ? '' : 'Reset page buttons'}
-						</CButton>
+						</Button>
 						&nbsp;
-						<CButton color="light" onClick={() => resetPage()} title="Wipe page">
+						<Button color="light" onClick={() => resetPage()} title="Wipe page">
 							<FontAwesomeIcon icon={faEraser} /> {useCompactButtons ? '' : 'Wipe page'}
-						</CButton>
+						</Button>
 					</div>
 				</div>
-			</CCol>
+			</Grid.Col>
 		</>
 	)
 })

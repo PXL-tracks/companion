@@ -1,6 +1,9 @@
+import { nanoid } from 'nanoid'
 import { validateActionSetId } from '@companion-app/shared/ControlId.js'
 import type { ActionStepOptions } from '@companion-app/shared/Model/ActionModel.js'
 import type { NormalButtonSteps } from '@companion-app/shared/Model/ButtonModel.js'
+import { EntityModelType, type SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import { exprVal, optionsObjectToExpressionOptions } from '@companion-app/shared/Model/Options.js'
 import type {
 	PresetDefinition,
 	UIPresetDefinition,
@@ -9,22 +12,24 @@ import type {
 	UIPresetGroupTemplate,
 	UIPresetSection,
 } from '@companion-app/shared/Model/Presets.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
 import type {
-	CompanionPresetAction,
+	CompanionButtonStepActions,
 	CompanionPresetDefinition,
 	CompanionPresetDefinitions,
 	CompanionPresetGroup,
+	CompanionPresetLocalVariable,
 	CompanionPresetReference,
 	CompanionPresetSection,
 	Complete,
 	ModuleLogger,
-} from '@companion-module/base'
-import { convertActionsDelay, convertPresetFeedbacksToEntities, ConvertPresetStyleToDrawStyle } from './PresetUtils.js'
-import { stringifyError } from '@companion-app/shared/Stringify.js'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
-import { nanoid } from 'nanoid'
-import { exprVal } from '@companion-app/shared/Model/Options.js'
-import { assertNever } from '@companion-app/shared/Util.js'
+	SomePresetActionEntry,
+} from '@companion-module/host'
+import { ConvertLegacyStyleToElements } from '../../../Resources/ConvertLegacyStyleToElements.js'
+import { convertPresetActionEntries, type PresetEntryConversionContext } from './PresetInternalEntities.js'
+import { ConvertLayeredPresetFeedbacksToEntities, ConvertLayerPresetElements } from './PresetsLayered.js'
+import { convertPresetFeedbacksToEntities, ConvertPresetStyleToDrawStyle } from './PresetUtils.js'
 
 const DefaultStepOptions: Complete<ActionStepOptions> = {
 	runWhileHeld: [],
@@ -36,19 +41,40 @@ export function ConvertPresetDefinitions(
 	connectionId: string,
 	connectionUpgradeIndex: number | undefined,
 	rawSections: CompanionPresetSection[],
-	rawPresets: CompanionPresetDefinitions
+	rawPresets: CompanionPresetDefinitions,
+	feedbackAffectedProperties: ReadonlyMap<string, string[] | undefined> | null
 ): {
 	presets: Record<string, PresetDefinition>
 	uiPresets: Record<string, UIPresetSection>
 } {
-	const converter = new PresetDefinitionConverter(logger, connectionId, connectionUpgradeIndex)
+	const converter = new PresetDefinitionConverter(
+		logger,
+		connectionId,
+		connectionUpgradeIndex,
+		feedbackAffectedProperties
+	)
 
 	const uiPresets: Record<string, UIPresetSection> = {}
 
 	try {
 		// Translate all the preset definitions
 		for (const [id, preset] of Object.entries(rawPresets ?? {})) {
-			if (preset) converter.convertPreset(id, preset)
+			if (!preset) continue
+
+			if (preset.type === 'alternatives') {
+				// Try each variant until one is accepted
+				let matched = false
+				for (const variant of preset.variants) {
+					matched = converter.convertPreset(id, variant)
+					if (matched) break
+				}
+
+				if (!matched) {
+					logger.warn(`Found no compatible/valid variant for "${id}"`)
+				}
+			} else {
+				converter.convertPreset(id, preset)
+			}
 		}
 
 		rawSections?.forEach?.((rawSection, i) => {
@@ -91,15 +117,22 @@ class PresetDefinitionConverter {
 	readonly #logger: ModuleLogger
 	readonly #connectionId: string
 	readonly #connectionUpgradeIndex: number | undefined
+	readonly #feedbackAffectedProperties: ReadonlyMap<string, string[] | undefined> | null
 
 	readonly referencedPresetIds = new Set<string>()
 	readonly missingPresetIds = new Set<string>()
 	readonly presetDefinitions: Record<string, PresetDefinition> = {}
 
-	constructor(logger: ModuleLogger, connectionId: string, connectionUpgradeIndex: number | undefined) {
+	constructor(
+		logger: ModuleLogger,
+		connectionId: string,
+		connectionUpgradeIndex: number | undefined,
+		feedbackAffectedProperties: ReadonlyMap<string, string[] | undefined> | null
+	) {
 		this.#logger = logger
 		this.#connectionId = connectionId
 		this.#connectionUpgradeIndex = connectionUpgradeIndex
+		this.#feedbackAffectedProperties = feedbackAffectedProperties
 	}
 
 	convertSection(section: CompanionPresetSection, i: number): UIPresetSection | null {
@@ -245,7 +278,8 @@ class PresetDefinitionConverter {
 			this.#connectionId,
 			this.#connectionUpgradeIndex,
 			presetId,
-			preset
+			preset,
+			this.#feedbackAffectedProperties
 		)
 		if (!definition) return false
 
@@ -277,119 +311,221 @@ function ConvertPresetDefinition(
 	connectionId: string,
 	connectionUpgradeIndex: number | undefined,
 	presetId: string,
-	rawPreset: CompanionPresetDefinition
+	rawPreset: CompanionPresetDefinition,
+	feedbackAffectedProperties: ReadonlyMap<string, string[] | undefined> | null
 ): PresetDefinition | null {
 	try {
-		if (rawPreset.type === 'simple') {
-			const presetDefinition: PresetDefinition = {
-				id: presetId,
-				name: rawPreset.name,
-				type: 'button',
-				previewStyle: rawPreset.previewStyle,
-				model: {
+		const presetType = rawPreset.type
+		const presetName = rawPreset.name
+
+		// `internal:*` entries are allowed: the host has validated and version-gated them for new-api modules
+		const entryCtx: PresetEntryConversionContext = {
+			logger,
+			connectionId,
+			connectionUpgradeIndex,
+			allowInternalEntities: true,
+		}
+
+		switch (rawPreset.type) {
+			case 'simple': {
+				const parsedStyle = ConvertLegacyStyleToElements(
+					ConvertPresetStyleToDrawStyle(rawPreset.style),
+					convertPresetFeedbacksToEntities(rawPreset.feedbacks, entryCtx),
+					rawPreset.previewStyle,
+					feedbackAffectedProperties
+				)
+
+				const { steps, hasRotaryActions } = ConvertStepsForPreset(entryCtx, rawPreset.steps)
+
+				const presetDefinition: PresetDefinition = {
+					id: presetId,
+					name: rawPreset.name,
 					type: 'button',
-					options: {
-						rotaryActions: false, // Populated later, if relevant actions are defined
-						stepProgression: (rawPreset.options?.stepAutoProgress ?? true) ? 'auto' : 'manual',
-					},
-					style: ConvertPresetStyleToDrawStyle(rawPreset.style),
-					feedbacks: convertPresetFeedbacksToEntities(rawPreset.feedbacks, connectionId, connectionUpgradeIndex),
-					steps: {},
-					localVariables: [],
-				},
-				keywords: structuredClone(rawPreset.keywords),
-			}
-
-			if (rawPreset.steps) {
-				for (let i = 0; i < rawPreset.steps.length; i++) {
-					const newStep: NormalButtonSteps[0] = {
-						action_sets: {
-							down: [],
-							up: [],
-							rotate_left: undefined,
-							rotate_right: undefined,
+					model: {
+						type: 'button-layered',
+						options: {
+							rotaryActions: hasRotaryActions,
+							stepProgression: (rawPreset.options?.stepAutoProgress ?? true) ? 'auto' : 'manual',
+							canModifyStyleInApis: false,
 						},
-						options: structuredClone(DefaultStepOptions),
-					}
-					presetDefinition.model.steps[i] = newStep
 
-					const rawStep = rawPreset.steps[i]
-					if (!rawStep) continue
+						feedbacks: parsedStyle.feedbacks,
+						style: {
+							layers: parsedStyle.layers,
+						},
 
-					if (rawStep.name) newStep.options.name = rawStep.name
-
-					for (const [setId, set] of Object.entries(rawStep)) {
-						if (setId === 'name') continue
-
-						const setIdSafe = validateActionSetId(setId as any)
-						if (setIdSafe === undefined) {
-							logger.warn(`Invalid set id: ${setId}`)
-							continue
-						}
-
-						if (setIdSafe === 'rotate_left' || setIdSafe === 'rotate_right') {
-							// If there are rotary actions, then enable the option
-							presetDefinition.model.options.rotaryActions = true
-						}
-
-						const setActions: CompanionPresetAction[] = Array.isArray(set) ? set : set.actions
-						if (!isNaN(Number(setId)) && set.options?.runWhileHeld) newStep.options.runWhileHeld.push(Number(setId))
-
-						if (setActions) {
-							newStep.action_sets[setIdSafe] = convertActionsDelay(
-								setActions,
-								connectionId,
-								true, // Always relative now
-								connectionUpgradeIndex
-							)
-						}
-					}
+						steps,
+						localVariables: ConvertLocalVariablesForPreset(
+							logger,
+							rawPreset.type,
+							rawPreset.localVariables,
+							connectionId,
+							connectionUpgradeIndex
+						),
+					},
+					presetExtraFeedbacks: parsedStyle.previewStyleFeedbacks,
+					keywords: structuredClone(rawPreset.keywords),
 				}
-			}
 
-			// Ensure that there is at least one step
-			if (Object.keys(presetDefinition.model.steps).length === 0) {
-				presetDefinition.model.steps[0] = {
-					action_sets: { down: [], up: [], rotate_left: undefined, rotate_right: undefined },
-					options: structuredClone(DefaultStepOptions),
+				return presetDefinition
+			}
+			case 'layered': {
+				const { steps, hasRotaryActions } = ConvertStepsForPreset(entryCtx, rawPreset.steps)
+
+				const presetDefinition: PresetDefinition = {
+					id: presetId,
+					name: rawPreset.name,
+					type: 'button',
+					model: {
+						type: 'button-layered',
+						options: {
+							rotaryActions: hasRotaryActions,
+							stepProgression: (rawPreset.options?.stepAutoProgress ?? true) ? 'auto' : 'manual',
+							canModifyStyleInApis: false,
+						},
+
+						style: {
+							layers: ConvertLayerPresetElements(logger, connectionId, rawPreset.canvas, rawPreset.elements),
+						},
+						feedbacks: ConvertLayeredPresetFeedbacksToEntities(rawPreset.feedbacks, entryCtx),
+
+						steps,
+						localVariables: ConvertLocalVariablesForPreset(
+							logger,
+							rawPreset.type,
+							rawPreset.localVariables,
+							connectionId,
+							connectionUpgradeIndex
+						),
+					},
+					presetExtraFeedbacks: [], // No preview style for layered presets
+					keywords: structuredClone(rawPreset.keywords),
 				}
+
+				return presetDefinition
 			}
-
-			// Copy across local variables
-			if (rawPreset.localVariables) {
-				for (const localVariable of rawPreset.localVariables) {
-					switch (localVariable.variableType) {
-						case 'simple':
-							presetDefinition.model.localVariables.push({
-								id: nanoid(),
-								type: EntityModelType.Feedback,
-								definitionId: 'user_value',
-								connectionId: 'internal',
-								upgradeIndex: undefined,
-
-								variableName: localVariable.variableName,
-								headline: localVariable.headline,
-
-								options: {
-									persist_value: exprVal(false),
-									startup_value: exprVal(localVariable.startupValue),
-								},
-							})
-							break
-						default:
-							assertNever(localVariable.variableType)
-							logger.warn(`Unknown local variable type: ${localVariable.variableType}`)
-							break
-					}
-				}
-			}
-
-			return presetDefinition
-		} else {
-			return null
+			default:
+				assertNever(rawPreset)
+				logger.warn(`Received invalid preset "${presetName}"(${presetId}) with unsupported type "${presetType}"`)
+				return null
 		}
 	} catch (e) {
 		logger.warn(`Received invalid preset "${rawPreset.name}"(${presetId}): ${e}`)
 		return null
 	}
+}
+
+function ConvertStepsForPreset(
+	ctx: PresetEntryConversionContext,
+	rawSteps: CompanionButtonStepActions[] | undefined
+): { steps: NormalButtonSteps; hasRotaryActions: boolean } {
+	const steps: NormalButtonSteps = {}
+	let hasRotaryActions = false
+
+	if (rawSteps) {
+		for (let i = 0; i < rawSteps.length; i++) {
+			const newStep: NormalButtonSteps[0] = {
+				action_sets: {
+					down: [],
+					up: [],
+					rotate_left: undefined,
+					rotate_right: undefined,
+				},
+				options: structuredClone(DefaultStepOptions),
+			}
+			steps[i] = newStep
+
+			const rawStep = rawSteps[i]
+			if (!rawStep) continue
+
+			if (rawStep.name) newStep.options.name = rawStep.name
+
+			for (const [setId, set] of Object.entries(rawStep)) {
+				if (setId === 'name') continue
+
+				const setIdSafe = validateActionSetId(setId as any)
+				if (setIdSafe === undefined) {
+					ctx.logger.warn(`Invalid set id: ${setId}`)
+					continue
+				}
+
+				if (setIdSafe === 'rotate_left' || setIdSafe === 'rotate_right') {
+					// If there are rotary actions, then enable the option
+					hasRotaryActions = true
+				}
+
+				const setActions: SomePresetActionEntry[] = Array.isArray(set) ? set : set.actions
+				if (!isNaN(Number(setId)) && set.options?.runWhileHeld) newStep.options.runWhileHeld.push(Number(setId))
+
+				if (setActions) {
+					newStep.action_sets[setIdSafe] = convertPresetActionEntries(setActions, ctx)
+				}
+			}
+		}
+	}
+
+	// Ensure that there is at least one step
+	if (Object.keys(steps).length === 0) {
+		steps[0] = {
+			action_sets: { down: [], up: [], rotate_left: undefined, rotate_right: undefined },
+			options: structuredClone(DefaultStepOptions),
+		}
+	}
+
+	return { steps, hasRotaryActions }
+}
+
+function ConvertLocalVariablesForPreset(
+	logger: ModuleLogger,
+	_type: CompanionPresetDefinition['type'],
+	rawLocalVariables: CompanionPresetLocalVariable[] | undefined,
+	connectionId: string,
+	connectionUpgradeIndex: number | undefined
+): SomeEntityModel[] {
+	if (!rawLocalVariables) return []
+
+	const result: SomeEntityModel[] = []
+
+	for (const localVariable of rawLocalVariables) {
+		const localVariableType = localVariable.variableType
+		switch (localVariable.variableType) {
+			case 'feedback':
+				result.push({
+					type: EntityModelType.Feedback,
+					id: nanoid(),
+					connectionId: connectionId,
+					definitionId: localVariable.feedbackId,
+					options: structuredClone(optionsObjectToExpressionOptions(localVariable.options ?? {}, true)),
+					isInverted: exprVal(false),
+					headline: localVariable.headline,
+					upgradeIndex: connectionUpgradeIndex,
+					variableName: localVariable.variableName,
+				})
+
+				break
+			case 'simple':
+				result.push({
+					id: nanoid(),
+					type: EntityModelType.Feedback,
+					definitionId: 'user_value',
+					connectionId: 'internal',
+					upgradeIndex: undefined,
+
+					variableName: localVariable.variableName,
+					headline: localVariable.headline,
+
+					options: {
+						persist_value: exprVal(true), // Set to persisted, to minimise user confusion over the split values
+						startup_value: exprVal(localVariable.startupValue),
+					},
+				})
+				break
+			default:
+				assertNever(localVariable)
+				logger.warn(`Unknown local variable type: ${localVariableType}`)
+				break
+		}
+	}
+
+	return result
 }

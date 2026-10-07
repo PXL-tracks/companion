@@ -9,20 +9,26 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
-import type {
-	FeedbackForVisitor,
-	InternalModuleFragment,
-	InternalVisitor,
-	InternalActionDefinition,
-	ActionForVisitor,
-	InternalModuleFragmentEvents,
-	ActionForInternalExecution,
-} from './Types.js'
-import type { VariablesController } from '../Variables/Controller.js'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
-import { EventEmitter } from 'events'
+import { EventEmitter } from 'node:events'
+import {
+	CustomVariableCreateIfNotExistsOption,
+	CustomVariableSelectorOption,
+} from '@companion-app/shared/CustomVariable.js'
 import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import LogController from '../Log/Controller.js'
+import type { VariablesController } from '../Variables/Controller.js'
+import type { VariablesAndExpressionParser } from '../Variables/VariablesAndExpressionParser.js'
+import type {
+	ActionForInternalExecution,
+	ActionForVisitor,
+	FeedbackForVisitor,
+	InternalActionDefinition,
+	InternalActionResult,
+	InternalModuleFragment,
+	InternalModuleFragmentEvents,
+	InternalVisitor,
+} from './Types.js'
 
 export class InternalCustomVariables
 	extends EventEmitter<InternalModuleFragmentEvents>
@@ -44,29 +50,20 @@ export class InternalCustomVariables
 				label: 'Custom Variable: Set value',
 				description: undefined,
 				options: [
-					{
-						type: 'internal:custom_variable',
-						label: 'Custom variable',
-						id: 'name',
-						expressionDescription:
-							'The name of the custom variable. Just the portion after the "custom:" prefix. Make sure to wrap it in quotes!',
-					},
-					{
-						type: 'checkbox',
-						label: 'Create if not exists',
-						id: 'create',
-						default: false,
-						disableAutoExpression: true,
-					},
+					CustomVariableSelectorOption,
+					CustomVariableCreateIfNotExistsOption,
 					{
 						type: 'textinput',
 						label: 'Value',
 						id: 'value',
 						default: '',
-						description: 'The raw value will be written to the variable',
-						expressionDescription: 'The expression will be executed with the result written to the variable',
+						description: 'Supports $(this:current) for the current value of this variable.',
+						expressionDescription:
+							'Supports $(this:current) for the current value of this variable. The expression result is written to the variable.',
 						allowInvalidValues: true,
 						disableSanitisation: true,
+						deferParsing: true,
+						contextVariableResolution: { type: 'customVariable', nameFieldId: 'name' },
 					},
 				],
 				optionsSupportExpressions: true,
@@ -103,34 +100,51 @@ export class InternalCustomVariables
 		}
 	}
 
-	executeAction(action: ActionForInternalExecution, _extras: RunActionExtras): boolean {
-		if (action.definitionId === 'custom_variable_set_value') {
-			const variableName = stringifyVariableValue(action.options.name)
-			if (!variableName) return true
+	executeAction(
+		action: ActionForInternalExecution,
+		_extras: RunActionExtras,
+		parser: VariablesAndExpressionParser
+	): InternalActionResult {
+		switch (action.definitionId) {
+			case 'custom_variable_set_value': {
+				const variableName = stringifyVariableValue(action.options.name)
+				if (variableName) {
+					const currentValue = this.#variableController.custom.getValue(variableName)
+					const childParser = parser.createChildParser({ 'this:current': currentValue })
+					const rawValue = action.rawEntity.rawOptions['value']
+					const parsed = childParser.parseEntityOption(rawValue, { allowExpression: true, parseVariables: true })
+					if (!parsed.ok)
+						throw new Error(`Failed to evaluate value for custom variable "${variableName}": ${parsed.error}`)
 
-			if (this.#variableController.custom.hasCustomVariable(variableName)) {
-				this.#variableController.custom.setValue(variableName, action.options.value)
-			} else if (action.options.create) {
-				this.#variableController.custom.createVariable(variableName, action.options.value)
-			} else {
-				this.#logger.warn(`Custom variable "${variableName}" not found`)
+					if (this.#variableController.custom.hasCustomVariable(variableName)) {
+						this.#variableController.custom.setValue(variableName, parsed.value)
+					} else if (action.options.create) {
+						this.#variableController.custom.createVariable(variableName, parsed.value)
+					} else {
+						this.#logger.warn(`Custom variable "${variableName}" not found`)
+					}
+				}
+				break
 			}
-			return true
-		} else if (action.definitionId === 'custom_variable_reset_to_default') {
-			const variableName = stringifyVariableValue(action.options.name)
-			if (!variableName) return true
-
-			this.#variableController.custom.resetValueToDefault(variableName)
-			return true
-		} else if (action.definitionId === 'custom_variable_sync_to_default') {
-			const variableName = stringifyVariableValue(action.options.name)
-			if (!variableName) return true
-
-			this.#variableController.custom.syncValueToDefault(variableName)
-			return true
-		} else {
-			return false
+			case 'custom_variable_reset_to_default': {
+				const variableName = stringifyVariableValue(action.options.name)
+				if (variableName) {
+					this.#variableController.custom.resetValueToDefault(variableName)
+				}
+				break
+			}
+			case 'custom_variable_sync_to_default': {
+				const variableName = stringifyVariableValue(action.options.name)
+				if (variableName) {
+					this.#variableController.custom.syncValueToDefault(variableName)
+				}
+				break
+			}
+			default:
+				return null
 		}
+
+		return { result: undefined }
 	}
 
 	visitReferences(_visitor: InternalVisitor, _actions: ActionForVisitor[], _feedbacks: FeedbackForVisitor[]): void {

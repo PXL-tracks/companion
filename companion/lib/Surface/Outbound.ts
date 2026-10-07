@@ -1,22 +1,20 @@
+import { EventEmitter } from 'node:events'
+import { isEqual } from 'lodash-es'
 import { nanoid } from 'nanoid'
-import LogController from '../Log/Controller.js'
-import type { DataDatabase } from '../Data/Database.js'
+import z from 'zod'
+import { ParseExpression, ResolveExpression } from '@companion-app/shared/Expressions.js'
+import { JsonObjectSchema } from '@companion-app/shared/Model/Options.js'
 import type {
 	CompanionSurfaceConfigField,
 	OutboundSurfaceInfo,
 	OutboundSurfacesUpdate,
 } from '@companion-app/shared/Model/Surfaces.js'
+import type { DataDatabase } from '../Data/Database.js'
 import type { DataStoreTableView } from '../Data/StoreBase.js'
+import LogController from '../Log/Controller.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
-import { EventEmitter } from 'node:events'
-import { OutboundSurfaceCollections } from './OutboundCollections.js'
-import { isEqual } from 'lodash-es'
 import { ServiceSurfaceDiscovery } from './Discovery.js'
-import { ParseExpression } from '@companion-app/shared/Expression/ExpressionParse.js'
-import { ResolveExpression } from '@companion-app/shared/Expression/ExpressionResolve.js'
-import { ExpressionFunctions } from '@companion-app/shared/Expression/ExpressionFunctions.js'
-import { JsonObjectSchema } from '@companion-app/shared/Model/Options.js'
+import { OutboundSurfaceCollections } from './OutboundCollections.js'
 
 export interface SurfaceOutboundControllerEvents {
 	clientInfo: [update: OutboundSurfacesUpdate]
@@ -59,18 +57,6 @@ export class SurfaceOutboundController {
 		this.#dbTable = db.getTableView('surfaces_remote')
 
 		this.events.setMaxListeners(0)
-
-		this.#collections = new OutboundSurfaceCollections(
-			db,
-			(validCollectionIds) => this.#cleanUnknownCollectionIds(validCollectionIds),
-			() => {
-				// // Emit event to trigger feedback updates for outbound surface collection enabled states
-				// this.events.emit('clientInfo', {
-				// 	type: 'init',
-				// 	items: this.#storage,
-				// })
-			}
-		)
 
 		this.#collections = new OutboundSurfaceCollections(
 			db,
@@ -185,7 +171,7 @@ export class SurfaceOutboundController {
 			this.#enabledConnectionIds.delete(connectionInfo.id)
 		}
 
-		this.events.emit(`startStop:${connectionInfo.instanceId}`, connectionInfo)
+		this.events.emit(`startStop:${connectionInfo.instanceId}`, { ...connectionInfo, enabled })
 	}
 
 	createTrpcRouter() {
@@ -298,21 +284,8 @@ export class SurfaceOutboundController {
 				.mutation(async ({ input }) => {
 					const { id, enabled } = input
 
-					const surfaceInfo = this.#storage.get(id)
-					if (!surfaceInfo) throw new Error('Surface not found')
-
-					surfaceInfo.enabled = !!enabled
-					this.#dbTable.set(id, surfaceInfo)
-
-					// Start/stop the connection
-					this.#startStopConnection(surfaceInfo)
-
-					this.events.emit('clientInfo', {
-						type: 'add',
-						itemId: id,
-
-						info: surfaceInfo,
-					})
+					const success = this.setOutboundEnabled(id, enabled)
+					if (!success) throw new Error('Surface not found')
 				}),
 
 			saveConfig: publicProcedure
@@ -417,6 +390,28 @@ export class SurfaceOutboundController {
 		})
 	}
 
+	getById(id: string): OutboundSurfaceInfo | undefined {
+		return this.#storage.get(id)
+	}
+
+	setOutboundEnabled(id: string, enabled: boolean): boolean {
+		const surfaceInfo = this.#storage.get(id)
+		if (!surfaceInfo) return false
+
+		surfaceInfo.enabled = !!enabled
+		this.#dbTable.set(id, surfaceInfo)
+
+		this.#startStopConnection(surfaceInfo)
+
+		this.events.emit('clientInfo', {
+			type: 'add',
+			itemId: id,
+			info: surfaceInfo,
+		})
+
+		return true
+	}
+
 	addOutboundConnection(newInfo: OutboundSurfaceInfo): void {
 		if (this.#storage.has(newInfo.id)) throw new Error(`Outbound surface with ID ${newInfo.id} already exists`)
 
@@ -438,7 +433,10 @@ export class SurfaceOutboundController {
 			.values()
 			.filter((surfaceInfo) => {
 				return (
-					surfaceInfo && surfaceInfo.type === 'plugin' && surfaceInfo.instanceId === instanceId && surfaceInfo.enabled
+					surfaceInfo &&
+					surfaceInfo.type === 'plugin' &&
+					surfaceInfo.instanceId === instanceId &&
+					this.#enabledConnectionIds.has(surfaceInfo.id)
 				)
 			})
 			.toArray()
@@ -484,9 +482,12 @@ export class SurfaceOutboundController {
 			const expression = ParseExpression(matchExpression)
 			const doesMatch = (otherConfig: Record<string, any>) => {
 				try {
-					const val = ResolveExpression(
-						expression,
-						(props) => {
+					const val = ResolveExpression(expression, {
+						// Config-match expressions should be trivial - keep the budget tight
+						maxOperations: 1000,
+						maxCallDepth: 16,
+
+						getVariableValue: (props) => {
 							if (props.label === 'objA') {
 								return config?.[props.name]
 							} else if (props.label === 'objB') {
@@ -495,8 +496,11 @@ export class SurfaceOutboundController {
 								throw new Error(`Unknown variable "${props.variableId}"`)
 							}
 						},
-						ExpressionFunctions
-					)
+						parseVariables: null, // Not supported here
+						blink: undefined, // Not supported here
+
+						defaultTimezone: undefined, // no timezone context
+					})
 					return !!val && val !== 'false' && val !== '0'
 				} catch (e) {
 					console.error('Failed to resolve expression', e)

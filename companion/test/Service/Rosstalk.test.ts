@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeEach, vi } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { mock, mockDeep } from 'vitest-mock-extended'
-import { ServiceRosstalk } from '../../lib/Service/Rosstalk.js'
 import type { DataUserConfig } from '../../lib/Data/UserConfig.js'
+import { ServiceRosstalk } from '../../lib/Service/Rosstalk.js'
 import type { ServiceApi } from '../../lib/Service/ServiceApi.js'
 
 const mockOptions = {
@@ -88,6 +88,151 @@ describe('Rosstalk', () => {
 
 			expect(serviceApi.pressControl).toHaveBeenCalledTimes(2)
 			expect(serviceApi.pressControl).toHaveBeenLastCalledWith('myControl', false, 'rosstalk')
+		})
+
+		test('ok - index with duplicate CC prefix', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			// Some senders (e.g. ProPresenter) prepend their own `CC ` on top of a user-entered command
+			service.processIncoming(null as any, 'CC CC 12:24')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(1)
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 12,
+				row: 2,
+				column: 7,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(1)
+		})
+
+		test('ok - coordinates with duplicate CC prefix', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			service.processIncoming(null as any, 'CC CC 12/3/4')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(1)
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 12,
+				row: 3,
+				column: 4,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(1)
+		})
+
+		test('command surrounded by garbage is ignored', async () => {
+			const { serviceApi, service } = createService()
+
+			service.processIncoming(null as any, 'garbage CC 12:24 more garbage')
+			service.processIncoming(null as any, 'XX CC 12/3/4')
+			service.processIncoming(null as any, 'CC 12/3/4 trailing')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(0)
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(0)
+		})
+
+		test('command with line terminator', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			service.processIncoming(null as any, 'CC 12:24\r\n')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(1)
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 12,
+				row: 2,
+				column: 7,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(1)
+		})
+
+		test('command with null terminator', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			service.processIncoming(null as any, 'CC 12:24\0')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(1)
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 12,
+				row: 2,
+				column: 7,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(1)
+		})
+
+		test('command with leading control characters', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			service.processIncoming(null as any, '\0CC 12:24')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(1)
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 12,
+				row: 2,
+				column: 7,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(1)
+		})
+
+		test('multiple null separated commands in one chunk', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			service.processIncoming(null as any, 'CC 12:24\0CC 13/3/4\0')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(2)
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledWith({
+				pageNumber: 12,
+				row: 2,
+				column: 7,
+			})
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 13,
+				row: 3,
+				column: 4,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(2)
+		})
+
+		test('multiple commands in one chunk', async () => {
+			const { serviceApi, service } = createService()
+			serviceApi.getControlIdAt.mockReturnValue('myControl')
+
+			service.processIncoming(null as any, 'CC 12:24\nCC 13/3/4\n')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(2)
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledWith({
+				pageNumber: 12,
+				row: 2,
+				column: 7,
+			})
+			expect(serviceApi.getControlIdAt).toHaveBeenLastCalledWith({
+				pageNumber: 13,
+				row: 3,
+				column: 4,
+			})
+
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(2)
+		})
+
+		test('noop keepalive is ignored', async () => {
+			const { serviceApi, service } = createService()
+
+			// Ross XPression polls the connection with a `noop` keepalive
+			service.processIncoming(null as any, 'noop')
+			service.processIncoming(null as any, 'NOOP\r\n')
+
+			expect(serviceApi.getControlIdAt).toHaveBeenCalledTimes(0)
+			expect(serviceApi.pressControl).toHaveBeenCalledTimes(0)
 		})
 
 		test('bad format coordinates', async () => {

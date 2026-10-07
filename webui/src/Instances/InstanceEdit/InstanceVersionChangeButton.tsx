@@ -1,33 +1,27 @@
-import React, { useCallback, useContext, useRef, useState } from 'react'
-import {
-	CAlert,
-	CButton,
-	CCol,
-	CCollapse,
-	CForm,
-	CFormLabel,
-	CFormSelect,
-	CModalBody,
-	CModalFooter,
-	CModalHeader,
-} from '@coreui/react'
 import { faPencil } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { CModalExt } from '~/Components/CModalExt.js'
 import { useForm } from '@tanstack/react-form'
 import { observer } from 'mobx-react-lite'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { useAllModuleProducts } from '~/Hooks/useFilteredProducts.js'
-import { DropdownInputField } from '~/Components/DropdownInputField.js'
+import { useCallback, useContext, useId, useRef, useState } from 'react'
 import type { DropdownChoice } from '@companion-app/shared/Model/Common.js'
-import { useComputed } from '~/Resources/util.js'
-import { useModuleVersionSelectOptions } from '~/Instances/useModuleVersionSelectOptions.js'
-import { ModuleVersionsRefresh } from '~/Instances/ModuleVersionsRefresh.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import type { ClientInstanceConfigBase, ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { StaticAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
+import { Collapse } from '~/Components/Collapse'
+import { DropdownInputField } from '~/Components/DropdownInputField.js'
+import { SimpleDropdownInputField } from '~/Components/DropdownInputFieldSimple'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { Modal } from '~/Components/Modal'
+import { useAllModuleProducts } from '~/Hooks/useFilteredProducts.js'
+import { ModuleVersionsRefresh } from '~/Instances/ModuleVersionsRefresh.js'
+import { useModuleVersionSelectOptions } from '~/Instances/useModuleVersionSelectOptions.js'
+import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import type { InstanceEditPanelService } from './InstanceEditPanelService'
 
 interface InstanceVersionChangeButtonProps<TConfig extends ClientInstanceConfigBase> {
+	id: string
 	service: InstanceEditPanelService<TConfig>
 	currentModuleId: string
 	currentVersionId: string | null
@@ -36,6 +30,7 @@ interface InstanceVersionChangeButtonProps<TConfig extends ClientInstanceConfigB
 }
 
 export function InstanceVersionChangeButton<TConfig extends ClientInstanceConfigBase>({
+	id,
 	service,
 	currentModuleId,
 	currentVersionId,
@@ -48,11 +43,6 @@ export function InstanceVersionChangeButton<TConfig extends ClientInstanceConfig
 	const originalModuleIdRef = useRef(currentModuleId) // The moduleId at the time the modal was opened
 
 	const buttonRef = useRef<HTMLButtonElement>(null)
-	const buttonFocus = () => {
-		buttonRef.current?.focus()
-	}
-
-	const setModuleAndVersionMutation = useMutationExt(trpc.instances.connections.setModuleAndVersion.mutationOptions())
 
 	const [saveError, setSaveError] = useState<string | null>(null)
 	const form = useForm({
@@ -61,11 +51,7 @@ export function InstanceVersionChangeButton<TConfig extends ClientInstanceConfig
 			versionId: currentVersionId,
 		},
 		onSubmit: async ({ value }) => {
-			const error = await setModuleAndVersionMutation.mutateAsync({
-				connectionId: service.instanceId,
-				moduleId: value.moduleId,
-				versionId: value.versionId,
-			})
+			const error = await service.setModuleAndVersion(value.moduleId, value.versionId)
 			if (error) {
 				setSaveError(error)
 			} else {
@@ -75,163 +61,180 @@ export function InstanceVersionChangeButton<TConfig extends ClientInstanceConfig
 		},
 	})
 
-	const doShow = useCallback(() => {
-		form.reset()
-		originalModuleIdRef.current = currentModuleId
-		setSaveError(null)
-		setAdvancedMode(false)
-		setShow(true)
-	}, [form, currentModuleId])
-	const doClose = useCallback(() => setShow(false), [setShow])
-	const onClosed = useCallback(() => {
-		form.reset()
-		setSaveError(null)
-		setAdvancedMode(false)
-	}, [form])
+	const doShow = useCallback(
+		(open: boolean) => {
+			if (!open) {
+				setShow(false)
+			} else {
+				form.reset()
+				originalModuleIdRef.current = currentModuleId
+				setSaveError(null)
+				setAdvancedMode(false)
+				setShow(true)
+			}
+		},
+		[form, currentModuleId]
+	)
+	const onOpenChangeComplete = useCallback(
+		(open: boolean) => {
+			if (!open) {
+				form.reset()
+				setSaveError(null)
+				setAdvancedMode(false)
+			}
+		},
+		[form]
+	)
 
-	const toggleAdvancedMode = useCallback(() => {
-		setAdvancedMode((prev) => {
-			const newMode = !prev
-			// When toggling back to simple mode, restore the original module
-			if (!newMode) {
+	const handleAdvancedModeChange = useCallback(
+		(open: boolean) => {
+			if (!open) {
 				form.setFieldValue('moduleId', originalModuleIdRef.current)
 				form.setFieldValue('versionId', currentVersionId)
 			}
-			return newMode
-		})
-	}, [form, currentVersionId])
+			setAdvancedMode(open)
+		},
+		[form, currentVersionId]
+	)
+
+	const versionFieldId = useId()
+	const moduleFieldId = useId()
 
 	return (
-		<>
-			<CButton color="light" size="sm" title="Change module version" onClick={doShow}>
+		<Modal.Root open={show} onOpenChange={doShow} onOpenChangeComplete={onOpenChangeComplete}>
+			<Modal.Trigger id={id} color="light" size="sm" title="Change module version" aria-label="Change module version">
 				<FontAwesomeIcon icon={faPencil} />
-			</CButton>
+			</Modal.Trigger>
 
-			<CModalExt visible={show} onClose={doClose} onClosed={onClosed} onOpened={buttonFocus}>
-				<CModalHeader closeButton>
-					<h5>Change Module Version</h5>
-				</CModalHeader>
-				<CModalBody>
-					<CForm
-						className="row g-sm-2"
-						onSubmit={(e) => {
-							e.preventDefault()
-							e.stopPropagation()
-							form.handleSubmit().catch((err) => {
-								console.error('Error submitting form', err)
-							})
-						}}
-					>
-						<CCol sm={12}>
-							<CAlert color="warning" className="mb-3">
-								Be careful when downgrading the module version. Some features may not be available in older versions.
-							</CAlert>
-							{!!saveError && (
-								<CAlert color="danger" className="mb-3">
-									Save failed: {saveError}
-								</CAlert>
-							)}
-						</CCol>
-
-						<form.Subscribe
-							selector={(state) => [state.values.moduleId, advancedMode] as const}
-							children={([selectedModuleId, isAdvanced]) => {
-								// In advanced mode, use the selected module from the form. In simple mode, lock to the original module.
-								const effectiveModuleId = isAdvanced ? selectedModuleId : originalModuleIdRef.current
-
-								return (
-									<form.Field
-										name="versionId"
-										children={(field) => (
-											<>
-												<CFormLabel htmlFor={field.name} className="col-sm-3 col-form-label col-form-label-sm">
-													Version
-													{!!modules.getStoreInfo(service.moduleType, effectiveModuleId) && (
-														<ModuleVersionsRefresh moduleType={service.moduleType} moduleId={effectiveModuleId} />
-													)}
-												</CFormLabel>
-												<CCol sm={9}>
-													<SelectedVersionDropdown
-														moduleType={service.moduleType}
-														moduleId={effectiveModuleId}
-														htmlName={field.name}
-														value={field.state.value}
-														onChange={field.handleChange}
-														onBlur={field.handleBlur}
-													/>
-												</CCol>
-											</>
-										)}
-									/>
-								)
+			<Modal.Portal>
+				<Modal.Backdrop />
+				<Modal.Viewport>
+					<Modal.Popup initialFocus={buttonRef}>
+						<Modal.Header closeButton>
+							<Modal.Title>Change Module Version</Modal.Title>
+						</Modal.Header>
+						<Form
+							onSubmit={(e) => {
+								e.preventDefault()
+								e.stopPropagation()
+								form.handleSubmit().catch((err) => {
+									console.error('Error submitting form', err)
+								})
 							}}
-						/>
+						>
+							<Modal.Body>
+								<Grid.Row className="g-sm-2">
+									<Grid.Col sm={12}>
+										<StaticAlert color="warning" className="mb-3">
+											Be careful when downgrading the module version. Some features may not be available in older
+											versions.
+										</StaticAlert>
+										{!!saveError && (
+											<StaticAlert color="danger" className="mb-3">
+												Save failed: {saveError}
+											</StaticAlert>
+										)}
+									</Grid.Col>
 
-						<CCol sm={12} className="mt-3 mb-2">
-							<hr className="my-2" />
-							<CButton color="link" size="sm" onClick={toggleAdvancedMode} className="p-0 text-decoration-none">
-								<span className="me-1">{advancedMode ? '▼' : '▶'}</span>
-								Advanced Options
-							</CButton>
-						</CCol>
+									<form.Subscribe
+										selector={(state) => [state.values.moduleId, advancedMode] as const}
+										children={([selectedModuleId, isAdvanced]) => {
+											// In advanced mode, use the selected module from the form. In simple mode, lock to the original module.
+											const effectiveModuleId = isAdvanced ? selectedModuleId : originalModuleIdRef.current
 
-						<CCollapse visible={advancedMode} className="row g-sm-2 p-0">
-							<CCol sm={12}>
-								<CAlert color="danger" className="mt-0 mb-3">
-									{changeModuleDangerMessage}
-								</CAlert>
-							</CCol>
+											return (
+												<form.Field
+													name="versionId"
+													children={(field) => (
+														<>
+															<div className="col-sm-3 d-flex align-items-center">
+																<FormLabel
+																	htmlFor={versionFieldId}
+																	className="col-form-label col-form-label-sm mb-0 flex-grow-1"
+																>
+																	Version
+																</FormLabel>
+																{!!modules.getStoreInfo(service.moduleType, effectiveModuleId) && (
+																	<ModuleVersionsRefresh moduleType={service.moduleType} moduleId={effectiveModuleId} />
+																)}
+															</div>
+															<Grid.Col sm={9}>
+																<SelectedVersionDropdown
+																	moduleType={service.moduleType}
+																	moduleId={effectiveModuleId}
+																	htmlName={versionFieldId}
+																	value={field.state.value}
+																	onChange={field.handleChange}
+																	onBlur={field.handleBlur}
+																/>
+															</Grid.Col>
+														</>
+													)}
+												/>
+											)
+										}}
+									/>
 
-							<CFormLabel htmlFor="moduleId" className="col-sm-3 col-form-label col-form-label-sm">
-								Module
-							</CFormLabel>
-							<CCol sm={9}>
-								<form.Field
-									name="moduleId"
-									children={(field) => (
-										<SelectedModuleDropdown
-											moduleType={service.moduleType}
-											htmlName={field.name}
-											value={field.state.value}
-											onChange={(val) => {
-												field.handleChange(val)
-												form.setFieldValue('versionId', null)
-											}}
-											onBlur={field.handleBlur}
-										/>
+									<Collapse.Root
+										open={advancedMode}
+										onOpenChange={handleAdvancedModeChange}
+										className="col-sm-12 mt-3 mb-2 p-0"
+									>
+										<hr className="my-2" />
+										<Collapse.Trigger className="button button-link button-sm p-0 text-decoration-none">
+											<span className="me-1">{advancedMode ? '▼' : '▶'}</span>
+											Advanced Options
+										</Collapse.Trigger>
+
+										<Collapse.Panel keepMounted className="row g-sm-2 p-0">
+											<Grid.Col sm={12}>
+												<StaticAlert color="danger" className="mt-2 mb-3">
+													{changeModuleDangerMessage}
+												</StaticAlert>
+											</Grid.Col>
+
+											<FormLabel htmlFor={moduleFieldId} className="col-sm-3 col-form-label col-form-label-sm">
+												Module
+											</FormLabel>
+											<Grid.Col sm={9}>
+												<form.Field
+													name="moduleId"
+													children={(field) => (
+														<SelectedModuleDropdown
+															moduleType={service.moduleType}
+															htmlName={moduleFieldId}
+															value={field.state.value}
+															onChange={(val) => {
+																field.handleChange(val)
+																form.setFieldValue('versionId', null)
+															}}
+															onBlur={field.handleBlur}
+														/>
+													)}
+												/>
+											</Grid.Col>
+										</Collapse.Panel>
+									</Collapse.Root>
+								</Grid.Row>
+							</Modal.Body>
+							<Modal.Footer>
+								<form.Subscribe
+									selector={(state) => [state.canSubmit, state.isSubmitting]}
+									children={([canSubmit, isSubmitting]) => (
+										<>
+											<Modal.Close disabled={isSubmitting}>Cancel</Modal.Close>
+											<Button ref={buttonRef} color="primary" type="submit" disabled={!canSubmit}>
+												Save {isSubmitting ? '...' : ''}
+											</Button>
+										</>
 									)}
 								/>
-							</CCol>
-						</CCollapse>
-					</CForm>
-				</CModalBody>
-				<CModalFooter>
-					<form.Subscribe
-						selector={(state) => [state.canSubmit, state.isSubmitting]}
-						children={([canSubmit, isSubmitting]) => (
-							<>
-								<CButton color="secondary" onClick={doClose} disabled={!canSubmit}>
-									Cancel
-								</CButton>
-								<CButton
-									ref={buttonRef}
-									color="primary"
-									type="submit"
-									disabled={!canSubmit}
-									onClick={() => {
-										form.handleSubmit().catch((err) => {
-											console.error('Error submitting form', err)
-										})
-									}}
-								>
-									Save {isSubmitting ? '...' : ''}
-								</CButton>
-							</>
-						)}
-					/>
-				</CModalFooter>
-			</CModalExt>
-		</>
+							</Modal.Footer>
+						</Form>
+					</Modal.Popup>
+				</Modal.Viewport>
+			</Modal.Portal>
+		</Modal.Root>
 	)
 }
 
@@ -305,20 +308,14 @@ const SelectedVersionDropdown = observer(function SelectedVersionDropdown({
 	)
 
 	return (
-		<CFormSelect
-			name={htmlName}
+		<SimpleDropdownInputField
+			id={htmlName}
 			value={value as string}
-			onChange={(e) => onChange(e.currentTarget.value)}
+			setValue={(value) => onChange(value as string)}
 			onBlur={onBlur}
-		>
-			{moduleVersionChoices.map((v) => (
-				<option key={v.value} value={v.value}>
-					{v.label}
-				</option>
-			))}
-			{!moduleVersionChoices.length && (
-				<option value={null as any}>{choicesLoaded ? 'No compatible versions found' : 'Loading...'}</option>
-			)}
-		</CFormSelect>
+			noOptionsMessage={choicesLoaded ? 'No compatible versions found' : 'Loading...'}
+			badOptionPrefix="Unknown version"
+			choices={moduleVersionChoices}
+		/>
 	)
 })

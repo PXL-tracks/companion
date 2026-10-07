@@ -1,11 +1,11 @@
-import React, { useCallback, useState } from 'react'
-import { CButton } from '@coreui/react'
-import { faCaretRight, faCaretDown, faCheckCircle, faTrash, faPencilAlt } from '@fortawesome/free-solid-svg-icons'
+import { faCaretDown, faCaretRight, faCheckCircle, faPencilAlt, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import { TextInputField } from '../TextInputField.js'
-import type { CollectionsNestingTableCollection, NestingCollectionsApi } from './Types.js'
+import { useCallback, useState } from 'react'
+import { Button } from '~/Components/Button'
+import { TextInputFieldSimple } from '../TextInputField.js'
 import { CollectionsNestingTableCollectionRowWrapper } from './CollectionsNestingTableRowWrappers.js'
+import type { CollectionsNestingTableCollection, NestingCollectionsApi } from './Types.js'
 
 export interface CollectionsNestingTableCollectionRowProps {
 	collection: CollectionsNestingTableCollection
@@ -13,7 +13,7 @@ export interface CollectionsNestingTableCollectionRowProps {
 	index: number
 	isCollapsed: boolean
 	toggleExpanded: () => void
-	collectionsApi: NestingCollectionsApi
+	collectionsApi: NestingCollectionsApi | undefined
 	nestingLevel: number
 }
 
@@ -35,7 +35,7 @@ export const CollectionsNestingTableCollectionRow = observer(function Collection
 	}, [toggleExpanded, isEditing])
 
 	const handleSetName = useCallback(
-		(name: string) => collectionsApi.renameCollection(collection.id, name),
+		(name: string) => collectionsApi?.renameCollection(collection.id, name),
 		[collectionsApi, collection.id]
 	)
 
@@ -47,6 +47,13 @@ export const CollectionsNestingTableCollectionRow = observer(function Collection
 			}, 100),
 		[]
 	)
+
+	const handleNameFieldKeyDown = useCallback((e: React.KeyboardEvent) => {
+		if (e.key === 'Enter') {
+			e.preventDefault()
+			setIsEditing(false)
+		}
+	}, [])
 
 	const clickEditName = useCallback((e: React.MouseEvent) => {
 		e.preventDefault()
@@ -60,7 +67,7 @@ export const CollectionsNestingTableCollectionRow = observer(function Collection
 			e.preventDefault()
 			e.stopPropagation()
 
-			collectionsApi.deleteCollection(collection.id)
+			collectionsApi?.deleteCollection(collection.id)
 		},
 		[collectionsApi, collection.id]
 	)
@@ -75,11 +82,13 @@ export const CollectionsNestingTableCollectionRow = observer(function Collection
 			<div className="d-flex align-items-center justify-content-between" onClick={toggleExpanded2}>
 				<div className="d-flex align-items-center flex-grow-1">
 					{isEditing ? (
-						<TextInputField
+						<TextInputFieldSimple
+							id={undefined}
 							value={collection.label ?? ''}
 							placeholder={`Give this collection a name`}
 							setValue={handleSetName}
 							onBlur={handleNameFieldBlur}
+							onKeyDown={handleNameFieldKeyDown}
 							autoFocus
 						/>
 					) : (
@@ -92,19 +101,23 @@ export const CollectionsNestingTableCollectionRow = observer(function Collection
 				<div className="d-flex align-items-center" onClick={(e) => e.stopPropagation()}>
 					{children}
 
-					{isEditing ? (
-						<CButton color="link" onClick={handleNameFieldBlur}>
-							<FontAwesomeIcon icon={faCheckCircle} />
-						</CButton>
-					) : (
-						<CButton color="link" onClick={clickEditName}>
-							<FontAwesomeIcon icon={faPencilAlt} />
-						</CButton>
-					)}
+					{!!collectionsApi && (
+						<>
+							{isEditing ? (
+								<Button color="link" onClick={handleNameFieldBlur}>
+									<FontAwesomeIcon icon={faCheckCircle} />
+								</Button>
+							) : (
+								<Button color="link" onClick={clickEditName}>
+									<FontAwesomeIcon icon={faPencilAlt} />
+								</Button>
+							)}
 
-					<CButton color="link" onClick={clickDeleteCollection}>
-						<FontAwesomeIcon icon={faTrash} />
-					</CButton>
+							<Button color="link" onClick={clickDeleteCollection}>
+								<FontAwesomeIcon icon={faTrash} />
+							</Button>
+						</>
+					)}
 				</div>
 			</div>
 		</CollectionsNestingTableCollectionRowWrapper>

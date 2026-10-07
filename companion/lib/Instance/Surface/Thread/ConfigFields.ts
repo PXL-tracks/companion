@@ -1,3 +1,4 @@
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type {
 	CompanionInputFieldBaseExtended,
 	CompanionInputFieldCheckboxExtended,
@@ -5,41 +6,43 @@ import type {
 	CompanionInputFieldNumberExtended,
 	CompanionInputFieldStaticTextExtended,
 } from '@companion-app/shared/Model/Options.js'
-import { assertNever } from '@companion-app/shared/Util.js'
 import type {
-	SomeCompanionInputField as SurfaceInputField,
+	CompanionSurfaceConfigField,
+	CompanionSurfaceInputFieldTextInput,
+} from '@companion-app/shared/Model/Surfaces.js'
+import { assertNever } from '@companion-app/shared/Util.js'
+import type { Complete } from '@companion-module/base'
+import type {
 	CompanionInputFieldBase,
 	CompanionInputFieldCheckbox,
 	CompanionInputFieldDropdown,
 	CompanionInputFieldNumber,
 	CompanionInputFieldStaticText,
 	CompanionInputFieldTextInput,
+	SomeCompanionInputField as SurfaceInputField,
 } from '@companion-surface/base'
-import type { Complete } from '@companion-module/base'
-import type {
-	CompanionSurfaceConfigField,
-	CompanionSurfaceInputFieldTextInput,
-} from '@companion-app/shared/Model/Surfaces.js'
 
 export function translateSurfaceConfigFields(fields: SurfaceInputField[]): CompanionSurfaceConfigField[] {
-	return fields.map((o) => {
-		switch (o.type) {
-			case 'static-text':
-				return translateStaticTextField(o)
-			case 'textinput':
-				return translateTextInputField(o)
-			case 'checkbox':
-				return translateCheckboxField(o)
-			case 'number':
-				return translateNumberField(o)
-			case 'dropdown':
-				return translateDropdownField(o)
+	return fields
+		.filter((o) => !BANNED_PROPS.has(o.id))
+		.map((o) => {
+			switch (o.type) {
+				case 'static-text':
+					return translateStaticTextField(o)
+				case 'textinput':
+					return translateTextInputField(o)
+				case 'checkbox':
+					return translateCheckboxField(o)
+				case 'number':
+					return translateNumberField(o)
+				case 'dropdown':
+					return translateDropdownField(o)
 
-			default:
-				assertNever(o)
-				return generateUnsupportedField(o)
-		}
-	})
+				default:
+					assertNever(o)
+					return generateUnsupportedField(o)
+			}
+		})
 }
 
 function generateUnsupportedField<T extends CompanionInputFieldBase>(
@@ -74,6 +77,7 @@ function translateTextInputField(field: CompanionInputFieldTextInput): Complete<
 		multiline: false,
 		placeholder: undefined, // Not supported from modules
 		disableSanitisation: false, // Not supported from modules
+		unwrapPastedVariableNamespace: undefined, // Not supported from modules
 	}
 }
 function translateCheckboxField(field: CompanionInputFieldCheckbox): Complete<CompanionInputFieldCheckboxExtended> {
@@ -95,6 +99,9 @@ function translateNumberField(field: CompanionInputFieldNumber): Complete<Compan
 		range: undefined,
 		showMinAsNegativeInfinity: undefined,
 		showMaxAsPositiveInfinity: undefined,
+		clampValues: false,
+		asInteger: false,
+		allowNull: false,
 	}
 }
 function translateDropdownField(field: CompanionInputFieldDropdown): Complete<CompanionInputFieldDropdownExtended> {
@@ -105,7 +112,6 @@ function translateDropdownField(field: CompanionInputFieldDropdown): Complete<Co
 		choices: field.choices,
 		allowCustom: undefined,
 		regex: undefined,
-		minChoicesForSearch: undefined,
 	}
 }
 
@@ -122,6 +128,8 @@ function translateCommonFields(
 	| 'width'
 	| 'disableAutoExpression'
 	| 'allowInvalidValues'
+	| 'deferParsing'
+	| 'contextVariableResolution'
 > {
 	return {
 		id: field.id,
@@ -140,5 +148,7 @@ function translateCommonFields(
 		width: undefined,
 		disableAutoExpression: true,
 		allowInvalidValues: false,
+		deferParsing: undefined,
+		contextVariableResolution: undefined,
 	}
 }

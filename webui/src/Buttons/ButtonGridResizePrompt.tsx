@@ -1,10 +1,11 @@
-import { CAlert, CButton } from '@coreui/react'
-import { observer } from 'mobx-react-lite'
-import React, { useContext } from 'react'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faExpand } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { observer } from 'mobx-react-lite'
+import { useContext } from 'react'
+import { DismissableAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 export const ButtonGridResizePrompt = observer(function ButtonGridResizePrompt(): React.ReactNode {
 	const { surfaces, userConfig } = useContext(RootAppStoreContext)
@@ -12,7 +13,7 @@ export const ButtonGridResizePrompt = observer(function ButtonGridResizePrompt()
 	const setConfigKeyMutation = useMutationExt(trpc.userConfig.setConfigKey.mutationOptions())
 
 	const overflowing = userConfig.properties && surfaces.getSurfacesOverflowingBounds(userConfig.properties.gridSize)
-	if (!overflowing || overflowing.surfaces.length === 0) return null
+	if (!overflowing || overflowing.surfaces.length === 0 || !userConfig.properties.gridSizePromptGrow) return null
 
 	const doAutoResize = () => {
 		if (!overflowing) return
@@ -26,18 +27,18 @@ export const ButtonGridResizePrompt = observer(function ButtonGridResizePrompt()
 
 	return (
 		<>
-			<CAlert color="info" onClose={doDismiss} dismissible>
+			<DismissableAlert color="info" onClose={doDismiss}>
 				You have some surfaces which overflow the current grid bounds
 				<ul>
 					{overflowing.surfaces.map((s) => (
 						<li key={s.id}>{s.displayName}</li>
 					))}
 				</ul>
-				<CButton color="info" onClick={doAutoResize}>
+				<Button color="info" onClick={doAutoResize}>
 					<FontAwesomeIcon icon={faExpand} />
 					&nbsp;Resize grid to fit
-				</CButton>
-			</CAlert>
+				</Button>
+			</DismissableAlert>
 		</>
 	)
 })

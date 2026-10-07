@@ -1,7 +1,7 @@
-import type { EntityModelType, EntitySupportedChildGroupDefinition, FeedbackEntitySubType } from './EntityModel.js'
-import type { SomeCompanionInputField } from './Options.js'
 import type { CompanionButtonStyleProps } from '@companion-module/base'
 import type { ObjectsDiff } from './Common.js'
+import type { EntityModelType, EntitySupportedChildGroupDefinition, FeedbackEntitySubType } from './EntityModel.js'
+import type { SomeCompanionInputField } from './Options.js'
 
 export interface ClientEntityDefinition {
 	entityType: EntityModelType
@@ -16,10 +16,25 @@ export interface ClientEntityDefinition {
 	optionsToMonitorForInvalidations: string[] | null
 	feedbackType: FeedbackEntitySubType | null
 	feedbackStyle: Partial<CompanionButtonStyleProps> | undefined
+	/**
+	 * Special case for 'conditionalise existing feedbacks' to avoid the root getting style overrides, as we defer that to the children feedbacks
+	 */
+	feedbackDisableStyleOverrides?: boolean
 	hasLifecycleFunctions: boolean
 	hasLearn: boolean
 	learnTimeout: number | undefined
 	showInvert: boolean
+
+	/**
+	 * When an action, whether the action specifies that its callback returns a
+	 * `JsonValue` result.
+	 */
+	actionHasResult: boolean | undefined
+
+	/**
+	 * When an advanced feedback, the properties that should have overrides assigned
+	 */
+	feedbackAffectedProperties: string[] | undefined
 
 	/**
 	 * Whether this entity definition uses the auto-parser for options
@@ -62,3 +77,36 @@ export interface EntityDefinitionUpdateUpdateConnection extends ObjectsDiff<Clie
 	type: 'update-connection'
 	connectionId: string
 }
+
+export interface UICompositeElementDefinition {
+	name: string
+	description?: string
+	options: SomeCompanionInputField[]
+}
+
+export interface CompositeElementDefinitionInit {
+	type: 'init'
+	definitions: Record<string, Record<string, UICompositeElementDefinition>>
+}
+
+export interface CompositeElementDefinitionForgetConnection {
+	type: 'forget-connection'
+	connectionId: string
+}
+
+export interface CompositeElementDefinitionAddConnection {
+	type: 'add-connection'
+	connectionId: string
+	definitions: Record<string, UICompositeElementDefinition>
+}
+
+export interface CompositeElementDefinitionUpdateConnection extends ObjectsDiff<UICompositeElementDefinition> {
+	type: 'update-connection'
+	connectionId: string
+}
+
+export type CompositeElementDefinitionUpdate =
+	| CompositeElementDefinitionInit
+	| CompositeElementDefinitionForgetConnection
+	| CompositeElementDefinitionAddConnection
+	| CompositeElementDefinitionUpdateConnection

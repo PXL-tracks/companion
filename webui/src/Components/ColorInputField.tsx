@@ -1,18 +1,18 @@
-import React, { useState, useCallback, useContext } from 'react'
-import { SketchPicker } from './ColorPicker/Sketch.js'
-import type { ColorResult } from './ColorPicker/colors.js'
-import { createPortal } from 'react-dom'
-import { useOnClickOutsideExt } from '~/Resources/util.js'
-import { usePopper } from 'react-popper'
-import { MenuPortalContext } from './MenuPortalContext.js'
+import { autoUpdate, flip, shift, useFloating } from '@floating-ui/react'
 import { colord } from 'colord'
+import { useCallback, useContext, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { CompanionColorPresetValue } from '@companion-app/shared/Model/Options.js'
+import { useOnClickOutsideExt } from '~/Resources/util.js'
+import type { ColorResult } from './ColorPicker/colors.js'
+import { SketchPicker } from './ColorPicker/Sketch.js'
+import { MenuPortalContext } from './MenuPortalContext.js'
 
-function splitColor(color: number | string) {
+function splitColor(color: number | string, enableAlpha: boolean) {
 	if (typeof color === 'number' || !isNaN(Number(color))) {
 		color = Number(color)
 
-		if (color > 0xffffff) {
+		if (enableAlpha) {
 			return {
 				r: (color >> 16) & 0xff,
 				g: (color >> 8) & 0xff,
@@ -47,13 +47,14 @@ function splitColor(color: number | string) {
 
 const toReturnType = <T extends 'string' | 'number'>(
 	value: ColorResult,
-	returnType: 'string' | 'number'
+	returnType: 'string' | 'number',
+	enableAlpha: boolean | undefined
 ): AsType<T> => {
 	if (returnType === 'string') {
-		return `rgba(${value.rgb.r}, ${value.rgb.g}, ${value.rgb.b}, ${value.rgb.a})` as any // TODO - typings
+		return `rgba(${value.rgb.r}, ${value.rgb.g}, ${value.rgb.b}, ${value.rgb.a ?? 1})` as any // TODO - typings
 	} else {
 		let colorNumber = parseInt(value.hex.slice(1, 7), 16)
-		if (value.rgb.a && value.rgb.a !== 1) {
+		if (enableAlpha && value.rgb.a !== undefined && value.rgb.a !== 1) {
 			colorNumber += 0x1000000 * Math.round(255 * (1 - value.rgb.a)) // add possible transparency to number
 		}
 		return colorNumber as any // TODO - typings
@@ -63,6 +64,7 @@ const toReturnType = <T extends 'string' | 'number'>(
 type AsType<T extends 'string' | 'number'> = T extends 'string' ? string : number
 
 interface ColorInputFieldProps<T extends 'string' | 'number'> {
+	id: string | undefined
 	value: AsType<T>
 	setValue: (value: AsType<T>) => void
 	disabled?: boolean
@@ -72,6 +74,7 @@ interface ColorInputFieldProps<T extends 'string' | 'number'> {
 }
 
 export function ColorInputField<T extends 'string' | 'number'>({
+	id,
 	value,
 	setValue,
 	// disabled,
@@ -96,23 +99,23 @@ export function ColorInputField<T extends 'string' | 'number'>({
 
 	const onChange = useCallback(
 		(c: ColorResult) => {
-			const newValue = toReturnType<T>(c, returnType)
+			const newValue = toReturnType<T>(c, returnType, enableAlpha)
 			setValue(newValue)
 			setCurrentColor(newValue)
 		},
-		[setValue, returnType]
+		[setValue, returnType, enableAlpha]
 	)
 
 	const onChangeComplete = useCallback(
 		(c: ColorResult) => {
-			const newValue = toReturnType<T>(c, returnType)
+			const newValue = toReturnType<T>(c, returnType, enableAlpha)
 			setValue(newValue)
 			setCurrentColor(null)
 		},
-		[setValue, returnType]
+		[setValue, returnType, enableAlpha]
 	)
 
-	const color = splitColor(currentColor ?? value ?? 0)
+	const color = splitColor(currentColor ?? value ?? 0, enableAlpha ?? false)
 
 	const styles = {
 		color: {
@@ -135,25 +138,45 @@ export function ColorInputField<T extends 'string' | 'number'>({
 
 	const [referenceElement, setReferenceElement] = useState<HTMLDivElement | null>(null)
 	const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
-	const { styles: popperStyles, attributes } = usePopper(referenceElement, popperElement)
+	const { floatingStyles } = useFloating({
+		elements: { reference: referenceElement, floating: popperElement },
+		whileElementsMounted: autoUpdate,
+		middleware: [flip(), shift()],
+	})
 	useOnClickOutsideExt([{ current: referenceElement }, { current: popperElement }], setHide)
 
 	return (
 		<>
 			<div style={{ lineHeight: 0 }}>
-				<div style={styles.swatch} onClick={handleClick} ref={setReferenceElement}>
+				<div
+					id={id}
+					style={styles.swatch}
+					onClick={handleClick}
+					ref={setReferenceElement}
+					role="button"
+					tabIndex={0}
+					onKeyDown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault()
+							handleClick()
+						}
+					}}
+					aria-expanded={displayPicker}
+					aria-haspopup="dialog"
+					aria-label="Color picker"
+				>
 					<div style={styles.color} />
 				</div>
 				{displayPicker &&
 					createPortal(
-						<div ref={setPopperElement} style={{ ...popperStyles.popper, zIndex: 3 }} {...attributes.popper}>
+						<div ref={setPopperElement} style={{ ...floatingStyles, zIndex: 3 }}>
 							<SketchPicker
 								// disabled={disabled}
 								color={color}
 								onChange={onChange}
 								onChangeComplete={onChangeComplete}
 								disableAlpha={enableAlpha ? false : true}
-								presetColors={Array.isArray(presetColors) ? (presetColors as any) : PICKER_COLORS}
+								presetColors={Array.isArray(presetColors) ? presetColors : PICKER_COLORS}
 							/>
 						</div>,
 						menuPortal || document.body

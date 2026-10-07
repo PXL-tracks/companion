@@ -1,26 +1,28 @@
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { ImageResult } from '../Graphics/ImageResult.js'
+import type { InstanceController } from '../Instance/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import type { AppInfo } from '../Registry.js'
+import type { SurfaceController } from '../Surface/Controller.js'
+import type { UIExpress } from '../UI/Express.js'
+import type { UIHandler } from '../UI/Handler.js'
 import { ServiceArtnet } from './Artnet.js'
 import { ServiceBonjourDiscovery } from './BonjourDiscovery.js'
-import { ServiceElgatoPlugin } from './ElgatoPlugin.js'
 import { ServiceEmberPlus } from './EmberPlus.js'
 import { ServiceHttpApi } from './HttpApi.js'
 import { ServiceHttps } from './Https.js'
+import { ServiceMdnsAdvertise } from './MdnsAdvertise.js'
 import { ServiceOscListener } from './OscListener.js'
 import type { ServiceOscSender } from './OscSender.js'
 import { ServiceRosstalk } from './Rosstalk.js'
+import { ServiceSatelliteApi } from './Satellite/SatelliteApi.js'
 import { ServiceSatelliteTcp } from './SatelliteTcp.js'
+import { ServiceSatelliteWebsocket } from './SatelliteWebsocket.js'
+import type { ServiceApi } from './ServiceApi.js'
 import { ServiceTcp } from './Tcp.js'
 import { ServiceTimeline } from './Timeline/Controller.js'
 import { ServiceUdp } from './Udp.js'
-import type { UIHandler } from '../UI/Handler.js'
-import { ServiceSatelliteWebsocket } from './SatelliteWebsocket.js'
-import type { ServiceApi } from './ServiceApi.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { ImageResult } from '../Graphics/ImageResult.js'
-import type { SurfaceController } from '../Surface/Controller.js'
-import type { IPageStore } from '../Page/Store.js'
-import type { InstanceController } from '../Instance/Controller.js'
-import type { UIExpress } from '../UI/Express.js'
 
 /**
  * Class that manages all of the services.
@@ -47,13 +49,15 @@ export class ServiceController {
 	readonly emberplus: ServiceEmberPlus
 	readonly artnet: ServiceArtnet
 	readonly rosstalk: ServiceRosstalk
+	readonly satelliteApi: ServiceSatelliteApi
 	readonly satelliteTcp: ServiceSatelliteTcp
 	readonly satelliteWebsocket: ServiceSatelliteWebsocket
-	readonly elgatoPlugin: ServiceElgatoPlugin
 	readonly bonjourDiscovery: ServiceBonjourDiscovery
+	readonly mdnsAdvertise: ServiceMdnsAdvertise
 	readonly timeline: ServiceTimeline
 
 	constructor(
+		appInfo: AppInfo,
 		serviceApi: ServiceApi,
 		userconfig: DataUserConfig,
 		oscSender: ServiceOscSender,
@@ -72,17 +76,18 @@ export class ServiceController {
 		this.emberplus = new ServiceEmberPlus(serviceApi, userconfig, pageStore)
 		this.artnet = new ServiceArtnet(serviceApi, userconfig)
 		this.rosstalk = new ServiceRosstalk(serviceApi, userconfig)
-		this.satelliteTcp = new ServiceSatelliteTcp(serviceApi.appInfo, surfaceController, userconfig)
-		this.satelliteWebsocket = new ServiceSatelliteWebsocket(serviceApi.appInfo, surfaceController, userconfig)
-		this.elgatoPlugin = new ServiceElgatoPlugin(serviceApi, surfaceController, userconfig)
+		this.satelliteApi = new ServiceSatelliteApi(serviceApi, surfaceController, userconfig)
+		this.satelliteTcp = new ServiceSatelliteTcp(this.satelliteApi, userconfig)
+		this.satelliteWebsocket = new ServiceSatelliteWebsocket(this.satelliteApi, userconfig)
 		this.bonjourDiscovery = new ServiceBonjourDiscovery(userconfig, instanceController)
+		this.mdnsAdvertise = new ServiceMdnsAdvertise(userconfig, appInfo)
 		this.timeline = new ServiceTimeline(instanceController)
 	}
 
 	onButtonDrawn(location: ControlLocation, render: ImageResult): void {
 		this.tcp.onButtonDrawn(location, render)
 		this.emberplus.onButtonDrawn(location, render)
-		this.elgatoPlugin.onButtonDrawn(location, render)
+		this.satelliteApi.onButtonDrawn(location, render)
 	}
 
 	/**
@@ -93,12 +98,13 @@ export class ServiceController {
 	updateUserConfig(key: string, value: boolean | number | string): void {
 		this.artnet.updateUserConfig(key, value)
 		this.bonjourDiscovery.updateUserConfig(key, value)
-		this.elgatoPlugin.updateUserConfig(key, value)
 		this.emberplus.updateUserConfig(key, value)
 		this.https.updateUserConfig(key, value)
+		this.mdnsAdvertise.updateUserConfig(key, value)
 		this.oscListener.updateUserConfig(key, value)
 		this.oscSender.updateUserConfig(key, value)
 		this.rosstalk.updateUserConfig(key, value)
+		this.satelliteApi.updateUserConfig(key, value)
 		this.satelliteTcp.updateUserConfig(key, value)
 		this.satelliteWebsocket.updateUserConfig(key, value)
 		this.tcp.updateUserConfig(key, value)

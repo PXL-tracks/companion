@@ -1,5 +1,5 @@
-import { default_nav_buttons_definitions } from './Defaults.js'
-import type { IPageStore, PageStore } from './Store.js'
+import { EventEmitter } from 'node:events'
+import z from 'zod'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import type {
 	PageModel,
@@ -7,14 +7,14 @@ import type {
 	PageModelChangesItem,
 	PageModelChangesUpdate,
 } from '@companion-app/shared/Model/PageModel.js'
-import LogController from '../Log/Controller.js'
-import { EventEmitter } from 'events'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { ControlsController } from '../Controls/Controller.js'
 import type { ControlCommonEvents } from '../Controls/ControlDependencies.js'
+import type { ControlsController } from '../Controls/Controller.js'
 import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import LogController from '../Log/Controller.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import { default_nav_buttons_definitions } from './Defaults.js'
+import type { IPageStore, PageStore } from './Store.js'
 
 interface PageControllerEvents {
 	controlIdsMoved: [controlIds: string[]]
@@ -78,9 +78,8 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 			this.setControlIdAt(location, null)
 		})
 
-		// Check if we need to create a default page
-		const createdDefault = this.#store._ensureDefaultPageExists()
-		if (createdDefault) {
+		// Check if we need to populate a default page
+		if (this.#store.createdDefaultPage) {
 			setImmediate(() => {
 				this.createPageDefaultNavButtons(1)
 			})
@@ -116,7 +115,7 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 				.mutation(({ input }) => {
 					this.#logger.silly(`trpc: pages:setName ${input.pageNumber}: ${input.name}`)
 
-					this.setPageName(input.pageNumber, input.name, true)
+					this.setPageName(input.pageNumber, input.name)
 				}),
 
 			remove: publicProcedure
@@ -210,7 +209,7 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 					this.#store._movePageInOrder(currentPageIndex, input.pageNumber - 1)
 
 					// Update cache for controls on later pages
-					const { changedPageIds } = this.#updateAndRedrawAllPagesAfter(
+					const { changedPageIds } = this.#updateAndRedrawAllPagesInRange(
 						Math.min(currentPageIndex + 1, input.pageNumber),
 						Math.max(currentPageIndex + 1, input.pageNumber)
 					)
@@ -267,7 +266,7 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 		this.#store._removePage(pageInfo.id)
 
 		// Update cache for controls on later pages
-		const { changedPageNumbers, changedPageIds } = this.#updateAndRedrawAllPagesAfter(pageNumber, null)
+		const { changedPageNumbers, changedPageIds } = this.#updateAndRedrawAllPagesInRange(pageNumber, null)
 
 		// the list is a page shorter, ensure the 'old last' page is reported as undefined
 		const missingPageNumber = this.#store.getPageIds().length + 1
@@ -305,7 +304,7 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 		}
 
 		// Update cache for controls on later pages
-		const { changedPageIds } = this.#updateAndRedrawAllPagesAfter(asPageNumber, null)
+		const { changedPageIds } = this.#updateAndRedrawAllPagesInRange(asPageNumber, null)
 
 		// inform clients
 		this.emit('clientUpdate', {
@@ -327,7 +326,7 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 	 * @param firstPageNumber
 	 * @param lastPageNumber If null, run to the end
 	 */
-	#updateAndRedrawAllPagesAfter(
+	#updateAndRedrawAllPagesInRange(
 		firstPageNumber: number,
 		lastPageNumber: number | null
 	): { changedPageNumbers: number[]; changedPageIds: Set<string> } {
@@ -398,10 +397,9 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 	 * Reset a page to defaults and empty
 	 * Note: Controls will be orphaned if not explicitly deleted by the caller
 	 * @param pageNumber - the page id
-	 * @param [redraw = true] - <code>true</code> if the graphics should invalidate
 	 * @returns ControlIds referenced on the page
 	 */
-	resetPage(pageNumber: number, redraw = true): string[] {
+	resetPage(pageNumber: number): string[] {
 		this.#logger.silly('Reset page ' + pageNumber)
 
 		// Fetch the page and ensure it exists
@@ -412,14 +410,14 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 
 		const controlChanges: PageModelChangesItem['controls'] = []
 
-		// Clear cache for old controls and track changes
+		// Report each populated location as cleared
 		for (const [row, rowObj] of Object.entries(pageInfo.controls)) {
 			if (!rowObj) continue
-			for (const [col, controlId] of Object.entries(rowObj)) {
+			for (const col of Object.keys(rowObj)) {
 				controlChanges.push({
 					row: Number(row),
 					column: Number(col),
-					controlId,
+					controlId: null,
 				})
 			}
 		}
@@ -428,9 +426,8 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 		this.#store._resetPageControls(pageNumber)
 
 		// Reset page name using the store
-		const newPageInfo = this.#store._setPageName(pageNumber, 'PAGE')
+		this.#store._setPageName(pageNumber, 'PAGE')
 
-		if (redraw && newPageInfo) this.#invalidatePageNumberControls(pageNumber, newPageInfo)
 		this.emit('clientUpdate', {
 			type: 'update',
 			updatedOrder: null,
@@ -500,19 +497,16 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 	 * Set/update a page
 	 * @param pageNumber - the page id
 	 * @param name - the page object containing the name
-	 * @param redraw - <code>true</code> if the graphics should invalidate
 	 */
-	setPageName(pageNumber: number, name: string, redraw = true): void {
+	setPageName(pageNumber: number, name: string): void {
 		const pageInfo = this.#store.getPageInfo(pageNumber)
 		if (!pageInfo) {
 			throw new Error('Page must be created before it can be imported to')
 		}
 
-		const newPageInfo = this.#store._setPageName(pageNumber, name)
+		this.#store._setPageName(pageNumber, name)
 
 		this.#logger.silly('Set page ' + pageNumber + ' to ', name)
-
-		if (redraw && newPageInfo) this.#invalidatePageNumberControls(pageNumber, newPageInfo)
 
 		this.emit('clientUpdate', {
 			type: 'update',
@@ -529,26 +523,6 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 	}
 
 	/**
-	 * Redraw the page number control on the specified page
-	 */
-	#invalidatePageNumberControls(pageNumber: number, pageInfo: PageModel): void {
-		if (!pageInfo?.controls) return
-
-		for (const [row, rowObj] of Object.entries(pageInfo.controls)) {
-			for (const [column, controlId] of Object.entries(rowObj)) {
-				const control = this.#controlsController.getControl(controlId)
-				if (control && control.type === 'pagenum') {
-					this.#graphicsController.invalidateButton({
-						pageNumber: Number(pageNumber),
-						column: Number(column),
-						row: Number(row),
-					})
-				}
-			}
-		}
-	}
-
-	/**
 	 * Redraw allcontrols on the specified page
 	 */
 	#invalidateAllControlsOnPageNumber(pageNumber: number, pageInfo: PageModel): void {
@@ -559,6 +533,10 @@ export class PageController extends EventEmitter<PageControllerEvents> {
 			for (const [column, controlId] of Object.entries(rowObj)) {
 				const control = this.#controlsController.getControl(controlId)
 				if (control) {
+					// The page number changed, so the control's location-dependent state (this:page and
+					// related variables/feedbacks) must be recomputed, not just redrawn from cache.
+					control.triggerLocationHasChanged()
+
 					this.#graphicsController.invalidateButton({
 						pageNumber: pageNumber,
 						column: Number(column),

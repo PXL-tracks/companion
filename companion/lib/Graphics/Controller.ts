@@ -9,27 +9,43 @@
  * this program.
  */
 
-import QuickLRU from 'quick-lru'
+import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import type * as imageRs from '@julusian/image-rs'
 import { GlobalFonts } from '@napi-rs/canvas'
-import { GraphicsRenderer } from './Renderer.js'
-import { ParseControlId, xyToOldBankIndex } from '@companion-app/shared/ControlId.js'
-import type { ImageResult } from './ImageResult.js'
-import { ImageWriteQueue } from '../Resources/ImageWriteQueue.js'
-import workerPool from 'workerpool'
-import { isPackaged } from '../Resources/Util.js'
-import path from 'path'
-import os from 'os'
+import compressionMiddleware from 'compression'
 import debounceFn from 'debounce-fn'
-import type { CompanionButtonStyleProps } from '@companion-module/base'
-import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
-import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
+import type Express from 'express'
+import QuickLRU from 'quick-lru'
+import workerPool from 'workerpool'
+import { ParseControlId, xyToOldBankIndex } from '@companion-app/shared/ControlId.js'
+import {
+	resolveButtonStyleProperties,
+	type ResolveButtonStylePropertiesConfig,
+} from '@companion-app/shared/Graphics/Util.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { EventEmitter } from 'events'
-import LogController from '../Log/Controller.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { IPageStore } from '../Page/Store.js'
+import type { RendererButtonStyle, RendererDrawStyle } from '@companion-app/shared/Model/Render.js'
+import type { SomeButtonGraphicsDrawElement } from '@companion-app/shared/Model/StyleLayersModel.js'
+import { ButtonGraphicsDecorationType, type DrawImageBuffer } from '@companion-app/shared/Model/StyleModel.js'
+import type { SurfaceRotation } from '@companion-app/shared/Model/Surfaces.js'
+import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
 import type { IControlStore } from '../Controls/IControlStore.js'
+import type { DataDatabase } from '../Data/Database.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import LogController from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import { ImageWriteQueue } from '../Resources/ImageWriteQueue.js'
+import { isPackaged } from '../Resources/Util.js'
+import type { VariablesController } from '../Variables/Controller.js'
 import type { VariablesValues, VariableValueEntry } from '../Variables/Values.js'
+import { collectContentHashes } from './ConvertGraphicsElements/Util.js'
+import { FONT_DEFINITIONS } from './Fonts.js'
+import { ImageLibrary } from './ImageLibrary.js'
+import { ImageResult } from './ImageResult.js'
+import { GraphicsLayeredProcessedStyleGenerator } from './LayeredProcessedStyleGenerator.js'
+import { computeOversampling, GraphicsRenderer } from './Renderer.js'
 import { GraphicsThreadMethods } from './ThreadMethods.js'
 
 const CRASHED_WORKER_RETRY_COUNT = 10
@@ -44,21 +60,6 @@ const RENDER_CACHE_PER_BUTTON_RATIO = 0.1 // Proportion of states to keep cached
 const RENDER_CACHE_MIN_SIZE = 100
 const RENDER_CACHE_MAX_SIZE = 1000
 const RENDER_CACHE_RESIZE_DEBOUNCE_MS = 500
-
-export interface GraphicsOptions {
-	page_direction_flipped: boolean
-	page_plusminus: boolean
-	remove_topbar: boolean
-}
-
-/**
- * Generate full path to a font file, handling both packaged and non-packaged environments
- */
-function generateFontUrl(fontFilename: string): string {
-	const fontPath = isPackaged() ? 'assets/Fonts' : '../../../assets/Fonts'
-	// we could simplify by using import.meta.dirname
-	return path.join(import.meta.dirname, fontPath, fontFilename)
-}
 
 interface GraphicsControllerEvents {
 	button_drawn: [location: ControlLocation, render: ImageResult]
@@ -87,7 +88,7 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	/**
 	 * Cached UserConfig values that affect button rendering
 	 */
-	readonly #drawOptions: GraphicsOptions
+	readonly #drawOptions: ResolveButtonStylePropertiesConfig
 
 	/**
 	 * Current button renders cache
@@ -100,6 +101,11 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	readonly #renderLRUCache: QuickLRU<string, ImageResult>
 
 	readonly #renderQueue: ImageWriteQueue<string, [RenderArguments, boolean]>
+
+	/**
+	 * Image library for storing and managing images
+	 */
+	readonly imageLibrary: ImageLibrary
 
 	#pool = workerPool.pool(path.join(import.meta.dirname, isPackaged() ? './RenderThread.js' : './Thread.js'), {
 		minWorkers: 2,
@@ -200,14 +206,16 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		controlsStore: IControlStore,
 		pageStore: IPageStore,
 		userConfigController: DataUserConfig,
-		variableValuesController: VariablesValues
+		variablesController: VariablesController,
+		db: DataDatabase,
+		internalApiRouter: Express.Router
 	) {
 		super()
 
 		this.controlsStore = controlsStore
 		this.#pageStore = pageStore
 		this.#userConfigController = userConfigController
-		this.#variableValuesController = variableValuesController
+		this.#variableValuesController = variablesController.values
 
 		// Initialize render LRU cache with dynamic size based on control count
 		const initialCacheSize = this.#computeRenderCacheSize()
@@ -217,9 +225,8 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		this.setMaxListeners(0)
 
 		this.#drawOptions = {
-			page_direction_flipped: this.#userConfigController.getKey('page_direction_flipped'),
-			page_plusminus: this.#userConfigController.getKey('page_plusminus'),
-			remove_topbar: this.#userConfigController.getKey('remove_topbar'),
+			buttons_decoration: this.#userConfigController.getKey('buttons_decoration'),
+			buttons_status_icons: this.#userConfigController.getKey('buttons_status_icons'),
 		}
 
 		this.#renderQueue = new ImageWriteQueue(
@@ -228,27 +235,35 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 				try {
 					if (args.type === 'preset') {
 						const control = this.controlsStore.getControl(args.controlId)
-						const buttonStyle = control?.getDrawStyle() ?? undefined
+						const buttonStyle = (await control?.drawing?.getDrawStyle()) ?? undefined
 
 						let render: ImageResult | undefined
-						if (buttonStyle && buttonStyle.style) {
+						if (buttonStyle && buttonStyle.style === 'button-layered') {
 							// Check if the image is already present in the render cache and if so, return it
-
-							const key = JSON.stringify({ options: this.#drawOptions, buttonStyle })
-							render = this.#renderLRUCache.get(key)
+							// Use collected contentHashes instead of JSON.stringify on entire buttonStyle to avoid
+							// serializing large binary data (images can be 100KB+)
+							const cacheKey = JSON.stringify({
+								options: this.#drawOptions,
+								...buttonStyle,
+								elements: collectContentHashes(buttonStyle.elements),
+							})
+							render = this.#renderLRUCache.get(cacheKey)
 
 							if (!render) {
-								const { buffer, width, height, dataUrl, draw_style } = await this.#executePoolDrawButtonImage(
-									buttonStyle,
-									undefined,
-									undefined,
-									CRASHED_WORKER_RETRY_COUNT
-								)
-								render = GraphicsRenderer.wrapDrawButtonImage(buffer, width, height, dataUrl, draw_style, buttonStyle)
-								this.#renderLRUCache.set(key, render)
+								const renderStyle: RendererDrawStyle = {
+									...buttonStyle,
+									...resolveButtonStyleProperties(this.#drawOptions, buttonStyle.elements),
+									location: undefined, // Presets don't have a location, and it isn't needed for rendering
+								}
+
+								render = await this.#drawImageResult(renderStyle)
+								this.#renderLRUCache.set(cacheKey, render)
 							}
 						} else {
-							render = GraphicsRenderer.drawBlank(this.#drawOptions, null)
+							render = GraphicsRenderer.drawBlank(
+								this.#drawOptions.buttons_decoration === ButtonGraphicsDecorationType.TopBar,
+								null
+							)
 						}
 
 						this.emit('presetDrawn', args.controlId, render)
@@ -268,7 +283,40 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 
 					const controlId = this.#pageStore.getControlIdAt(location)
 					const control = controlId ? this.controlsStore.getControl(controlId) : undefined
-					const buttonStyle = control?.getDrawStyle() ?? undefined
+					const buttonStyle = (await control?.drawing?.getDrawStyle()) ?? undefined
+
+					let render: ImageResult | undefined
+					if (location && locationIsInBounds && buttonStyle && buttonStyle.style) {
+						const showButtonConfig = resolveButtonStyleProperties(this.#drawOptions, buttonStyle.elements)
+
+						const renderStyle = {
+							...buttonStyle,
+
+							...showButtonConfig,
+							// Only needed if the topbar is shown
+							location: showButtonConfig.decoration === ButtonGraphicsDecorationType.TopBar ? location : undefined,
+						}
+
+						const cacheKeyObj: Record<string, any> = {
+							...renderStyle,
+							elements: collectContentHashes(buttonStyle.elements), // use hashes of elements for the key
+							referencedLocations: [...(buttonStyle.referencedLocations ?? [])].sort(), // Sets serialize as {} in JSON.stringify
+						}
+						const cacheKey = JSON.stringify(cacheKeyObj)
+
+						// Check if the image is already present in the render cache and if so, return it
+						render = this.#renderLRUCache.get(cacheKey)
+
+						if (!render) {
+							render = await this.#drawImageResult(renderStyle, buttonStyle.elements, buttonStyle.referencedLocations)
+							this.#renderLRUCache.set(cacheKey, render)
+						}
+					} else {
+						render = GraphicsRenderer.drawBlank(
+							this.#drawOptions.buttons_decoration === ButtonGraphicsDecorationType.TopBar,
+							location
+						)
+					}
 
 					if (location && locationIsInBounds) {
 						// Update the internal b_text_1_4 variable
@@ -276,19 +324,27 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 							const values: VariableValues = {}
 
 							// Update text, if it is present
-							values[`b_text_${location.pageNumber}_${location.row}_${location.column}`] =
-								buttonStyle?.style === 'button' ? buttonStyle.text : undefined
+							values[`b_text_${location.pageNumber}_${location.row}_${location.column}`] = render
+								? render.style?.text?.text
+								: undefined
 							const bankIndex = xyToOldBankIndex(location.column, location.row)
 							if (bankIndex)
-								values[`b_text_${location.pageNumber}_${bankIndex}`] =
-									buttonStyle?.style === 'button' ? buttonStyle.text : undefined
+								values[`b_text_${location.pageNumber}_${bankIndex}`] = render ? render.style?.text?.text : undefined
+
+							values[`b_active_${location.pageNumber}_${location.row}_${location.column}`] =
+								buttonStyle?.style === 'button-layered' ? buttonStyle.pushed : undefined
 
 							// Update step
 							values[`b_step_${location.pageNumber}_${location.row}_${location.column}`] =
-								buttonStyle?.style === 'button' ? buttonStyle.stepCurrent : undefined
+								buttonStyle?.style === 'button-layered' ? buttonStyle.stepCurrent : undefined
 							values[`b_step_count_${location.pageNumber}_${location.row}_${location.column}`] =
-								buttonStyle?.style === 'button' ? buttonStyle.stepCount : undefined
+								buttonStyle?.style === 'button-layered' ? buttonStyle.stepCount : undefined
 
+							values[`b_actions_running_${location.pageNumber}_${location.row}_${location.column}`] =
+								buttonStyle?.style === 'button-layered' ? (buttonStyle.action_running ?? false) : undefined
+
+							values[`b_status_${location.pageNumber}_${location.row}_${location.column}`] =
+								buttonStyle?.style === 'button-layered' ? (buttonStyle.button_status ?? 'good') : undefined
 							// Submit the updated values
 							if (this.#pendingVariables) {
 								Object.assign(this.#pendingVariables, values)
@@ -297,33 +353,6 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 							}
 							this.#debouncePendingVariables()
 						})
-					}
-
-					let render: ImageResult | undefined
-					if (location && locationIsInBounds && buttonStyle && buttonStyle.style) {
-						const pagename = this.#pageStore.getPageName(location.pageNumber)
-
-						// Check if the image is already present in the render cache and if so, return it
-						let keyLocation: ControlLocation | undefined
-						if (buttonStyle.style === 'button') {
-							const globalShowTopBar = !this.#drawOptions.remove_topbar && buttonStyle.show_topbar === 'default'
-							keyLocation = globalShowTopBar || buttonStyle.show_topbar === true ? location : undefined
-						}
-						const key = JSON.stringify({ options: this.#drawOptions, buttonStyle, keyLocation, pagename })
-						render = this.#renderLRUCache.get(key)
-
-						if (!render) {
-							const { buffer, width, height, dataUrl, draw_style } = await this.#executePoolDrawButtonImage(
-								buttonStyle,
-								location,
-								pagename,
-								CRASHED_WORKER_RETRY_COUNT
-							)
-							render = GraphicsRenderer.wrapDrawButtonImage(buffer, width, height, dataUrl, draw_style, buttonStyle)
-							this.#renderLRUCache.set(key, render)
-						}
-					} else {
-						render = GraphicsRenderer.drawBlank(this.#drawOptions, location)
 					}
 
 					// Only cache the render, if it is within the valid bounds
@@ -343,22 +372,41 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 
 		this.#logger.info('Loading fonts')
 
-		GlobalFonts.registerFromPath(generateFontUrl('Arimo-Regular.ttf'), 'Companion-sans')
-		// typos:disable-line wdth is part of the filename
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansMono-wdth-wght.ttf'), 'Companion-mono')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansSymbols-wght.ttf'), 'Companion-symbols1')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansSymbols2-Regular.ttf'), 'Companion-symbols2')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansMath-Regular.ttf'), 'Companion-symbols3')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoMusic-Regular.ttf'), 'Companion-symbols4')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansLinearA-Regular.ttf'), 'Companion-symbols5')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansLinearB-Regular.ttf'), 'Companion-symbols6')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansGurmukhi-Regular.ttf'), 'Companion-gurmukhi')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansSC-Regular.ttf'), 'Companion-simplified-chinese')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoSansKR-Regular.ttf'), 'Companion-korean')
-		GlobalFonts.registerFromPath(generateFontUrl('NotoColorEmoji-compat.ttf'), 'Companion-emoji')
-		GlobalFonts.registerFromPath(generateFontUrl('pf_tempesta_seven.ttf'), '5x7')
+		for (const definition of FONT_DEFINITIONS) {
+			GlobalFonts.registerFromPath(definition.pathOnDisk, definition.name)
+		}
 
 		this.#logger.info('Fonts loaded')
+
+		// Initialize the image library
+		this.imageLibrary = new ImageLibrary(db, this, variablesController)
+
+		// Serve font files to clients
+		internalApiRouter.get('/graphics/font/:font', compressionMiddleware(), (req, res) => {
+			const definition = FONT_DEFINITIONS.find((def) => def.name === req.params.font)
+			if (!definition) {
+				res.status(404).send('Font not found')
+				return
+			}
+
+			// Try and set the correct content type
+			if (definition.pathOnDisk.endsWith('.ttf')) {
+				res.setHeader('Content-Type', 'font/ttf')
+			}
+
+			// Cache aggressively
+			res.setHeader('Cache-Control', 'public, max-age=31536000')
+
+			this.#logger.debug(`Send font ${definition.name}`)
+			const stream = fs.createReadStream(definition.pathOnDisk)
+			stream.on('error', (err) => {
+				this.#logger.warn(`Failed to stream font ${definition.name}: ${err}`)
+				if (!res.headersSent) res.status(500).end()
+				else res.destroy(err)
+			})
+			res.on('close', () => stream.destroy())
+			stream.pipe(res)
+		})
 	}
 
 	/**
@@ -376,7 +424,10 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 					column,
 				}
 
-				const blankRender = GraphicsRenderer.drawBlank(this.#drawOptions, location)
+				const blankRender = GraphicsRenderer.drawBlank(
+					this.#drawOptions.buttons_decoration === ButtonGraphicsDecorationType.TopBar,
+					location
+				)
 
 				this.#updateCacheWithRender(location, blankRender)
 				this.emit('button_drawn', location, blankRender)
@@ -404,50 +455,31 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	}
 
 	/**
-	 * Redraw the page controls on every page
-	 */
-	invalidatePageControls(): void {
-		const allControls = this.controlsStore.getAllControls()
-		for (const control of allControls.values()) {
-			if (control.type === 'pageup' || control.type === 'pagedown') {
-				this.invalidateControl(control.controlId)
-			}
-		}
-	}
-
-	/**
 	 * Draw a preview of a button
 	 */
-	async drawPreview(buttonStyle: CompanionButtonStyleProps & { style: 'button' }): Promise<ImageResult> {
-		const drawStyle: DrawStyleModel = {
-			...buttonStyle,
+	async drawPreview(
+		drawType: RendererButtonStyle['drawType'],
+		elements: SomeButtonGraphicsDrawElement[]
+	): Promise<ImageResult> {
+		const drawStyle: RendererButtonStyle = {
+			style: 'button-layered',
+			drawType,
 
-			textExpression: false,
+			elements: elements,
 
-			imageBuffers: [],
 			pushed: false,
-			cloud: false,
-			cloud_error: false,
 			button_status: undefined,
 			action_running: false,
 
 			stepCurrent: 1,
 			stepCount: 1,
 
-			show_topbar: buttonStyle.show_topbar,
-			alignment: buttonStyle.alignment ?? 'center:center',
-			pngalignment: buttonStyle.pngalignment ?? 'center:center',
-			png64: buttonStyle.png64 ?? null,
-			size: buttonStyle.size === 'auto' ? 'auto' : Number(buttonStyle.size),
+			...resolveButtonStyleProperties(this.#drawOptions, elements),
+
+			location: undefined,
 		}
 
-		const { buffer, width, height, dataUrl, draw_style } = await this.#executePoolDrawButtonImage(
-			drawStyle,
-			undefined,
-			undefined,
-			CRASHED_WORKER_RETRY_COUNT
-		)
-		return GraphicsRenderer.wrapDrawButtonImage(buffer, width, height, dataUrl, draw_style, drawStyle)
+		return this.#drawImageResult(drawStyle)
 	}
 
 	/**
@@ -456,20 +488,17 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 	 * @param value - the saved value
 	 */
 	updateUserConfig(key: string, value: boolean | number | string): void {
-		if (key == 'page_direction_flipped') {
-			this.#drawOptions.page_direction_flipped = !!value
-			this.invalidatePageControls()
-		} else if (key == 'page_plusminus') {
-			this.#drawOptions.page_plusminus = !!value
-			this.invalidatePageControls()
-		} else if (key == 'remove_topbar') {
-			this.#drawOptions.remove_topbar = !!value
-			this.#logger.silly('Topbar removed')
+		if (key == 'buttons_decoration') {
+			this.#drawOptions.buttons_decoration = value as any
+			this.#logger.silly('Button decoration changed')
 			// Delay redrawing to give connections a chance to adjust
 			setTimeout(() => {
 				this.emit('resubscribeFeedbacks')
-				this.regenerateAll(false)
+				this.triggerRegenerateAll()
 			}, 1000)
+		} else if (key === 'buttons_status_icons') {
+			this.#drawOptions.buttons_status_icons = String(value) as any
+			this.triggerRegenerateAll()
 		}
 	}
 
@@ -497,16 +526,17 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		this.#drawAndCacheButton(location)
 	}
 
+	triggerRegenerateAll = debounceFn(() => this.#regenerateAll(), { wait: 100, maxWait: 500 })
+
 	/**
 	 * Regenerate every button image
-	 * @param skipInvalidation whether to skip reporting invalidations of each button
 	 */
-	regenerateAll(skipInvalidation = false): void {
+	#regenerateAll(): void {
 		const pageCount = this.#pageStore.getPageCount()
 		for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
 			const populatedLocations = this.#pageStore.getAllPopulatedLocationsOnPage(pageNumber)
 			for (const location of populatedLocations) {
-				this.#drawAndCacheButton(location, skipInvalidation)
+				this.#drawAndCacheButton(location)
 			}
 		}
 	}
@@ -566,7 +596,10 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		const render = this.#renderCache.get(location.pageNumber)?.get(location.row)?.get(location.column)
 		if (render) return render
 
-		return GraphicsRenderer.drawBlank(this.#drawOptions, location)
+		return GraphicsRenderer.drawBlank(
+			this.#drawOptions.buttons_decoration === ButtonGraphicsDecorationType.TopBar,
+			location
+		)
 	}
 
 	/**
@@ -586,22 +619,58 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 		this.#debounceResizeRenderCache()
 	}
 
+	async #drawImageResult(
+		drawStyle: RendererButtonStyle,
+		drawElements: readonly SomeButtonGraphicsDrawElement[] | null = null,
+		referencedLocations: ReadonlySet<string> | undefined = undefined
+	): Promise<ImageResult> {
+		const processedStyle = GraphicsLayeredProcessedStyleGenerator.Generate(drawStyle)
+
+		return new ImageResult(
+			processedStyle,
+			async (width, height, rotation, format) =>
+				this.#executePoolDrawButtonImageBuffer(
+					drawStyle,
+					{ width, height, oversampling: computeOversampling(width, height) },
+					rotation,
+					format,
+					CRASHED_WORKER_RETRY_COUNT
+				),
+			drawElements,
+			referencedLocations ?? new Set()
+		)
+	}
+
 	/**
 	 * Draw a button image in the worker pool
 	 * @returns Image render object
 	 */
-	async #executePoolDrawButtonImage(
-		drawStyle: DrawStyleModel,
-		location: ControlLocation | undefined,
-		pagename: string | undefined,
+	async #executePoolDrawButtonImageBuffer(
+		drawStyle: RendererDrawStyle,
+		resolution: { width: number; height: number; oversampling: number },
+		rotation: SurfaceRotation | null,
+		format: imageRs.PixelFormat,
 		remainingAttempts: number
-	): Promise<{
-		buffer: Buffer
-		width: number
-		height: number
-		dataUrl: string
-		draw_style: DrawStyleModel['style'] | undefined
-	}> {
-		return this.#poolExec('drawButtonImage', [this.#drawOptions, drawStyle, location, pagename], remainingAttempts)
+	): Promise<Uint8Array> {
+		return this.#poolExec('drawButtonImageBuffer', [drawStyle, resolution, rotation, format], remainingAttempts)
+	}
+
+	/**
+	 * Create a preview image in the worker pool
+	 */
+	async executeCreatePreview(
+		originalDataUrl: string,
+		remainingAttempts: number = CRASHED_WORKER_RETRY_COUNT
+	): Promise<{ width: number; height: number; previewDataUrl: string }> {
+		return this.#poolExec('createImagePreview', [originalDataUrl], remainingAttempts)
+	}
+
+	async renderPixelBuffers(
+		imageBuffers: DrawImageBuffer[],
+		remainingAttempts: number = CRASHED_WORKER_RETRY_COUNT
+	): Promise<string | undefined> {
+		if (imageBuffers.length === 0) return undefined
+
+		return this.#poolExec('drawImageBuffers', [true, imageBuffers], remainingAttempts)
 	}
 }

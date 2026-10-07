@@ -1,11 +1,13 @@
+import { EventEmitter } from 'node:events'
 import selfsigned from 'selfsigned'
-import type { UserConfigModel, UserConfigUpdate } from '@companion-app/shared/Model/UserConfigModel.js'
-import { EventEmitter } from 'events'
-import type { DataDatabase, DataDatabaseDefaultTable } from './Database.js'
-import LogController from '../Log/Controller.js'
-import type { DataStoreTableView } from './StoreBase.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import z from 'zod'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
+import { ButtonGraphicsDecorationType } from '@companion-app/shared/Model/StyleModel.js'
+import type { UserConfigModel, UserConfigUpdate } from '@companion-app/shared/Model/UserConfigModel.js'
+import LogController from '../Log/Controller.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import type { DataDatabase, DataDatabaseDefaultTable } from './Database.js'
+import type { DataStoreTableView } from './StoreBase.js'
 
 export interface DataUserConfigEvents {
 	keyChanged: [key: keyof UserConfigModel, value: any, checkControlsInBounds: boolean]
@@ -41,11 +43,13 @@ export class DataUserConfig extends EventEmitter<DataUserConfigEvents> {
 
 		page_direction_flipped: false,
 		page_plusminus: false,
-		remove_topbar: false,
+		buttons_decoration: ButtonGraphicsDecorationType.TopBar,
+		buttons_status_icons: 'show',
 
-		elgato_plugin_enable: false,
 		usb_hotplug: true,
 		auto_enable_discovered_surfaces: true,
+
+		satellite_subscriptions_enabled: false,
 
 		pin_enable: false,
 		link_lockouts: false,
@@ -100,11 +104,13 @@ export class DataUserConfig extends EventEmitter<DataUserConfigEvents> {
 			minRow: 0,
 			maxRow: 3,
 		},
-		gridSizeInlineGrow: false, // TODO: temporary until the styling of growing is better
 		gridSizePromptGrow: true,
 
 		installName: '',
+		mdns_announcements_enabled: true,
 		default_export_filename: '$(internal:hostname)_$(internal:date_iso)-$(internal:time_h)$(internal:time_m)',
+
+		timezone: '',
 
 		backups: [
 			// Create a disabled backup rule by default
@@ -335,6 +341,13 @@ export class DataUserConfig extends EventEmitter<DataUserConfigEvents> {
 	}
 
 	/**
+	 * Get a copy of the entire user config object
+	 */
+	getAll(): UserConfigModel {
+		return structuredClone(this.#data)
+	}
+
+	/**
 	 * Get a specific use config setting
 	 * @param key
 	 * @param [clone = false] - <code>true</code> if a clone is needed instead of a link
@@ -417,6 +430,8 @@ export class DataUserConfig extends EventEmitter<DataUserConfigEvents> {
 			)
 			return
 		}
+
+		if (BANNED_PROPS.has(String(key))) throw new Error(`Setting config key "${String(key)}" is not allowed`)
 
 		this.setKeyUnchecked(key, value, save)
 	}

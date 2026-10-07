@@ -1,19 +1,22 @@
-import React, { useCallback, useContext, useRef } from 'react'
-import { CButton, CButtonGroup, CCol, CFormSwitch, CRow } from '@coreui/react'
-import { RootAppStoreContext } from '../Stores/RootAppStore.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useDragDropMonitor } from '@dnd-kit/react'
+import { isSortable, useSortable } from '@dnd-kit/react/sortable'
 import { faAdd, faSort, faTrash } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router'
 import classNames from 'classnames'
 import dayjs from 'dayjs'
-import { useDrag, useDrop } from 'react-dnd'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '../Components/GenericConfirmModal.js'
-import type { BackupRulesConfig } from '@companion-app/shared/Model/UserConfigModel.js'
 import { observer } from 'mobx-react-lite'
-import { NonIdealState } from '../Components/NonIdealState.js'
-import { Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router'
-import { backupTypes } from './BackupConstants.js'
-import { checkDragState, type DragState } from '~/Resources/DragAndDrop.js'
+import { useCallback, useContext, useRef } from 'react'
+import type { BackupRulesConfig } from '@companion-app/shared/Model/UserConfigModel.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { Grid } from '~/Components/Grid'
+import { SwitchInputField } from '~/Components/SwitchInputField.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '../Components/GenericConfirmModal.js'
+import { NonIdealState } from '../Components/NonIdealState.js'
+import { RootAppStoreContext } from '../Stores/RootAppStore.js'
+import { backupTypes } from './BackupConstants.js'
 
 export const SettingsBackupsPage = observer(function UserConfig() {
 	const navigate = useNavigate({ from: '/settings/backups' })
@@ -48,23 +51,29 @@ export const SettingsBackupsPage = observer(function UserConfig() {
 	const showSecondaryPanel = !!selectedRuleId
 
 	return (
-		<CRow className="split-panels">
-			<CCol xs={12} xl={6} className={`primary-panel ${showPrimaryPanel ? '' : 'd-xl-block d-none'}`}>
+		<Grid.Row className="split-panels">
+			<Grid.Col xs={12} xl={6} className={`primary-panel ${showPrimaryPanel ? '' : 'd-xl-block d-none'}`}>
 				<div className="flex-column-layout">
 					<div className="fixed-header">
 						<div className="d-flex justify-content-between">
 							<div>
-								<h4>Settings - Backups</h4>
+								<h4 className="button-inline">
+									Settings - Backups
+									<ContextHelpButton action="/user-guide/config/settings#backups">
+										Companion can back itself up on a schedule to multiple directories if desired. These backups can be
+										synced to cloud storage or backed up during OS backup to give more peace of mind to administrators.
+									</ContextHelpButton>
+								</h4>
 								<p>Scheduled backups of your Companion configuration. Settings apply instantaneously!</p>
 							</div>
 						</div>
 
 						<div className="mb-2">
-							<CButtonGroup>
-								<CButton color="primary" onClick={doAddNew} size="sm">
+							<ButtonGroup>
+								<Button color="primary" onClick={doAddNew} size="sm">
 									<FontAwesomeIcon icon={faAdd} /> Add Backup Rule
-								</CButton>
-							</CButtonGroup>
+								</Button>
+							</ButtonGroup>
 						</div>
 					</div>
 
@@ -72,14 +81,14 @@ export const SettingsBackupsPage = observer(function UserConfig() {
 						<BackupsTable editRule={doEditRule} />
 					</div>
 				</div>
-			</CCol>
+			</Grid.Col>
 
-			<CCol xs={12} xl={6} className={`secondary-panel ${showSecondaryPanel ? '' : 'd-xl-block d-none'}`}>
+			<Grid.Col xs={12} xl={6} className={`secondary-panel ${showSecondaryPanel ? '' : 'd-xl-block d-none'}`}>
 				<div className="secondary-panel-simple">
 					<Outlet />
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })
 
@@ -103,52 +112,59 @@ const BackupsTable = observer(function BackupsTable({ editRule }: BackupsTablePr
 		[reorderRulesMutation]
 	)
 
+	useDragDropMonitor({
+		onDragEnd(event) {
+			if (event.canceled) return
+			const { source } = event.operation
+			// Only handle backup-rule drags (the provider is shared across the whole app).
+			// For sortables the move is described by the source's projected index, not `target`.
+			if (!source || source.type !== 'backup-rule' || !isSortable(source)) return
+			const { initialIndex, index } = source
+			if (initialIndex === index) return
+			// The dragged rule should land where the rule currently at `index` sits; the backend
+			// removes the dragged rule then re-inserts it at the target's position.
+			const targetRule = backupRules[index]
+			if (!targetRule) return
+			moveRule(String(source.id), targetRule.id)
+		},
+	})
+
 	return (
-		<table className="table-tight table-responsive-sm collections-nesting-table" style={{ marginBottom: 10 }}>
-			<tbody>
-				{backupRules.length > 0 ? (
-					backupRules.map((rule) => (
-						<BackupsTableRow key={rule.id} rule={rule} editRule={editRule} moveRule={moveRule} />
-					))
-				) : (
-					<tr>
-						<td colSpan={4} className="currentlyNone">
-							<NonIdealState icon={faAdd} text="No backup rules configured. Add one to get started!" />
-						</td>
-					</tr>
-				)}
-			</tbody>
-		</table>
+		<div className="collections-nesting-table mb-2">
+			{backupRules.length > 0 ? (
+				backupRules.map((rule, index) => (
+					<BackupsTableRow key={rule.id} rule={rule} index={index} editRule={editRule} />
+				))
+			) : (
+				<div className="currentlyNone">
+					<NonIdealState icon={faAdd} text="No backup rules configured. Add one to get started!" />
+				</div>
+			)}
+		</div>
 	)
 })
 
-interface BackupsTableRowDragData {
-	id: string
-
-	dragState: DragState | null
-}
-interface BackupsTableRowDragStatus {
-	isDragging: boolean
-}
-
 interface BackupsTableRowProps {
 	rule: BackupRulesConfig
+	index: number
 	editRule: (ruleId: string) => void
-	moveRule: (itemId: string, targetId: string) => void
 }
 
-function BackupsTableRow({ rule, editRule, moveRule }: BackupsTableRowProps) {
+function BackupsTableRow({ rule, index, editRule }: BackupsTableRowProps) {
 	const confirmRef = useRef<GenericConfirmModalRef>(null)
 
 	const updateRuleFieldMutation = useMutationExt(trpc.importExport.backupRules.updateRuleField.mutationOptions())
 	const deleteRuleMutation = useMutationExt(trpc.importExport.backupRules.deleteRule.mutationOptions())
 
-	const doEnableDisable = useCallback(() => {
-		// Toggle the enabled state using the dedicated endpoint
-		updateRuleFieldMutation.mutateAsync({ ruleId: rule.id, field: 'enabled', value: !rule.enabled }).catch((err) => {
-			console.error('Error updating backup rule enabled state:', err)
-		})
-	}, [updateRuleFieldMutation, rule.id, rule.enabled])
+	const doEnableDisable = useCallback(
+		(enabled: boolean) => {
+			// Toggle the enabled state using the dedicated endpoint
+			updateRuleFieldMutation.mutateAsync({ ruleId: rule.id, field: 'enabled', value: enabled }).catch((err) => {
+				console.error('Error updating backup rule enabled state:', err)
+			})
+		},
+		[updateRuleFieldMutation, rule.id]
+	)
 
 	const doDelete = useCallback(() => {
 		confirmRef.current?.show(
@@ -165,84 +181,53 @@ function BackupsTableRow({ rule, editRule, moveRule }: BackupsTableRowProps) {
 
 	const doEdit = useCallback(() => editRule(rule.id), [editRule, rule.id])
 
-	const ref = useRef(null)
-	const [, drop] = useDrop<BackupsTableRowDragData>({
-		accept: 'backup-rule',
-		hover(hoverItem, monitor) {
-			if (!ref.current) {
-				return
-			}
-			// Don't replace items with themselves
-			if (hoverItem.id === rule.id) {
-				return
-			}
-
-			if (!checkDragState(hoverItem, monitor, rule.id)) return
-
-			// Time to actually perform the action
-			moveRule(hoverItem.id, rule.id)
-		},
-	})
-
-	const [{ isDragging }, drag, preview] = useDrag<BackupsTableRowDragData, unknown, BackupsTableRowDragStatus>({
-		type: 'backup-rule',
-		item: {
-			id: rule.id,
-			dragState: null,
-		},
-		collect: (monitor) => ({
-			isDragging: monitor.isDragging(),
-		}),
-	})
-	preview(drop(ref))
+	const { ref, handleRef } = useSortable({ id: rule.id, index, type: 'backup-rule', accept: 'backup-rule' })
 
 	const matchRoute = useMatchRoute()
 	const routeMatch = matchRoute({ to: '/settings/backups/$ruleId' })
 	const isSelected = routeMatch && routeMatch.ruleId === rule.id
 
-	const backupTypeLabel =
-		backupTypes.find((type: { label: string; value: string }) => type.value === rule.backupType)?.label ||
-		rule.backupType
+	const backupTypeLabel = backupTypes.find((type) => type.id === rule.backupType)?.label || rule.backupType
 
 	return (
-		<tr
+		<div
 			ref={ref}
 			className={classNames('collections-nesting-table-row-item', {
-				'row-dragging': isDragging,
-				'row-notdragging': !isDragging,
 				'row-selected': isSelected,
 			})}
 		>
-			<td ref={drag} className="td-reorder">
-				<FontAwesomeIcon icon={faSort} />
-				<GenericConfirmModal ref={confirmRef} />
-			</td>
-			<td onClick={doEdit} className="hand">
-				<b>{rule.name}</b>
-				<br />
-				<small>Format: {backupTypeLabel}</small>
-			</td>
-			<td onClick={doEdit} className="hand">
-				<small>Cron: {rule.cron}</small>
-				<br />
-				{rule.lastRan ? <small>Last run: {dayjs(rule.lastRan).format('MM/DD HH:mm:ss')}</small> : ''}
-			</td>
-			<td className="action-buttons">
-				<CButtonGroup>
-					<CFormSwitch
-						className="connection-enabled-switch ms-2"
-						color="success"
-						checked={rule.enabled}
-						onChange={doEnableDisable}
-						title={rule.enabled ? 'Disable rule' : 'Enable rule'}
-						size="xl"
-					/>
+			<div className="collections-nesting-table-row-item-grid">
+				<div ref={handleRef} className="row-reorder-handle">
+					<FontAwesomeIcon icon={faSort} />
+					<GenericConfirmModal ref={confirmRef} />
+				</div>
+				<div className="grow backup-rule-content">
+					<div onClick={doEdit} className="hand backup-rule-info">
+						<b>{rule.name}</b>
+						<br />
+						<small>Format: {backupTypeLabel}</small>
+					</div>
+					<div onClick={doEdit} className="hand backup-rule-cron">
+						<small>Cron: {rule.cron}</small>
+						<br />
+						{rule.lastRan ? <small>Last run: {dayjs(rule.lastRan).format('MM/DD HH:mm:ss')}</small> : ''}
+					</div>
+					<div className="backup-rule-actions">
+						<ButtonGroup>
+							<SwitchInputField
+								id={undefined}
+								value={rule.enabled}
+								setValue={doEnableDisable}
+								tooltip={rule.enabled ? 'Disable rule' : 'Enable rule'}
+							/>
 
-					<CButton color="gray" onClick={doDelete} title="Delete">
-						<FontAwesomeIcon icon={faTrash} />
-					</CButton>
-				</CButtonGroup>
-			</td>
-		</tr>
+							<Button onClick={doDelete} title="Delete">
+								<FontAwesomeIcon icon={faTrash} />
+							</Button>
+						</ButtonGroup>
+					</div>
+				</div>
+			</div>
+		</div>
 	)
 }

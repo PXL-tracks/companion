@@ -1,14 +1,19 @@
-import type { InternalController } from '../../Internal/Controller.js'
+import { isExpressionOrValue } from '@companion-app/shared/Model/Options.js'
 import { TrySplitVariableId } from '@companion-app/shared/Variables.js'
+import type { InternalController } from '../../Internal/Controller.js'
 import { VisitorReferencesBase } from './VisitorReferencesBase.js'
 
 export class VisitorReferencesUpdater extends VisitorReferencesBase<VisitorReferencesUpdaterVisitor> {
 	constructor(
 		internalModule: InternalController,
 		connectionLabelsRemap: Record<string, string> | undefined,
-		connectionIdRemap: Record<string, string> | undefined
+		connectionIdRemap: Record<string, string> | undefined,
+		outboundSurfaceIdRemap: Record<string, string> | undefined
 	) {
-		super(internalModule, new VisitorReferencesUpdaterVisitor(connectionLabelsRemap, connectionIdRemap))
+		super(
+			internalModule,
+			new VisitorReferencesUpdaterVisitor(connectionLabelsRemap, connectionIdRemap, outboundSurfaceIdRemap)
+		)
 	}
 
 	recheckChangedFeedbacks(): this {
@@ -40,6 +45,11 @@ export class VisitorReferencesUpdaterVisitor {
 	readonly connectionIdRemap: Record<string, string> | undefined
 
 	/**
+	 * outbound surface id remapping
+	 */
+	readonly outboundSurfaceIdRemap: Record<string, string> | undefined
+
+	/**
 	 * Feedback ids that have been changed
 	 */
 	readonly changedFeedbackIds = new Set<string>()
@@ -51,10 +61,12 @@ export class VisitorReferencesUpdaterVisitor {
 
 	constructor(
 		connectionLabelsRemap: Record<string, string> | undefined,
-		connectionIdRemap: Record<string, string> | undefined
+		connectionIdRemap: Record<string, string> | undefined,
+		outboundSurfaceIdRemap: Record<string, string> | undefined
 	) {
 		this.connectionLabelsRemap = connectionLabelsRemap
 		this.connectionIdRemap = connectionIdRemap
+		this.outboundSurfaceIdRemap = outboundSurfaceIdRemap
 	}
 
 	/**
@@ -66,18 +78,39 @@ export class VisitorReferencesUpdaterVisitor {
 	}
 
 	/**
+	 * Visit an outbound surface id property
+	 */
+	visitOutboundSurfaceId(obj: Record<string, any>, propName: string | number, feedbackId?: string): void {
+		if (!this.outboundSurfaceIdRemap) return
+
+		this.#updateValue(obj, propName, (oldValue, isExpression) => {
+			if (!this.outboundSurfaceIdRemap || isExpression) return oldValue // An expression can't be a plain surface id
+
+			const newId = this.outboundSurfaceIdRemap[oldValue]
+			if (newId && newId !== oldValue) {
+				this.#trackChange(feedbackId)
+				return newId
+			}
+			return oldValue
+		})
+	}
+
+	/**
 	 * Visit a connection id property
 	 */
 	visitConnectionId(obj: Record<string, any>, propName: string | number, feedbackId?: string): void {
 		if (!this.connectionIdRemap) return
 
-		const oldId = obj[propName]
-		const newId = this.connectionIdRemap[oldId]
-		if (newId && newId !== oldId) {
-			obj[propName] = newId
+		this.#updateValue(obj, propName, (oldValue, isExpression) => {
+			if (!this.connectionIdRemap || isExpression) return oldValue // An expression can't be a plain connection id
 
-			this.#trackChange(feedbackId)
-		}
+			const newId = this.connectionIdRemap[oldValue]
+			if (newId && newId !== oldValue) {
+				this.#trackChange(feedbackId)
+				return newId
+			}
+			return oldValue
+		})
 	}
 	/**
 	 * Visit a connection id array property
@@ -85,10 +118,15 @@ export class VisitorReferencesUpdaterVisitor {
 	visitConnectionIdArray(obj: Record<string, any>, propName: string, feedbackId?: string): void {
 		if (!this.connectionIdRemap) return
 
-		const array = obj[propName]
-		for (let i = 0; i < array.length; i++) {
-			this.visitConnectionId(array, i, feedbackId)
-		}
+		this.#updateValue(obj, propName, (oldValue, isExpression) => {
+			if (isExpression || !Array.isArray(oldValue)) return oldValue // An expression can't be a plain connection id
+
+			for (let i = 0; i < oldValue.length; i++) {
+				this.visitConnectionId(oldValue, i, feedbackId)
+			}
+
+			return oldValue // update in place
+		})
 	}
 
 	/**
@@ -99,34 +137,37 @@ export class VisitorReferencesUpdaterVisitor {
 
 		const labelsRemap = this.connectionLabelsRemap
 
-		const rawStr = obj[propName]
-		if (typeof rawStr !== 'string') return
+		this.#updateValue(obj, propName, (oldValue, _isExpression) => {
+			if (typeof oldValue !== 'string') return oldValue
 
-		const entries = Object.entries(labelsRemap)
-		if (entries.length === 1) {
-			// Fast path
-			const [fromlabel, tolabel] = entries[0]
-			obj[propName] = rawStr.replaceAll(`$(${fromlabel}:`, `$(${tolabel}:`)
-		} else {
-			// Slow route
+			let newValue = oldValue
 
-			// Everybody stand back. I know regular expressions. - xckd #208 /ck/kc/
-			const reg = /\$\(([^:$)]+):/g
+			const entries = Object.entries(labelsRemap)
+			if (entries.length === 1) {
+				// Fast path
+				const [fromlabel, tolabel] = entries[0]
+				newValue = oldValue.replaceAll(`$(${fromlabel}:`, `$(${tolabel}:`)
+			} else {
+				// Slow route
 
-			const newStr = rawStr.replaceAll(reg, (match, oldLabel) => {
-				const newLabel = labelsRemap[oldLabel]
-				if (newLabel) {
-					return `$(${newLabel}:`
-				} else {
-					// Unchanged
-					return match
-				}
-			})
+				// Everybody stand back. I know regular expressions. - xckd #208 /ck/kc/
+				const reg = /\$\(([^:$)]+):/g
 
-			obj[propName] = newStr
-		}
+				newValue = oldValue.replaceAll(reg, (match, oldLabel) => {
+					const newLabel = labelsRemap[oldLabel]
+					if (newLabel) {
+						return `$(${newLabel}:`
+					} else {
+						// Unchanged
+						return match
+					}
+				})
+			}
 
-		if (obj[propName] !== rawStr) this.#trackChange(feedbackId)
+			if (oldValue !== newValue) this.#trackChange(feedbackId)
+
+			return newValue
+		})
 	}
 
 	/**
@@ -135,14 +176,38 @@ export class VisitorReferencesUpdaterVisitor {
 	visitVariableName(obj: Record<string, any>, propName: string, feedbackId?: string): void {
 		if (!this.connectionLabelsRemap) return
 
-		const id = TrySplitVariableId(obj[propName])
-		if (!id) return
+		this.#updateValue(obj, propName, (oldValue, isExpression) => {
+			if (!this.connectionLabelsRemap || isExpression || typeof oldValue !== 'string') return oldValue // An expression can't be a plain variable name
 
-		const newLabel = this.connectionLabelsRemap[id[0]]
-		if (newLabel) {
-			obj[propName] = `${newLabel}:${id[1]}`
+			const id = TrySplitVariableId(oldValue)
+			if (!id) return oldValue
 
-			this.#trackChange(feedbackId)
+			const newLabel = this.connectionLabelsRemap[id[0]]
+			if (newLabel) {
+				this.#trackChange(feedbackId)
+				return `${newLabel}:${id[1]}`
+			}
+			return oldValue
+		})
+	}
+
+	/**
+	 * Update a value on the object.
+	 * Note: the updater must return the value to preserve, even if unchanged. And fire the #trackChange if needed
+	 */
+	#updateValue(
+		obj: Record<string, any>,
+		propName: string | number,
+		updater: (oldValue: any, isExpression: boolean) => any
+	): void {
+		const value = obj[propName]
+		if (isExpressionOrValue(value)) {
+			obj[propName] = {
+				...value,
+				value: updater(value.value, value.isExpression),
+			}
+		} else {
+			obj[propName] = updater(value, false)
 		}
 	}
 }

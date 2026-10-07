@@ -1,7 +1,7 @@
-import type { DropdownChoice, DropdownChoiceId } from './Common.js'
 import type { JsonValue } from 'type-fest'
-import type { CompanionOptionValues, CompanionPresetOptionValues } from '@companion-module/host'
 import z from 'zod'
+import type { CompanionOptionValues, CompanionPresetOptionValues } from '@companion-module/host'
+import type { DropdownChoice, DropdownChoiceId } from './Common.js'
 
 export const JsonValueSchema: z.ZodType<JsonValue> = z.json()
 
@@ -63,13 +63,20 @@ export interface CompanionInputFieldBaseExtended {
 		| 'internal:time'
 		| 'internal:date'
 		| 'internal:variable'
+		| 'internal:variable_value'
 		| 'internal:custom_variable'
 		| 'internal:trigger'
 		| 'internal:trigger_collection'
 		| 'internal:connection_id'
 		| 'internal:connection_collection'
 		| 'internal:surface_serial'
+		| 'internal:outbound_surface_id'
 		| 'internal:page'
+		| 'internal:horizontal-alignment'
+		| 'internal:vertical-alignment'
+		| 'internal:image-file'
+		| 'internal:table'
+		| 'internal:list'
 	/** The label of the field */
 	label: string
 	/** A hover tooltip for this field */
@@ -94,7 +101,25 @@ export interface CompanionInputFieldBaseExtended {
 	 * If false, the default value will be used instead.
 	 */
 	allowInvalidValues?: boolean
+
+	/**
+	 * If true, this field is skipped during the standard parseEntityOptions pass.
+	 * The action handler must parse the raw value itself via action.rawEntity.rawOptions using an enhanced parser.
+	 * Only valid for internal actions that need runtime context (e.g. current variable value) before parsing.
+	 */
+	deferParsing?: boolean
+
+	/**
+	 * Describes which sibling option fields identify the target variable for a deferred-parsing
+	 * field. Drives both the variable picker (showing $(this:current)) and the live expression preview.
+	 * Only valid alongside deferParsing: true.
+	 */
+	contextVariableResolution?: ContextVariableResolution
 }
+
+export type ContextVariableResolution =
+	| { type: 'localVariable'; locationFieldId: string; nameFieldId: string }
+	| { type: 'customVariable'; nameFieldId: string }
 
 export interface InternalInputFieldTime extends CompanionInputFieldBaseExtended {
 	type: 'internal:time'
@@ -110,6 +135,10 @@ export interface InternalInputFieldVariable extends CompanionInputFieldBaseExten
 export interface InternalInputFieldCustomVariable extends CompanionInputFieldBaseExtended {
 	type: 'internal:custom_variable'
 	includeNone?: boolean
+}
+export interface InternalInputFieldVariableValue extends CompanionInputFieldBaseExtended {
+	type: 'internal:variable_value'
+	default: JsonValue
 }
 export interface InternalInputFieldTrigger extends CompanionInputFieldBaseExtended {
 	type: 'internal:trigger'
@@ -135,7 +164,16 @@ export interface InternalInputFieldSurfaceSerial extends CompanionInputFieldBase
 	type: 'internal:surface_serial'
 	includeSelf: boolean
 	default: string
-	useRawSurfaces?: boolean
+	/**
+	 * Which entries to offer in the picker:
+	 * - `groups`: surface groups only (group-level actions, e.g. lock, set page)
+	 * - `surfaces`: individual surfaces only (per-surface actions where a group makes no sense)
+	 * - `groups-and-surfaces`: both, so either a whole group or a single surface can be targeted
+	 */
+	listMode: 'groups' | 'surfaces' | 'groups-and-surfaces'
+}
+export interface InternalInputFieldOutboundSurfaceId extends CompanionInputFieldBaseExtended {
+	type: 'internal:outbound_surface_id'
 }
 export interface InternalInputFieldPage extends CompanionInputFieldBaseExtended {
 	type: 'internal:page'
@@ -143,18 +181,58 @@ export interface InternalInputFieldPage extends CompanionInputFieldBaseExtended 
 	includeDirection: boolean
 	default: number
 }
+export interface InternalInputFieldHorizontalAlignment extends CompanionInputFieldBaseExtended {
+	type: 'internal:horizontal-alignment'
+	/** The default value */
+	default: 'left' | 'center' | 'right'
+}
+export interface InternalInputFieldVerticalAlignment extends CompanionInputFieldBaseExtended {
+	type: 'internal:vertical-alignment'
+	/** The default value */
+	default: 'top' | 'center' | 'bottom'
+}
+export interface InternalInputFieldPngImage extends CompanionInputFieldBaseExtended {
+	type: 'internal:image-file'
+	/** The default value */
+	default: string | null
+	/** Minimum image dimensions */
+	min?: { width: number; height: number }
+	/** Maximum image dimensions */
+	max?: { width: number; height: number }
+}
+
+export interface InternalInputFieldTable extends CompanionInputFieldBaseExtended {
+	type: 'internal:table'
+	columns: SomeCompanionInputField[]
+	default: Record<string, JsonValue>[]
+}
+
+export interface InternalInputFieldList extends CompanionInputFieldBaseExtended {
+	type: 'internal:list'
+	fields: SomeCompanionInputField[]
+	addLabel?: string
+	minItems?: number
+	default: Record<string, JsonValue>[]
+}
 
 export type InternalInputField =
 	| InternalInputFieldTime
 	| InternalInputFieldDate
 	| InternalInputFieldVariable
+	| InternalInputFieldVariableValue
 	| InternalInputFieldCustomVariable
 	| InternalInputFieldTrigger
 	| InternalInputFieldTriggerCollection
 	| InternalInputFieldConnectionId
 	| InternalInputFieldConnectionCollection
 	| InternalInputFieldSurfaceSerial
+	| InternalInputFieldOutboundSurfaceId
 	| InternalInputFieldPage
+	| InternalInputFieldHorizontalAlignment
+	| InternalInputFieldVerticalAlignment
+	| InternalInputFieldPngImage
+	| InternalInputFieldTable
+	| InternalInputFieldList
 
 export interface CompanionInputFieldStaticTextExtended extends CompanionInputFieldBaseExtended {
 	type: 'static-text'
@@ -166,10 +244,24 @@ export interface CompanionInputFieldColorExtended extends CompanionInputFieldBas
 	type: 'colorpicker'
 
 	default: string | number
-	enableAlpha?: boolean
-	returnType?: 'string' | 'number'
+	enableAlpha: boolean
+	returnType: 'string' | 'number'
 
 	presetColors?: CompanionColorPresetValue[]
+}
+
+/**
+ * Default expression-mode hint for a color field. Any color field accepts either form and normalizes it to
+ * the field's returnType, so the guidance is the same regardless of returnType.
+ */
+export const DEFAULT_COLOR_EXPRESSION_DESCRIPTION =
+	"Return a color number (e.g. 16711680 or 0xff0000) or a css color string (e.g. '#ff0000' or 'rgb(255, 0, 0))'"
+
+/**
+ * The default expression-mode hint for a color field, or undefined for non-color fields.
+ */
+export function colorFieldExpressionHint(field: SomeCompanionInputField): string | undefined {
+	return field.type === 'colorpicker' ? DEFAULT_COLOR_EXPRESSION_DESCRIPTION : undefined
 }
 export interface CompanionInputFieldTextInputExtended extends CompanionInputFieldBaseExtended {
 	type: 'textinput'
@@ -189,6 +281,13 @@ export interface CompanionInputFieldTextInputExtended extends CompanionInputFiel
 	 * This is so that expression results don't get mangled
 	 */
 	disableSanitisation?: boolean
+
+	/**
+	 * Internal use only: when a `$(...)` variable reference is pasted into this field (in value mode), unwrap it to
+	 * just the inner name. Set to a namespace (e.g. `local`) to also strip a matching `namespace:` prefix, so pasting
+	 * `$(local:foo)` yields `foo`. Used by the local/page variable name fields.
+	 */
+	unwrapPastedVariableNamespace?: string
 }
 export interface CompanionInputFieldExpressionExtended extends CompanionInputFieldBaseExtended {
 	type: 'expression'
@@ -203,7 +302,6 @@ export interface CompanionInputFieldDropdownExtended extends CompanionInputField
 	default: DropdownChoiceId
 	allowCustom?: boolean
 	regex?: string
-	minChoicesForSearch?: number
 }
 export interface CompanionInputFieldMultiDropdownExtended extends CompanionInputFieldBaseExtended {
 	type: 'multidropdown'
@@ -211,20 +309,23 @@ export interface CompanionInputFieldMultiDropdownExtended extends CompanionInput
 	choices: DropdownChoice[]
 	/** The default selected values */
 	default: DropdownChoiceId[]
-	/** The minimum number of entries the dropdown must have before it allows searching */
-	minChoicesForSearch?: number
 	/** The minimum number of selected values */
 	minSelection?: number
 	/** The maximum number of selected values */
 	maxSelection?: number
+	/**
+	 * If true, the ui should sort the selected values by the order they appear in the choices array
+	 * Any custom values will be sorted alphabetically at the end of the list
+	 */
+	sortSelection?: boolean
 
 	allowCustom?: boolean
 	regex?: string
 }
 export interface CompanionInputFieldNumberExtended extends CompanionInputFieldBaseExtended {
 	type: 'number'
-	/** The default value */
-	default: number
+	/** The default value. `null` is only valid together with `allowNull` and represents the "auto" state. */
+	default: number | null
 	/**
 	 * The minimum value to allow
 	 * Note: values may not conform to this
@@ -243,6 +344,16 @@ export interface CompanionInputFieldNumberExtended extends CompanionInputFieldBa
 	showMinAsNegativeInfinity?: boolean
 	/** When true, show the max value as a visual ∞ when value >= max */
 	showMaxAsPositiveInfinity?: boolean
+
+	/** When value validation occurs, clamp values to the min/max instead of rejecting them as invalid */
+	clampValues?: boolean
+	/** Whether to only allow integer values */
+	asInteger?: boolean
+	/**
+	 * When true, the field can be cleared to `null`, shown in the UI as "auto". The consumer decides what
+	 * "auto" resolves to. Requires the value type to permit `null`.
+	 */
+	allowNull?: boolean
 }
 export interface CompanionInputFieldCheckboxExtended extends CompanionInputFieldBaseExtended {
 	type: 'checkbox'
@@ -297,6 +408,12 @@ export type ExpressionOrValue<T> = { value: T; isExpression: false } | { value: 
 export type ExpressionableOptionsObject = {
 	[key: string]: ExpressionOrValue<JsonValue | undefined> | undefined
 }
+
+export type ExpressionValueType<ExprOrValue extends ExpressionOrValue<unknown>> = [ExprOrValue] extends [
+	ExpressionOrValue<infer Value>,
+]
+	? Value
+	: never
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function isExpressionOrValue(input: any): input is ExpressionOrValue<any> {

@@ -1,35 +1,37 @@
 /* eslint-disable n/no-process-exit */
-import EventEmitter from 'events'
-import fs from 'fs-extra'
+import EventEmitter from 'node:events'
+import path from 'node:path'
 import express from 'express'
-import LogController, { type Logger } from './Log/Controller.js'
+import fs from 'fs-extra'
+import type { PackageJson } from 'type-fest'
+import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { CloudController } from './Cloud/Controller.js'
+import { ActionRunner } from './Controls/ActionRunner.js'
+import type { ControlCommonEvents } from './Controls/ControlDependencies.js'
 import { ControlsController } from './Controls/Controller.js'
 import { ControlStore } from './Controls/ControlStore.js'
-import { GraphicsController } from './Graphics/Controller.js'
 import { DataController } from './Data/Controller.js'
 import { DataDatabase } from './Data/Database.js'
+import { DataUsageStatistics } from './Data/UsageStatistics.js'
 import type { DataUserConfig } from './Data/UserConfig.js'
+import { GraphicsController } from './Graphics/Controller.js'
+import { ImportExportController } from './ImportExport/Controller.js'
 import { InstanceController } from './Instance/Controller.js'
 import { InternalController } from './Internal/Controller.js'
+import LogController, { type Logger } from './Log/Controller.js'
 import { PageController } from './Page/Controller.js'
-import { ServiceController } from './Service/Controller.js'
-import { SurfaceController } from './Surface/Controller.js'
-import { UIController } from './UI/Controller.js'
-import { isPackaged, sendOverIpc, showErrorMessage } from './Resources/Util.js'
-import { VariablesController } from './Variables/Controller.js'
-import { DataUsageStatistics } from './Data/UsageStatistics.js'
-import { ImportExportController } from './ImportExport/Controller.js'
-import { ServiceOscSender } from './Service/OscSender.js'
-import type { ControlCommonEvents } from './Controls/ControlDependencies.js'
-import type { PackageJson } from 'type-fest'
-import { ServiceApi } from './Service/ServiceApi.js'
-import { createTrpcRouter } from './UI/TRPC.js'
 import { PageStore } from './Page/Store.js'
 import { PreviewController } from './Preview/Controller.js'
-import path from 'path'
-import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
-import { ActionRunner } from './Controls/ActionRunner.js'
+import { ActiveLearningStore } from './Resources/ActiveLearningStore.js'
+import { isPackaged, sendOverIpc, showErrorMessage } from './Resources/Util.js'
+import { ServiceController } from './Service/Controller.js'
+import { ServiceOscSender } from './Service/OscSender.js'
+import { ServiceApi } from './Service/ServiceApi.js'
+import { SurfaceController } from './Surface/Controller.js'
+import { UIController } from './UI/Controller.js'
+import { createTrpcRouter } from './UI/TRPC.js'
+import { VariablesController } from './Variables/Controller.js'
+import { LocalVariablesController } from './Variables/LocalVariablesController.js'
 
 let infoFileName: URL
 // note this could be done in one line, but webpack was having trouble before url processing was disabled.
@@ -110,7 +112,7 @@ export class Registry {
 	 */
 	readonly page: PageController
 	/**
-	 * The core page controller
+	 * The core preview controller
 	 */
 	readonly preview: PreviewController
 	/**
@@ -165,7 +167,7 @@ export class Registry {
 	constructor(
 		baseAppInfo: Pick<
 			AppInfo,
-			'configDir' | 'modulesDirs' | 'builtinModuleDirs' | 'udevRulesDir' | 'machineId' | 'notifications'
+			'configDir' | 'logsDir' | 'modulesDirs' | 'builtinModuleDirs' | 'udevRulesDir' | 'machineId' | 'options'
 		>
 	) {
 		if (!baseAppInfo.configDir) throw new Error(`Missing configDir`)
@@ -197,12 +199,20 @@ export class Registry {
 		this.#data = new DataController(this.#appInfo, this.db)
 		this.userconfig = this.#data.userconfig
 
+		const activeLearningStore = new ActiveLearningStore()
 		const pageStore = new PageStore(this.db.getTableView('pages'))
 
-		this.variables = new VariablesController(this.db)
+		this.variables = new VariablesController(this.db, this.userconfig)
 		const controlStore = new ControlStore(this.db, this.variables.values)
 
-		this.graphics = new GraphicsController(controlStore, pageStore, this.userconfig, this.variables.values)
+		this.graphics = new GraphicsController(
+			controlStore,
+			pageStore,
+			this.userconfig,
+			this.variables,
+			this.db,
+			this.#internalApiRouter
+		)
 
 		this.surfaces = new SurfaceController(this.db, {
 			controls: controlStore,
@@ -228,18 +238,28 @@ export class Registry {
 
 		this.internalModule = new InternalController(controlStore, pageStore, this.instance, this.variables)
 
-		const actionRunner = new ActionRunner(this.instance, this.internalModule)
+		const localVariables = new LocalVariablesController(controlStore, pageStore)
 
-		this.controls = new ControlsController(this.db, controlStore, controlEvents, {
+		const actionRunner = new ActionRunner(this.instance, this.internalModule, this.variables, localVariables)
+
+		this.controls = new ControlsController(this.db, controlStore, controlEvents, activeLearningStore, {
 			surfaces: this.surfaces,
 			pageStore: pageStore,
 			internalModule: this.internalModule,
 			instance: this.instance,
 			variableValues: this.variables.values,
 			userconfig: this.userconfig,
+			graphics: this.graphics,
 			actionRunner: actionRunner,
 		})
-		this.preview = new PreviewController(this.graphics, pageStore, this.controls, controlEvents)
+		this.preview = new PreviewController(
+			this.instance.definitions,
+			this.graphics,
+			pageStore,
+			this.controls,
+			controlEvents,
+			localVariables
+		)
 
 		this.internalModule.init(
 			this.#appInfo,
@@ -248,6 +268,7 @@ export class Registry {
 			this.surfaces,
 			this.graphics,
 			this.userconfig,
+			localVariables,
 			controlEvents,
 			actionRunner,
 			this.exit.bind(this)
@@ -277,10 +298,12 @@ export class Registry {
 			this.surfaces,
 			this.variables,
 			this.graphics,
-			controlEvents
+			controlEvents,
+			this.instance
 		)
 
 		this.services = new ServiceController(
+			this.#appInfo,
 			serviceApi,
 			this.userconfig,
 			oscSender,
@@ -297,6 +320,7 @@ export class Registry {
 			this.instance,
 			this.page,
 			this.controls,
+			this.graphics,
 			this.variables,
 			this.cloud,
 			this.services,
@@ -345,6 +369,11 @@ export class Registry {
 			this.preview.onVariablesChanged(all_changed_variables_set, fromControlId)
 		})
 
+		this.instance.definitions.on('updateCompositeElements', (elementIds) => {
+			this.controls.onCompositeElementsChanged(elementIds)
+			this.preview.onConnectionCompositeElementsChanged(elementIds)
+		})
+
 		this.page.on('controlIdsMoved', (controlIds) => {
 			this.preview.onControlIdsLocationChanged(controlIds)
 		})
@@ -375,7 +404,7 @@ export class Registry {
 
 			this.variables.custom.init()
 			this.internalModule.firstUpdate()
-			this.graphics.regenerateAll(false)
+			this.graphics.triggerRegenerateAll()
 
 			// We are ready to start the instances/connections
 			await this.instance.initInstances(this.db.getIsFirstRun(), extraModulePath)
@@ -391,6 +420,8 @@ export class Registry {
 			this.controls.triggerEvents.emit('startup')
 
 			if (process.env.COMPANION_IPC_PARENT) {
+				process.on('disconnect', () => process.exit())
+
 				process.on('message', (msg: any): void => {
 					try {
 						if (msg.messageType === 'http-rebind') {
@@ -499,9 +530,14 @@ export class Registry {
 	}
 }
 
+/**
+ * Immutable facts about this Companion installation - where it lives, its identity and build.
+ */
 export interface AppInfo {
 	/** The current config directory */
 	configDir: string
+	/** The directory where rotated log files are stored on disk. Only set when running under the launcher. */
+	logsDir: string | undefined
 	/** The base directory for storing installed modules */
 	modulesDirs: Record<ModuleInstanceType, string>
 	/** The builtin module directories */
@@ -512,5 +548,26 @@ export interface AppInfo {
 	appVersion: string
 	appBuild: string
 	pkgInfo: PackageJson
+
+	/** How the user chose to run this instance (cli flags / env / launcher settings) */
+	options: AppOptions
+}
+
+/**
+ * Launch-time configuration for this Companion instance, chosen via cli flags, env vars or the
+ * launcher settings. Unlike the rest of AppInfo, these are user choices rather than facts about
+ * the installation.
+ */
+export interface AppOptions {
+	/** Whether to show version-related notifications in the header */
 	notifications: boolean
+	/** Whether running shell commands on this computer is allowed (e.g. the internal "run shell command" action) */
+	enableShellCommandSupport: boolean
+	/**
+	 * Whether modules that are otherwise held back for safety may be loaded - e.g. importing custom
+	 * modules from remote (non-loopback) clients. Local clients can always import.
+	 */
+	enableRestrictedModules: boolean
+	/** Express "trust proxy" value, so the real client ip can be determined behind a reverse proxy */
+	trustedProxies: string | undefined
 }

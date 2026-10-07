@@ -1,24 +1,28 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { MyErrorBoundary } from '~/Resources/Error.js'
-import { LoadingRetryOrError } from '~/Resources/Loading.js'
-import { CCol, CContainer, CRow } from '@coreui/react'
-import queryString from 'query-string'
-import rangeParser from 'parse-numeric-range'
-import { usePagesInfoSubscription } from '~/Hooks/usePagesInfoSubscription.js'
-import { useUserConfigSubscription } from '~/Hooks/useUserConfigSubscription.js'
-import useElementclientSize from '~/Hooks/useElementInnerSize.js'
-import { ConfigurePanel } from './ConfigurePanel.js'
-import { ButtonsBlock, ButtonWrapper, SectionOfButtons, type TabletGridSize } from './ButtonsFromPage.js'
-import { PagesStore } from '~/Stores/PagesStore.js'
-import { observer } from 'mobx-react-lite'
-import { UserConfigStore } from '~/Stores/UserConfigStore.js'
 import { useNavigate } from '@tanstack/react-router'
+import { observer } from 'mobx-react-lite'
+import rangeParser from 'parse-numeric-range'
+import queryString from 'query-string'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { Grid } from '~/Components/Grid'
+import { StandalonePageError } from '~/Components/StandalonePageError.js'
+import useElementClientSize from '~/Hooks/useElementClientSize.js'
+import { usePagesInfoSubscription } from '~/Hooks/usePagesInfoSubscription.js'
 import { useWakeLock } from '~/Hooks/useScreenWakeLock.js'
+import { TRPCConnectionStatus, useTRPCConnectionStatus } from '~/Hooks/useTRPCConnectionStatus.js'
+import { useUserConfigSubscription } from '~/Hooks/useUserConfigSubscription.js'
+import { MyErrorBoundary } from '~/Resources/Error.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { PagesStore } from '~/Stores/PagesStore.js'
+import { UserConfigStore } from '~/Stores/UserConfigStore.js'
+import { ButtonsBlock, ButtonWrapper, SectionOfButtons, type TabletGridSize } from './ButtonsFromPage.js'
+import { ConfigurePanel } from './ConfigurePanel.js'
 
 export const TabletView = observer(function TabletView() {
 	const navigate = useNavigate({ from: '/tablet' })
+
+	const connectionStatus = useTRPCConnectionStatus()
 
 	const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -40,6 +44,7 @@ export const TabletView = observer(function TabletView() {
 
 		const parsedQuery: Record<string, string> = {}
 		for (const [key, value] of Object.entries(rawParsedQuery)) {
+			if (BANNED_PROPS.has(key)) continue
 			if (Array.isArray(value)) {
 				if (value[0]) {
 					parsedQuery[key] = value[0]
@@ -161,22 +166,37 @@ export const TabletView = observer(function TabletView() {
 	let displayColumns = Number(parsedQuery['display_cols'])
 	if (displayColumns === 0 || isNaN(displayColumns)) displayColumns = gridSize.columnCount
 
-	const [elementSizeRef, pageSize] = useElementclientSize<HTMLDivElement>()
+	const [elementSizeRef, pageSize] = useElementClientSize<HTMLDivElement>()
 	const buttonSize = pageSize.width / displayColumns
 
 	useWakeLock()
 
+	// If the socket was connected and has since dropped, show a calm reconnecting overlay
+	// rather than the raw connection error. Gated on `wasConnected` so it doesn't flash
+	// during the normal first-load connect.
+	if (connectionStatus.wasConnected && connectionStatus.status !== TRPCConnectionStatus.Connected) {
+		return (
+			<div className="page-tablet">
+				<StandalonePageError
+					dataReady={false}
+					error={loadError || 'Lost connection to Companion'}
+					doRetry={doRetryLoad}
+				/>
+			</div>
+		)
+	}
+
 	return (
 		<div className="page-tablet">
 			<div className="scroller">
-				<CContainer fluid className="d-flex flex-column">
+				<Grid.Container fluid className="d-flex flex-column">
 					{pagesReady && userConfigReady && rawGridSize ? (
 						<>
 							<ConfigurePanel updateQueryUrl={updateQueryUrl} query={parsedQuery} gridSize={rawGridSize} />
 
 							<div className="button-zone">
-								<CRow>
-									<CCol sm={12} className="buttongrid-row">
+								<Grid.Row>
+									<Grid.Col sm={12} className="buttongrid-row">
 										<div ref={elementSizeRef} className="buttons-holder">
 											{showPageHeadings ? (
 												<PagesWithHeadings
@@ -195,19 +215,16 @@ export const TabletView = observer(function TabletView() {
 												/>
 											)}
 										</div>
-									</CCol>
-								</CRow>
+									</Grid.Col>
+								</Grid.Row>
 							</div>
 						</>
 					) : (
-						<CRow className="flex-grow-1">
-							<div className="cycle-layout">
-								<div></div>
-								<LoadingRetryOrError dataReady={false} error={loadError} doRetry={doRetryLoad} design="pulse-xl" />
-							</div>
-						</CRow>
+						<Grid.Row className="flex-grow-1">
+							<StandalonePageError dataReady={false} error={loadError} doRetry={doRetryLoad} />
+						</Grid.Row>
 					)}
-				</CContainer>
+				</Grid.Container>
 			</div>
 		</div>
 	)

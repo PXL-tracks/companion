@@ -1,6 +1,8 @@
-import React, { useCallback, useState } from 'react'
-import { CCol, CFormInput, CFormLabel, CRow } from '@coreui/react'
+import { useCallback, useId, useState } from 'react'
 import type { UserConfigGridSize, UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
+import { FormLabel } from '~/Components/Form'
+import { Grid } from '~/Components/Grid'
+import { NumberInputField } from '~/Components/NumberInputField'
 
 interface GridStepProps {
 	rows: number
@@ -13,8 +15,8 @@ export function GridStep({ rows, columns, setValue }: GridStepProps): React.JSX.
 	const [totalColumns, setTotalColumns] = useState(columns)
 
 	const setMaxColumn = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const newValue = Number(e.currentTarget.value)
+		(newValue: number) => {
+			if (isNaN(newValue)) return
 			const grid: UserConfigGridSize = {
 				minRow: 0,
 				maxRow: totalRows - 1,
@@ -28,8 +30,8 @@ export function GridStep({ rows, columns, setValue }: GridStepProps): React.JSX.
 		[setValue, totalRows]
 	)
 	const setMaxRow = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const newValue = Number(e.currentTarget.value)
+		(newValue: number) => {
+			if (isNaN(newValue)) return
 			const grid: UserConfigGridSize = {
 				minRow: 0,
 				maxRow: newValue - 1,
@@ -43,9 +45,12 @@ export function GridStep({ rows, columns, setValue }: GridStepProps): React.JSX.
 		[setValue, totalColumns]
 	)
 
+	const rowFieldId = useId()
+	const columnFieldId = useId()
+
 	return (
-		<CRow>
-			<CCol sm={12}>
+		<Grid.Row>
+			<Grid.Col sm={12}>
 				<h5>Button Grid Size</h5>
 				<p>
 					By default Companion makes a grid of buttons sized for the Stream Deck XL. This can be made larger (or
@@ -56,27 +61,36 @@ export function GridStep({ rows, columns, setValue }: GridStepProps): React.JSX.
 					For example, to accommodate two Stream Deck XL's side-by-side you can set the grid size as 4 rows x 16
 					columns.
 				</p>
-			</CCol>
+			</Grid.Col>
 
-			<CFormLabel htmlFor="colFormRows" className="col-sm-4 col-form-label col-form-label-sm">
+			<FormLabel htmlFor={rowFieldId} className="col-sm-4 col-form-label col-form-label-sm mb-2">
 				Rows
-			</CFormLabel>
-			<CCol sm={5}>
-				<CFormInput name="colFormRows" type="number" value={totalRows} min={0} step={1} onChange={setMaxRow} />
-			</CCol>
-			<CCol sm={3}></CCol>
+			</FormLabel>
+			<Grid.Col sm={5} className="mb-2">
+				<NumberInputField id={rowFieldId} value={totalRows} min={0} step={1} setValue={setMaxRow} immediateValue />
+			</Grid.Col>
+			<Grid.Col sm={3}></Grid.Col>
 
-			<CFormLabel htmlFor="colFormCols" className="col-sm-4 col-form-label col-form-label-sm">
+			<FormLabel htmlFor={columnFieldId} className="col-sm-4 col-form-label col-form-label-sm mb-2">
 				Columns
-			</CFormLabel>
-			<CCol sm={5}>
-				<CFormInput name="colFormRows" type="number" value={totalColumns} min={0} step={1} onChange={setMaxColumn} />
-			</CCol>
-			<CCol sm={3}></CCol>
+			</FormLabel>
+			<Grid.Col sm={5} className="mb-2">
+				<NumberInputField
+					id={columnFieldId}
+					value={totalColumns}
+					min={0}
+					step={1}
+					setValue={setMaxColumn}
+					immediateValue
+				/>
+			</Grid.Col>
+			<Grid.Col sm={3}></Grid.Col>
 
-			<CCol sm={12}>
-				<p>You can change this at any time on the 'Settings' tab in the GUI.</p>
-			</CCol>
-		</CRow>
+			<Grid.Col sm={12}>
+				<p className="text-muted mt-3" style={{ fontSize: '0.875rem' }}>
+					You can change this at any time on the 'Settings' tab in the GUI.
+				</p>
+			</Grid.Col>
+		</Grid.Row>
 	)
 }

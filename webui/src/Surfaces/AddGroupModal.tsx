@@ -1,25 +1,16 @@
-import React, { forwardRef, useCallback, useContext, useImperativeHandle, useState } from 'react'
-import {
-	CAlert,
-	CButton,
-	CCol,
-	CForm,
-	CFormInput,
-	CFormLabel,
-	CModalBody,
-	CModalFooter,
-	CModalHeader,
-	CRow,
-} from '@coreui/react'
-import { CModalExt } from '~/Components/CModalExt.js'
 import { useForm } from '@tanstack/react-form'
 import { nanoid } from 'nanoid'
-import { InlineHelp } from '~/Components/InlineHelp.js'
-import { faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { forwardRef, useCallback, useContext, useId, useImperativeHandle, useState } from 'react'
 import { isSurfaceGroupIdValid } from '@companion-app/shared/Label.js'
+import { StaticAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { InlineHelpIcon } from '~/Components/InlineHelp.js'
+import { Modal } from '~/Components/Modal'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 export interface AddSurfaceGroupModalRef {
 	show(): void
@@ -52,12 +43,6 @@ export const AddSurfaceGroupModal = forwardRef<AddSurfaceGroupModalRef>(function
 		},
 	})
 
-	const doClose = useCallback(() => setShow(false), [])
-	const onClosed = useCallback(() => {
-		form.reset()
-		setSaveError(null)
-	}, [form])
-
 	useImperativeHandle(
 		ref,
 		() => ({
@@ -70,117 +55,125 @@ export const AddSurfaceGroupModal = forwardRef<AddSurfaceGroupModalRef>(function
 		[form]
 	)
 
+	const onOpenChangeComplete = useCallback(
+		(open: boolean) => {
+			if (!open) {
+				form.reset()
+				setSaveError(null)
+			}
+		},
+		[form]
+	)
+
+	const nameFieldId = useId()
+	const idFieldId = useId()
+
 	return (
-		<CModalExt visible={show} onClose={doClose} onClosed={onClosed}>
-			<CModalHeader closeButton>
-				<h5>Add Surface Group</h5>
-			</CModalHeader>
-			<CForm
-				onSubmit={(e) => {
-					e.preventDefault()
-					e.stopPropagation()
-					form.handleSubmit().catch((err) => {
-						console.error('Form submission error', err)
-					})
-				}}
-			>
-				<CModalBody>
-					<CRow className="g-sm-2">
-						{saveError && (
-							<CCol className={`fieldtype-textinput`} sm={12}>
-								<CAlert color="danger">{saveError}</CAlert>
-							</CCol>
-						)}
-
-						<form.Field
-							name="name"
-							children={(field) => (
-								<>
-									<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">
-										Name
-										<InlineHelp help="Display name for the group. This can be changed later">
-											<FontAwesomeIcon icon={faQuestionCircle} className="ms-2" />
-										</InlineHelp>
-									</CFormLabel>
-									<CCol className={`fieldtype-textinput`} sm={8}>
-										<CFormInput
-											type="text"
-											style={{ color: field.state.meta.errors.length ? 'red' : undefined }}
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-											onBlur={field.handleBlur}
-										/>
-									</CCol>
-								</>
-							)}
-						/>
-
-						<form.Field
-							name="id"
-							validators={{
-								onChange: ({ value }) => {
-									console.log('')
-									if (!isSurfaceGroupIdValid(value))
-										return 'Id must be alphanumeric and can contain underscores and dashes'
-									if (!value) return 'Id cannot be empty'
-									if (surfaces.store.has(`group:${value}`)) return 'Id already exists'
-									return undefined
-								},
+		<Modal.Root open={show} onOpenChange={setShow} onOpenChangeComplete={onOpenChangeComplete}>
+			<Modal.Portal>
+				<Modal.Backdrop />
+				<Modal.Viewport>
+					<Modal.Popup>
+						<Modal.Header closeButton>
+							<Modal.Title>Add Surface Group</Modal.Title>
+						</Modal.Header>
+						<Form
+							onSubmit={(e) => {
+								e.preventDefault()
+								e.stopPropagation()
+								form.handleSubmit().catch((err) => {
+									console.error('Form submission error', err)
+								})
 							}}
-							children={(field) => (
-								<>
-									<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">
-										Id
-										<InlineHelp help="Id for the group, this is used for internal references. This cannot be changed once set.">
-											<FontAwesomeIcon icon={faQuestionCircle} className="ms-2" />
-										</InlineHelp>
-									</CFormLabel>
-									<CCol className={`fieldtype-textinput`} sm={8}>
-										<CFormInput
-											type="text"
-											style={{ color: field.state.meta.errors.length ? 'red' : undefined }}
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-											onBlur={field.handleBlur}
-										/>
-										{field.state.meta.errors.length > 0 && (
-											<CAlert color="warning" className="mt-2">
-												{field.state.meta.errors}
-											</CAlert>
-										)}
-									</CCol>
-								</>
-							)}
-						/>
-					</CRow>
-				</CModalBody>
-				<CModalFooter>
-					<form.Subscribe
-						selector={(state) => [state.canSubmit, state.isSubmitting]}
-						children={([canSubmit, isSubmitting]) => (
-							<>
-								<CButton color="secondary" onClick={doClose} disabled={isSubmitting}>
-									Cancel
-								</CButton>
+						>
+							<Modal.Body>
+								<Grid.Row className="g-sm-2">
+									{saveError && (
+										<Grid.Col className={`fieldtype-textinput`} sm={12}>
+											<StaticAlert color="danger">{saveError}</StaticAlert>
+										</Grid.Col>
+									)}
 
-								<CButton
-									color="primary"
-									className="me-md-1"
-									disabled={!canSubmit || isSubmitting}
-									type="submit"
-									onClick={() => {
-										form.handleSubmit().catch((err) => {
-											console.error('Form submission error', err)
-										})
-									}}
-								>
-									Add {isSubmitting ? '...' : ''}
-								</CButton>
-							</>
-						)}
-					/>
-				</CModalFooter>
-			</CForm>
-		</CModalExt>
+									<form.Field
+										name="name"
+										children={(field) => (
+											<>
+												<FormLabel htmlFor={nameFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+													Name
+													<InlineHelpIcon className="ms-1">
+														Display name for the group. This can be changed later
+													</InlineHelpIcon>
+												</FormLabel>
+												<Grid.Col className={`fieldtype-textinput`} sm={8}>
+													<TextInputFieldSimple
+														id={nameFieldId}
+														value={field.state.value}
+														setValue={field.handleChange}
+														checkValid={field.state.meta.errors.length === 0}
+														onBlur={field.handleBlur}
+														immediateValue
+													/>
+												</Grid.Col>
+											</>
+										)}
+									/>
+
+									<form.Field
+										name="id"
+										validators={{
+											onChange: ({ value }) => {
+												if (!isSurfaceGroupIdValid(value))
+													return 'Id must be alphanumeric and can contain underscores and dashes'
+												if (!value) return 'Id cannot be empty'
+												if (surfaces.store.has(`group:${value}`)) return 'Id already exists'
+												return undefined
+											},
+										}}
+										children={(field) => (
+											<>
+												<FormLabel htmlFor={idFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+													Id
+													<InlineHelpIcon className="ms-1">
+														Id for the group, this is used for internal references. This cannot be changed once set.
+													</InlineHelpIcon>
+												</FormLabel>
+												<Grid.Col className={`fieldtype-textinput`} sm={8}>
+													<TextInputFieldSimple
+														id={idFieldId}
+														value={field.state.value}
+														setValue={field.handleChange}
+														checkValid={field.state.meta.errors.length === 0}
+														onBlur={field.handleBlur}
+														immediateValue
+													/>
+													{field.state.meta.errors.length > 0 && (
+														<StaticAlert color="warning" className="mt-2">
+															{field.state.meta.errors}
+														</StaticAlert>
+													)}
+												</Grid.Col>
+											</>
+										)}
+									/>
+								</Grid.Row>
+							</Modal.Body>
+							<Modal.Footer>
+								<form.Subscribe
+									selector={(state) => [state.canSubmit, state.isSubmitting]}
+									children={([canSubmit, isSubmitting]) => (
+										<>
+											<Modal.Close disabled={isSubmitting}>Cancel</Modal.Close>
+											<Button color="primary" className="me-md-1" disabled={!canSubmit || isSubmitting} type="submit">
+												Add {isSubmitting ? '...' : ''}
+											</Button>
+										</>
+									)}
+								/>
+							</Modal.Footer>
+						</Form>
+					</Modal.Popup>
+				</Modal.Viewport>
+			</Modal.Portal>
+		</Modal.Root>
 	)
 })

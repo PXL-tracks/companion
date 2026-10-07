@@ -1,23 +1,21 @@
+import { faCheck, faPlus, faSearch } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useNavigate } from '@tanstack/react-router'
+import { toJS } from 'mobx'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useRef } from 'react'
+import { ParseExpression, ResolveExpression } from '@companion-app/shared/Expressions.js'
 import type {
 	ClientDiscoveredSurfaceInfoPlugin,
 	ClientDiscoveredSurfaceInfoSatellite,
 } from '@companion-app/shared/Model/Surfaces.js'
-import React, { useCallback, useContext, useRef } from 'react'
-import { assertNever, useComputed } from '~/Resources/util.js'
-import { CButton, CButtonGroup } from '@coreui/react'
-import { faCheck, faPlus, faSearch } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { SetupSatelliteModal, type SetupSatelliteModalRef } from './SetupSatelliteModal.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { Button, ButtonGroup } from '~/Components/Button'
 import { NonIdealState } from '~/Components/NonIdealState.js'
-import { observer } from 'mobx-react-lite'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { assertNever, useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { SetupSatelliteModal, type SetupSatelliteModalRef } from './SetupSatelliteModal.js'
 import { useSurfaceDiscoveryContext } from './SurfaceDiscoveryContext.js'
-import { useNavigate } from '@tanstack/react-router'
-import { ParseExpression } from '@companion-app/shared/Expression/ExpressionParse.js'
-import { ResolveExpression } from '@companion-app/shared/Expression/ExpressionResolve.js'
-import { ExpressionFunctions } from '@companion-app/shared/Expression/ExpressionFunctions.js'
-import { toJS } from 'mobx'
 
 export const SurfaceDiscoveryTable = observer(function SurfaceDiscoveryTable() {
 	const { notifier } = useContext(RootAppStoreContext)
@@ -139,11 +137,11 @@ function SatelliteRow({ surfaceInfo, showSetupSatellite }: SatelliteRowProps) {
 				})}
 			</td>
 			<td>
-				<CButtonGroup>
-					<CButton onClick={() => showSetupSatellite(surfaceInfo)} title="Setup">
+				<ButtonGroup>
+					<Button onClick={() => showSetupSatellite(surfaceInfo)} title="Setup">
 						<FontAwesomeIcon icon={faPlus} /> Setup
-					</CButton>
-				</CButtonGroup>
+					</Button>
+				</ButtonGroup>
 			</td>
 		</tr>
 	)
@@ -158,7 +156,6 @@ const PluginSurfaceRow = observer(function PluginSurfaceRow({ surfaceInfo, addCo
 	const { surfaceInstances, surfaces } = useContext(RootAppStoreContext)
 
 	const instanceInfo = surfaceInstances.instances.get(surfaceInfo.instanceId)
-	const surfaceInstanceDisplayName = instanceInfo?.label ?? 'Unknown Surface Integration'
 
 	const isAlreadyAdded = useComputed(() => {
 		// If no expression, can't match
@@ -168,9 +165,12 @@ const PluginSurfaceRow = observer(function PluginSurfaceRow({ surfaceInfo, addCo
 			const expression = ParseExpression(instanceInfo.remoteConfigMatches)
 			const doesMatch = (otherConfig: Record<string, any>) => {
 				try {
-					const val = ResolveExpression(
-						expression,
-						(props) => {
+					const val = ResolveExpression(expression, {
+						// Config-match expressions should be trivial - keep the budget tight
+						maxOperations: 1000,
+						maxCallDepth: 16,
+
+						getVariableValue: (props) => {
 							if (props.label === 'objA') {
 								return toJS(surfaceInfo.config[props.name])
 							} else if (props.label === 'objB') {
@@ -179,8 +179,11 @@ const PluginSurfaceRow = observer(function PluginSurfaceRow({ surfaceInfo, addCo
 								throw new Error(`Unknown variable "${props.variableId}"`)
 							}
 						},
-						ExpressionFunctions
-					)
+						parseVariables: null, // Not supported here
+						blink: undefined, // Not supported here
+
+						defaultTimezone: undefined, // no timezone context
+					})
 					return !!val && val !== 'false' && val !== '0'
 				} catch (e) {
 					console.error('Failed to resolve expression', e)
@@ -213,20 +216,20 @@ const PluginSurfaceRow = observer(function PluginSurfaceRow({ surfaceInfo, addCo
 				</div>
 			</td>
 			<td>
-				<p className="p-no-margin">{surfaceInstanceDisplayName}</p>
+				<p className="p-no-margin">{surfaceInfo.address ?? '-'}</p>
 			</td>
 			<td>
-				<CButtonGroup>
+				<ButtonGroup>
 					{isAlreadyAdded ? (
-						<CButton title={'Already added'} className="btn-undefined" disabled>
+						<Button title={'Already added'} disabled>
 							<FontAwesomeIcon icon={faCheck} /> Already added
-						</CButton>
+						</Button>
 					) : (
-						<CButton onClick={() => addConnection(surfaceInfo)} title="Add Connection" className="btn-undefined">
+						<Button onClick={() => addConnection(surfaceInfo)} title="Add Connection">
 							<FontAwesomeIcon icon={faPlus} /> Add Connection
-						</CButton>
+						</Button>
 					)}
-				</CButtonGroup>
+				</ButtonGroup>
 			</td>
 		</tr>
 	)

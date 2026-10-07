@@ -1,25 +1,33 @@
-import React, { useMemo } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { observer } from 'mobx-react-lite'
-import { useNavigate } from '@tanstack/react-router'
-import { makeAbsolutePath } from '~/Resources/util.js'
+import { useMemo } from 'react'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { AddInstancePanel } from '~/Instances/AddInstancePanel.js'
 import type { AddInstanceService } from '~/Instances/AddInstanceService'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { makeAbsolutePath } from '~/Resources/util.js'
 
-export const AddSurfaceInstancePanel = observer(function AddSurfaceInstancePanel() {
+interface AddSurfaceInstancePanelProps {
+	isSubpanel?: boolean
+}
+export const AddSurfaceInstancePanel = observer(function AddSurfaceInstancePanel({
+	isSubpanel,
+}: AddSurfaceInstancePanelProps) {
 	const service = useAddSurfaceInstanceService()
 
 	return (
 		<AddInstancePanel
 			service={service}
+			isSubpanel={!!isSubpanel}
 			title="Add Surface Integration"
-			description={(storeCount) =>
-				storeCount > 0 ? (
+			helpAction="/user-guide/surfaces/"
+			description={(modulesCount) =>
+				modulesCount > 0 ? (
 					<>
 						<div className="intro-text">
 							<p className="mb-2">
-								<strong>Companion supports over {storeCount} different surfaces</strong> and the list grows every day.
+								<strong>Companion supports over {modulesCount} different surfaces</strong>, and the list grows every
+								day.
 							</p>
 						</div>
 						<div>
@@ -27,11 +35,12 @@ export const AddSurfaceInstancePanel = observer(function AddSurfaceInstancePanel
 								Can't find your surface?{' '}
 								<a
 									target="_blank"
-									href={makeAbsolutePath('/getting-started#6_modules.md')}
+									href={makeAbsolutePath('/user-guide/config/modules')}
 									className="text-decoration-none"
 								>
 									Check our guidance for getting device support
 								</a>
+								.<br /> To import an offline module, go to the <Link to="/modules">Modules page</Link>.
 							</span>
 						</div>
 					</>
@@ -50,14 +59,16 @@ export const AddSurfaceInstancePanel = observer(function AddSurfaceInstancePanel
 })
 
 function useAddSurfaceInstanceService(): AddInstanceService {
-	const navigate = useNavigate({ from: '/surfaces/integrations' })
 	const addMutation = useMutationExt(trpc.instances.surfaces.add.mutationOptions())
+	const navigate = useNavigate() // from: is only needed to resolve relative paths, so not needed here...
 
 	return useMemo(
 		() => ({
 			moduleType: ModuleInstanceType.Surface,
 
 			closeAddInstance: () => {
+				// it's always safe to return to /surfaces/integrations (i.e. it will always display correctly)
+				// if the window is wide-enough, ConfigureSurfacesPage will remove the last part of the path.
 				void navigate({ to: '/surfaces/integrations' })
 			},
 			openConfigureInstance: (instanceId) => {

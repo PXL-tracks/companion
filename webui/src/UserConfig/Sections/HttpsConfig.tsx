@@ -1,15 +1,18 @@
-import React, { useCallback } from 'react'
-import { CAlert, CButton, CDropdown, CDropdownItem, CDropdownMenu, CDropdownToggle } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faSync, faTrash, faUndo } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import { UserConfigHeadingRow } from '../Components/UserConfigHeadingRow.js'
-import { UserConfigSwitchRow } from '../Components/UserConfigSwitchRow.js'
+import { useCallback } from 'react'
+import type { DropdownChoice } from '@companion-app/shared/Model/Common.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button } from '~/Components/Button'
+import { SimpleDropdownInputField } from '~/Components/DropdownInputFieldSimple.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import type { UserConfigProps } from '../Components/Common.js'
+import { UserConfigHeadingRow } from '../Components/UserConfigHeadingRow.js'
 import { UserConfigNumberInputRow } from '../Components/UserConfigNumberInputRow.js'
 import { UserConfigPortNumberRow } from '../Components/UserConfigPortNumberRow.js'
+import { UserConfigSwitchRow } from '../Components/UserConfigSwitchRow.js'
 import { UserConfigTextInputRow } from '../Components/UserConfigTextInputRow.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 
 export const HttpsConfig = observer(function HttpsConfig(props: UserConfigProps) {
 	const createSslCertificateMutation = useMutationExt(trpc.userConfig.sslCertificateCreate.mutationOptions())
@@ -39,15 +42,15 @@ export const HttpsConfig = observer(function HttpsConfig(props: UserConfigProps)
 
 	return (
 		<>
-			<UserConfigHeadingRow label="HTTPS Web Server" />
+			<UserConfigHeadingRow label="HTTPS Web Server" helpAction="/user-guide/config/settings#https-web-server" />
 
 			<tr>
 				<td colSpan={3}>
 					<p>An HTTPS server can be enabled for the Companion web interfaces should your deployment require it.</p>
-					<CAlert color="danger">
+					<StaticAlert color="danger">
 						Never expose the Companion web interface directly to the Internet. Note that HTTPS alone does not provide
 						additional security for this configuration.
-					</CAlert>
+					</StaticAlert>
 				</td>
 			</tr>
 
@@ -60,20 +63,17 @@ export const HttpsConfig = observer(function HttpsConfig(props: UserConfigProps)
 					<tr>
 						<td>Certificate Type</td>
 						<td>
-							<CDropdown className="mt-2" style={{ display: 'inline-block', overflow: 'visible' }}>
-								<CDropdownToggle>
-									{props.config.https_cert_type === 'external' ? 'External' : 'Self Signed'}
-								</CDropdownToggle>
-								<CDropdownMenu>
-									<CDropdownItem onClick={() => props.setValue('https_cert_type', 'self')}>Self Signed</CDropdownItem>
-									<CDropdownItem onClick={() => props.setValue('https_cert_type', 'external')}>External</CDropdownItem>
-								</CDropdownMenu>
-							</CDropdown>
+							<SimpleDropdownInputField
+								id={undefined}
+								value={props.config.https_cert_type}
+								setValue={(val) => props.setValue('https_cert_type', val)}
+								choices={certTypeOptions}
+							/>
 						</td>
 						<td>
-							<CButton onClick={() => props.resetValue('https_cert_type')} title="Reset to default">
+							<Button onClick={() => props.resetValue('https_cert_type')} title="Reset to default">
 								<FontAwesomeIcon icon={faUndo} />
-							</CButton>
+							</Button>
 						</td>
 					</tr>
 
@@ -117,22 +117,22 @@ export const HttpsConfig = observer(function HttpsConfig(props: UserConfigProps)
 											</td>
 											<td>
 												{props.config.https_self_cert && props.config.https_self_cert.length > 0 ? (
-													<p>
-														<CButton onClick={renewSslCertificate} color="success" className="mb-2">
+													<div className="my-3">
+														<Button onClick={renewSslCertificate} color="success" className="mb-2">
 															<FontAwesomeIcon icon={faSync} />
 															&nbsp;Renew
-														</CButton>
+														</Button>
 														<br />
-														<CButton onClick={deleteSslCertificate} color="danger">
+														<Button onClick={deleteSslCertificate} color="danger">
 															<FontAwesomeIcon icon={faTrash} />
 															&nbsp;Delete
-														</CButton>
-													</p>
+														</Button>
+													</div>
 												) : (
-													<CButton onClick={createSslCertificate} color="success">
+													<Button onClick={createSslCertificate} color="success">
 														<FontAwesomeIcon icon={faSync} />
 														&nbsp;Generate
-													</CButton>
+													</Button>
 												)}
 											</td>
 											<td>&nbsp;</td>
@@ -154,10 +154,10 @@ export const HttpsConfig = observer(function HttpsConfig(props: UserConfigProps)
 													This requires you to generate your own self-signed certificate or go through a certificate
 													authority. A properly signed certificate will work.
 												</p>
-												<CAlert color="danger">
+												<StaticAlert color="danger">
 													This option is provided as-is. Support will not be provided for this feature. <br />
 													DO NOT POST GITHUB ISSUES IF THIS DOES NOT WORK.
-												</CAlert>
+												</StaticAlert>
 											</td>
 										</tr>
 
@@ -192,3 +192,8 @@ export const HttpsConfig = observer(function HttpsConfig(props: UserConfigProps)
 		</>
 	)
 })
+
+const certTypeOptions: DropdownChoice[] = [
+	{ id: 'self', label: 'Self Signed' },
+	{ id: 'external', label: 'External' },
+]

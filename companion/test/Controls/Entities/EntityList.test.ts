@@ -1,5 +1,5 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest'
-import { ControlEntityList, ControlEntityListDefinition } from '../../../lib/Controls/Entities/EntityList.js'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import {
 	ActionEntityModel,
 	EntityModelType,
@@ -8,6 +8,16 @@ import {
 	FeedbackEntitySubType,
 	SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
+import { ControlEntityInstance } from '../../../lib/Controls/Entities/EntityInstance.js'
+import { ControlEntityList, ControlEntityListDefinition } from '../../../lib/Controls/Entities/EntityList.js'
+import { EntityPoolSpecialExpressionManager } from '../../../lib/Controls/Entities/EntitySpecialExpressionManager.js'
+import type { NewSpecialExpressionValue } from '../../../lib/Controls/Entities/SpecialExpressions.js'
+import {
+	InstanceDefinitionsForEntity,
+	InternalControllerForEntity,
+	NewFeedbackValue,
+	ProcessManagerForEntity,
+} from '../../../lib/Controls/Entities/Types.js'
 import {
 	ActionTree,
 	ActionTreeEntityDefinitions,
@@ -15,18 +25,6 @@ import {
 	FeedbackTreeEntityDefinitions,
 	getAllModelsInTree,
 } from './EntityListModels.js'
-import {
-	InstanceDefinitionsForEntity,
-	InternalControllerForEntity,
-	NewFeedbackValue,
-	NewIsInvertedValue,
-	ProcessManagerForEntity,
-} from '../../../lib/Controls/Entities/Types.js'
-import { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import { ControlEntityInstance } from '../../../lib/Controls/Entities/EntityInstance.js'
-import { FeedbackStyleBuilder } from '../../../lib/Controls/Entities/FeedbackStyleBuilder.js'
-import { mock } from 'vitest-mock-extended'
-import { EntityPoolIsInvertedManager } from '../../../lib/Controls/Entities/EntityIsInvertedManager.js'
 
 function createList(controlId: string, ownerId?: EntityOwner | null, listId?: ControlEntityListDefinition | null) {
 	const getEntityDefinition = vi.fn<InstanceDefinitionsForEntity['getEntityDefinition']>()
@@ -44,7 +42,7 @@ function createList(controlId: string, ownerId?: EntityOwner | null, listId?: Co
 		connectionEntityDelete,
 		connectionEntityLearnOptions: null as any,
 	}
-	const isInvertedManager: EntityPoolIsInvertedManager = {
+	const specialExpressionManager: EntityPoolSpecialExpressionManager = {
 		trackEntity: vi.fn(),
 		forgetEntity: vi.fn(),
 	} as any
@@ -59,7 +57,7 @@ function createList(controlId: string, ownerId?: EntityOwner | null, listId?: Co
 		instanceDefinitions,
 		internalController,
 		processManager,
-		isInvertedManager,
+		specialExpressionManager,
 		controlId,
 		ownerId ?? null,
 		listId ?? {
@@ -79,7 +77,7 @@ function createList(controlId: string, ownerId?: EntityOwner | null, listId?: Co
 		instanceDefinitions,
 		internalController,
 		processManager,
-		isInvertedManager,
+		specialExpressionManager,
 		controlId,
 		newActionModel,
 		false
@@ -99,7 +97,7 @@ function createList(controlId: string, ownerId?: EntityOwner | null, listId?: Co
 		instanceDefinitions,
 		internalController,
 		processManager,
-		isInvertedManager,
+		specialExpressionManager,
 		newActionModel,
 		newAction,
 	}
@@ -1428,83 +1426,6 @@ describe('getChildBooleanFeedbackValues', () => {
 
 		expect(list.getChildBooleanFeedbackValues()).toHaveLength(0)
 	})
-
-	test('basic feedback values', () => {
-		list.loadStorage(structuredClone(FeedbackTree), true, false)
-		// seed some values for boolean feedabcks
-		list.updateFeedbackValues('conn02', translateFeedbackValues({ '02': true }))
-		list.updateFeedbackValues('internal', translateFeedbackValues({ int0: 'abcd' }))
-
-		const fb = list.findById('02')
-		fb!.setStyleValue('bgcolor', 123)
-
-		const len = list.getDirectEntities().length
-
-		const values = list.getChildBooleanFeedbackValues()
-		expect(values).toHaveLength(len)
-
-		expect(values).toEqual([false, true, false])
-	})
-})
-
-describe('buildFeedbackStyle', () => {
-	const { list, getEntityDefinition } = createList('test01', null, { type: EntityModelType.Feedback })
-	getEntityDefinition.mockImplementation(FeedbackTreeEntityDefinitions)
-
-	test('invalid for action list', () => {
-		const { list } = createList('test01', null, { type: EntityModelType.Action })
-
-		const styleBuilder = mock<FeedbackStyleBuilder>()
-
-		expect(() => list.buildFeedbackStyle(styleBuilder)).toThrow('ControlEntityList is not style feedbacks')
-	})
-
-	test('invalid for boolean feedbacks list', () => {
-		const { list } = createList('test01', null, {
-			type: EntityModelType.Feedback,
-			feedbackListType: FeedbackEntitySubType.Boolean,
-		})
-
-		const styleBuilder = mock<FeedbackStyleBuilder>()
-
-		expect(() => list.buildFeedbackStyle(styleBuilder)).toThrow('ControlEntityList is not style feedbacks')
-	})
-
-	test('disabled', () => {
-		list.loadStorage(structuredClone(FeedbackTree), true, false)
-		// seed some values for boolean feedabcks
-		list.updateFeedbackValues('conn02', translateFeedbackValues({ '02': true }))
-
-		// Disable all feedbacks
-		for (const entity of list.getAllEntities()) {
-			entity.setEnabled(false)
-		}
-
-		const styleBuilder = mock<FeedbackStyleBuilder>()
-		list.buildFeedbackStyle(styleBuilder)
-
-		expect(styleBuilder.applyComplexStyle).toHaveBeenCalledTimes(0)
-		expect(styleBuilder.applySimpleStyle).toHaveBeenCalledTimes(0)
-	})
-
-	test('basic feedback values', () => {
-		list.loadStorage(structuredClone(FeedbackTree), true, false)
-		// seed some values for boolean feedabcks
-		list.updateFeedbackValues('conn02', translateFeedbackValues({ '02': true }))
-		list.updateFeedbackValues('internal', translateFeedbackValues({ int0: 'abcd' }))
-
-		const fb = list.findById('02')
-		fb!.setStyleValue('bgcolor', 123)
-
-		const styleBuilder = mock<FeedbackStyleBuilder>()
-		list.buildFeedbackStyle(styleBuilder)
-
-		expect(styleBuilder.applyComplexStyle).toHaveBeenCalledTimes(1)
-		expect(styleBuilder.applySimpleStyle).toHaveBeenCalledTimes(1)
-
-		expect(styleBuilder.applyComplexStyle).toHaveBeenCalledWith('abcd')
-		expect(styleBuilder.applySimpleStyle).toHaveBeenCalledWith({ bgcolor: 123 })
-	})
 })
 
 describe('updateFeedbackValues', () => {
@@ -1793,7 +1714,7 @@ describe('updateIsInvertedValues', () => {
 	})
 
 	test('lifecycle tracks inverted', () => {
-		const { list, isInvertedManager, getEntityDefinition } = createList('test01', null, {
+		const { list, specialExpressionManager, getEntityDefinition } = createList('test01', null, {
 			type: EntityModelType.Feedback,
 			feedbackListType: FeedbackEntitySubType.Boolean,
 		})
@@ -1820,10 +1741,10 @@ describe('updateIsInvertedValues', () => {
 		// loadStorage calls subscribe(true) if skipSubscribe is false
 		list.loadStorage([newFeedback], false, false)
 
-		expect(isInvertedManager.trackEntity).toHaveBeenCalledTimes(1)
+		expect(specialExpressionManager.trackEntity).toHaveBeenCalledTimes(1)
 
 		list.cleanup()
-		expect(isInvertedManager.forgetEntity).toHaveBeenCalledTimes(1)
+		expect(specialExpressionManager.forgetEntity).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -1844,8 +1765,9 @@ describe('moveEntity', () => {
 
 		list.moveEntity(0, 2)
 
+		// newIndex is the desired final index: '1' is popped then inserted at index 2
 		const ids = list.getAllEntities().map((e) => e.id)
-		expect(ids).toEqual(['2', '1', '3'])
+		expect(ids).toEqual(['2', '3', '1'])
 	})
 
 	test('move up', () => {
@@ -1889,13 +1811,15 @@ describe('moveEntity', () => {
 	})
 })
 
-function translateIsInvertedValues(oldValues: Record<string, boolean>): Map<string, NewIsInvertedValue> {
-	const map = new Map<string, NewIsInvertedValue>()
+function translateIsInvertedValues(
+	oldValues: Record<string, boolean>
+): Map<string, NewSpecialExpressionValue<'isInverted'>> {
+	const map = new Map<string, NewSpecialExpressionValue<'isInverted'>>()
 	for (const [entityId, isInverted] of Object.entries(oldValues)) {
 		map.set(entityId, {
 			entityId,
 			controlId: '',
-			isInverted,
+			value: isInverted,
 		})
 	}
 	return map

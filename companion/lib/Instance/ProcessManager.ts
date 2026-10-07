@@ -1,32 +1,33 @@
-import LogController, { type Logger } from '../Log/Controller.js'
-import PQueue from 'p-queue'
-import { nanoid } from 'nanoid'
-import path from 'path'
-import { ConnectionChildHandlerLegacy } from './Connection/ChildHandlerLegacy.js'
-import type { ConnectionChildHandlerApi, ConnectionChildHandlerDependencies } from './Connection/ChildHandlerApi.js'
+import { EventEmitter } from 'node:events'
+import { createRequire } from 'node:module'
+import os from 'node:os'
+import path from 'node:path'
 import fs from 'fs-extra'
-import os from 'os'
-import { getNodeJsPath, getNodeJsPermissionArguments } from './NodePath.js'
-import { RespawnMonitor } from '@companion-app/shared/Respawn.js'
-import type { InstanceModules } from './Modules.js'
-import type { InstanceConfigStore } from './ConfigStore.js'
+import { nanoid } from 'nanoid'
+import PQueue from 'p-queue'
+import type { SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import { ModuleInstanceType, type InstanceConfig } from '@companion-app/shared/Model/Instance.js'
+import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
 import {
 	isModuleApiVersionCompatible,
 	isSurfaceApiVersionCompatible,
 } from '@companion-app/shared/ModuleApiVersionCheck.js'
-import type { SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import { createRequire } from 'module'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import { ModuleInstanceType, type InstanceConfig } from '@companion-app/shared/Model/Instance.js'
+import { RespawnMonitor } from '@companion-app/shared/Respawn.js'
 import { assertNever } from '@companion-app/shared/Util.js'
-import type { SomeModuleVersionInfo } from './Types.js'
-import { SurfaceChildHandler, type SurfaceChildHandlerDependencies } from './Surface/ChildHandler.js'
-import { isPackaged } from '../Resources/Util.js'
 import type { SurfaceModuleManifest } from '@companion-surface/host'
+import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
+import LogController, { type Logger } from '../Log/Controller.js'
+import { isPackaged } from '../Resources/Util.js'
+import type { InstanceConfigStore } from './ConfigStore.js'
 import { doesModuleUseNewChildHandler } from './Connection/ApiVersions.js'
+import type { ConnectionChildHandlerApi, ConnectionChildHandlerDependencies } from './Connection/ChildHandlerApi.js'
+import { ConnectionChildHandlerLegacy } from './Connection/ChildHandlerLegacy.js'
 import { ConnectionChildHandlerNew } from './Connection/ChildHandlerNew.js'
 import { PreserveEnvVars } from './Environment.js'
-import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import type { InstanceModules } from './Modules.js'
+import { getNodeJsPath, getNodeJsPermissionArguments, realPathOrSelf } from './NodePath.js'
+import { SurfaceChildHandler, type SurfaceChildHandlerDependencies } from './Surface/ChildHandler.js'
+import type { SomeModuleVersionInfo } from './Types.js'
 
 /**
  * A backoff sleep strategy
@@ -88,7 +89,39 @@ export interface ChildProcessHandlerBase {
 	cleanup(): void
 }
 
-export class InstanceProcessManager {
+export interface InstanceProcessManagerEvents {
+	/**
+	 * Emitted whenever a child's readiness changes in a way that affects what can be requested from it
+	 * (became ready, stopped or crashed). Used to drive UI subscriptions such as the config-fields editor.
+	 */
+	childStateChange: [instanceId: string]
+}
+
+/**
+ * Resolve a module's entrypoint to its real (symlink-free) on-disk path within the module dir. The real
+ * path is required so Node's permission model does not deny reading a symlinked config/module dir at
+ * import time.
+ */
+export async function resolveModuleEntrypoint(
+	basePath: string,
+	rawEntrypoint: string
+): Promise<{ entrypoint: string; error?: 'outside' | 'missing' }> {
+	const jsPath = path.join('companion', rawEntrypoint.replace(/\\/g, '/'))
+	const jsFullPath = path.resolve(path.join(basePath, jsPath))
+
+	const relativeToBase = path.relative(basePath, jsFullPath)
+	if (relativeToBase.startsWith('..') || path.isAbsolute(relativeToBase)) {
+		return { entrypoint: jsFullPath, error: 'outside' }
+	}
+
+	if (!(await fs.pathExists(jsFullPath))) {
+		return { entrypoint: jsFullPath, error: 'missing' }
+	}
+
+	return { entrypoint: realPathOrSelf(jsFullPath) }
+}
+
+export class InstanceProcessManager extends EventEmitter<InstanceProcessManagerEvents> {
 	readonly #logger = LogController.createLogger('Instance/ProcessManager')
 
 	readonly #connectionDeps: ConnectionChildHandlerDependencies
@@ -109,6 +142,8 @@ export class InstanceProcessManager {
 		modules: InstanceModules,
 		instanceConfigStore: InstanceConfigStore
 	) {
+		super()
+
 		this.#connectionDeps = connectionDeps
 		this.#surfaceDeps = surfaceDeps
 		this.#modules = modules
@@ -360,17 +395,26 @@ export class InstanceProcessManager {
 				} else {
 					this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unknown module')
 				}
+				this.emit('childStateChange', instanceId)
 				return
 			}
 
 			const runtimeInfo = await this.#findAndValidateModuleInfo(moduleInfo, instanceId, baseChild.lastLabel)
-			if (!runtimeInfo) return
+			if ('error' in runtimeInfo) {
+				// The module cannot be started (e.g. incompatible api version). Report it as the status so the
+				// instance does not appear stuck at whatever status the previous stop left behind.
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', runtimeInfo.error)
+				this.emit('childStateChange', instanceId)
+				return
+			}
 
 			const nodePath = await getNodeJsPath(moduleInfo.manifest.runtime.type)
 			if (!nodePath) {
 				this.#logger.error(
 					`Runtime "${moduleInfo.manifest.runtime.type}" is not supported in this version of Companion: "${baseChild.lastLabel}"`
 				)
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unsupported runtime')
+				this.emit('childStateChange', instanceId)
 				return
 			}
 
@@ -420,6 +464,7 @@ export class InstanceProcessManager {
 					moduleInfo.basePath,
 					enableInspect
 				),
+				...runtimeInfo.arguments,
 				enableInspect ? `--inspect=${inspectPort}` : undefined,
 				runtimeInfo.entrypoint,
 			].filter((v): v is string => !!v)
@@ -460,6 +505,7 @@ export class InstanceProcessManager {
 
 				child.logger.info(`Process started process ${monitor.child?.pid}`)
 				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process started **')
+				this.emit('childStateChange', instanceId)
 			})
 			monitor.on('stop', () => {
 				child.isReady = false
@@ -472,6 +518,7 @@ export class InstanceProcessManager {
 				)
 				child.logger.debug(`Process stopped`)
 				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process stopped **')
+				this.emit('childStateChange', instanceId)
 			})
 			monitor.on('crash', () => {
 				child.isReady = false
@@ -480,6 +527,7 @@ export class InstanceProcessManager {
 				this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, null, 'Crashed')
 				child.logger.debug(`Process crashed`)
 				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process crashed **')
+				this.emit('childStateChange', instanceId)
 			})
 			monitor.on('stdout', (data) => {
 				if (moduleInfo.versionId === 'dev') {
@@ -612,6 +660,7 @@ export class InstanceProcessManager {
 
 						// mark child as ready to receive
 						child.isReady = true
+						this.emit('childStateChange', child.instanceId)
 
 						// Call ready hook
 						await child.handler?.ready?.()
@@ -684,17 +733,27 @@ export class InstanceProcessManager {
 		moduleInfo: SomeModuleVersionInfo,
 		instanceId: string,
 		lastLabel: string
-	): Promise<{
-		entrypoint: string
-		moduleEntrypoint: string
-		apiVersion: string
-		env: Record<string, string>
-	} | null> {
-		const jsPath = path.join('companion', moduleInfo.manifest.runtime.entrypoint.replace(/\\/g, '/'))
-		const jsFullPath = path.normalize(path.join(moduleInfo.basePath, jsPath))
-		if (!(await fs.pathExists(jsFullPath))) {
-			this.#logger.error(`Module entrypoint "${jsFullPath}" does not exist`)
-			return null
+	): Promise<
+		| {
+				entrypoint: string
+				arguments: string[]
+				moduleEntrypoint: string
+				apiVersion: string
+				env: Record<string, string>
+		  }
+		| { error: string }
+	> {
+		const { entrypoint: realEntrypoint, error: entrypointError } = await resolveModuleEntrypoint(
+			moduleInfo.basePath,
+			moduleInfo.manifest.runtime.entrypoint
+		)
+		if (entrypointError === 'outside') {
+			this.#logger.error(`Module entrypoint "${realEntrypoint}" is outside module directory`)
+			return { error: 'Invalid module' }
+		}
+		if (entrypointError === 'missing') {
+			this.#logger.error(`Module entrypoint "${realEntrypoint}" does not exist`)
+			return { error: 'Module files missing' }
 		}
 
 		const moduleType = moduleInfo.type
@@ -702,7 +761,7 @@ export class InstanceProcessManager {
 			case ModuleInstanceType.Connection: {
 				if (moduleInfo.manifest.runtime.api !== 'nodejs-ipc') {
 					this.#logger.error(`Only nodejs-ipc api is supported currently: "${lastLabel}"`)
-					return null
+					return { error: 'Unsupported module runtime' }
 				}
 
 				// Determine the module api version
@@ -719,13 +778,13 @@ export class InstanceProcessManager {
 						moduleApiVersion = moduleLibPackage.version
 					} catch (e) {
 						this.#logger.error(`Failed to get module api version: "${lastLabel}" ${e}`)
-						return null
+						return { error: 'Invalid module' }
 					}
 				}
 
 				if (!isModuleApiVersionCompatible(moduleApiVersion)) {
 					this.#logger.error(`Module Api version is too new/old: "${lastLabel}" ${moduleApiVersion}`)
-					return null
+					return { error: 'Incompatible module version' }
 				}
 
 				if (doesModuleUseNewChildHandler(moduleApiVersion)) {
@@ -735,16 +794,18 @@ export class InstanceProcessManager {
 							import.meta.dirname,
 							isPackaged() ? './ConnectionThread.js' : './Connection/Thread/Entrypoint.js'
 						),
-						moduleEntrypoint: jsFullPath,
+						arguments: ['--enable-source-maps'],
+						moduleEntrypoint: realEntrypoint,
 						env: {
-							MODULE_ENTRYPOINT: jsFullPath,
+							MODULE_ENTRYPOINT: realEntrypoint,
 						},
 					}
 				} else {
 					return {
 						apiVersion: moduleApiVersion,
-						entrypoint: jsFullPath,
-						moduleEntrypoint: jsFullPath,
+						entrypoint: realEntrypoint,
+						arguments: [],
+						moduleEntrypoint: realEntrypoint,
 						env: {
 							CONNECTION_ID: instanceId,
 						},
@@ -766,13 +827,13 @@ export class InstanceProcessManager {
 						moduleApiVersion = moduleLibPackage.version
 					} catch (e) {
 						this.#logger.error(`Failed to get module api version: "${lastLabel}" ${e}`)
-						return null
+						return { error: 'Invalid module' }
 					}
 				}
 
 				if (!isSurfaceApiVersionCompatible(moduleApiVersion)) {
 					this.#logger.error(`Module Api version is too new/old: "${lastLabel}" ${moduleApiVersion}`)
-					return null
+					return { error: 'Incompatible module version' }
 				}
 
 				return {
@@ -781,16 +842,17 @@ export class InstanceProcessManager {
 						import.meta.dirname,
 						isPackaged() ? './SurfaceThread.js' : './Surface/Thread/Entrypoint.js'
 					),
-					moduleEntrypoint: jsFullPath,
+					arguments: ['--enable-source-maps'],
+					moduleEntrypoint: realEntrypoint,
 					env: {
-						MODULE_ENTRYPOINT: jsFullPath,
+						MODULE_ENTRYPOINT: realEntrypoint,
 					},
 				}
 			}
 			default:
 				assertNever(moduleInfo)
 				this.#logger.error(`Unknown module type "${moduleType}" for api version check: "${lastLabel}"`)
-				return null
+				return { error: 'Unknown module type' }
 		}
 	}
 

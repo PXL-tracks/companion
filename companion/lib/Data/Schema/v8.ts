@@ -1,7 +1,7 @@
-import type { Database as SQLiteDB } from 'better-sqlite3'
+import type { DatabaseSync } from 'node:sqlite'
 import type { Logger } from '../../Log/Controller.js'
 
-export function createTables(store: SQLiteDB | undefined, defaultTable: string, logger: Logger): void {
+export function createTables(store: DatabaseSync | undefined, defaultTable: string, logger: Logger): void {
 	if (store) {
 		try {
 			store.prepare(`CREATE TABLE IF NOT EXISTS ${defaultTable} (id STRING UNIQUE, value STRING);`).run()
@@ -14,6 +14,7 @@ export function createTables(store: SQLiteDB | undefined, defaultTable: string, 
 			store.prepare(`CREATE TABLE IF NOT EXISTS surfaces (id STRING UNIQUE, value STRING);`).run()
 			store.prepare(`CREATE TABLE IF NOT EXISTS surface_groups (id STRING UNIQUE, value STRING);`).run()
 			store.prepare(`CREATE TABLE IF NOT EXISTS surfaces_remote (id STRING UNIQUE, value STRING);`).run()
+			store.prepare(`CREATE TABLE IF NOT EXISTS image_library (id STRING UNIQUE, value STRING);`).run()
 		} catch (e) {
 			logger.warn(`Error creating tables`, e)
 		}

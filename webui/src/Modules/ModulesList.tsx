@@ -1,6 +1,3 @@
-import React, { useCallback, useContext, useState } from 'react'
-import { CAlert, CButton, CButtonGroup, CNav, CNavItem, CNavLink } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
 	faEyeSlash,
 	faGamepad,
@@ -9,18 +6,25 @@ import {
 	faWarning,
 	type IconDefinition,
 } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import classNames from 'classnames'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useState } from 'react'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { InlineHelpCustom } from '~/Components/InlineHelp.js'
 import { NonIdealState } from '~/Components/NonIdealState.js'
 import { SearchBox } from '~/Components/SearchBox.js'
-import { useAllModuleProducts, filterProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
-import { ImportModules } from './ImportCustomModule.js'
+import { TabArea } from '~/Components/TabArea.js'
 import { useTableVisibilityHelper, VisibilityButton } from '~/Components/TableVisibility.js'
-import { RefreshModulesList } from './RefreshModulesList.js'
-import { LastUpdatedTimestamp } from './LastUpdatedTimestamp.js'
+import { filterProducts, useAllModuleProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons.js'
 import { assertNever, makeAbsolutePath } from '~/Resources/util.js'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ImportModules } from './ImportCustomModule.js'
+import { LastUpdatedTimestamp } from './LastUpdatedTimestamp.js'
+import { RefreshModulesList } from './RefreshModulesList.js'
 
 interface VisibleModulesState {
 	installed: boolean
@@ -49,7 +53,20 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 
 	const [filterType, setFilterType] = useState<ModuleInstanceType | null>(null)
 	const [filter, setFilter] = useState('')
+	const filterName = (() => {
+		if (filterType === null) return ' '
+		switch (filterType) {
+			case ModuleInstanceType.Connection:
+				return ' Connection '
+			case ModuleInstanceType.Surface:
+				return ' Surface '
+			default:
+				assertNever(filterType)
+				return ' '
+		}
+	})()
 
+	//  A module can support several devices: useAllModuleProducts returns the list of devices, so some modules are represented by several entries here.
 	const allProducts = useAllModuleProducts(null, true, true).filter((p) => !filterType || filterType === p.moduleType)
 	const typeProducts = allProducts.filter((p) => {
 		let isVisible = false
@@ -118,22 +135,35 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 
 		components = []
 		components.push(
-			<CAlert color="warning" role="alert">
-				Failed to build list of modules:
-				<br />
-				{e?.toString()}
-			</CAlert>
+			<tr key="module-list-build-error">
+				<td colSpan={4}>
+					<StaticAlert color="warning" role="alert">
+						Failed to build list of modules:
+						<br />
+						{e?.toString()}
+					</StaticAlert>
+				</td>
+			</tr>
 		)
 	}
 
-	const hiddenCount =
-		new Set(allProducts.map((p) => p.moduleId)).size - new Set(typeProducts.map((p) => p.moduleId)).size
+	const moduleKey = (p: FuzzyProduct) => `${p.moduleType}:${p.moduleId}`
+	const modulesCount = new Set(allProducts.map(moduleKey)).size
+	const hiddenCount = modulesCount - new Set(typeProducts.map(moduleKey)).size
 
 	return (
 		<div className="flex-column-layout">
 			<div className="fixed-header">
-				<h4>Manage Modules</h4>
-
+				<h4 className="button-inline">
+					Manage Modules
+					<ContextHelpButton action="/user-guide/config/modules" />
+				</h4>
+				<p className="mb-2">
+					<strong>
+						Companion can work with over {modulesCount} different{filterName}modules
+					</strong>{' '}
+					and the list grows every day.
+				</p>
 				<p>
 					View and manage your installed modules, or search for new ones to support additional devices. Can't find your
 					device?{' '}
@@ -155,7 +185,7 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 					<LastUpdatedTimestamp timestamp={modules.storeUpdateInfo.lastUpdated} />
 				</div>
 
-				<SearchBox filter={filter} setFilter={setFilter} />
+				<SearchBox filter={filter} setFilter={setFilter} className="mb-2" />
 			</div>
 
 			<FilterTypeTabs filterType={filterType} setFilterType={setFilterType} />
@@ -166,7 +196,7 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 						<tr>
 							<th colSpan={3}>
 								Module
-								<CButtonGroup className="table-header-buttons">
+								<ButtonGroup className="table-header-buttons">
 									<VisibilityButton {...visibleModules} keyId="installed" color="success" label="Installed" />
 									<VisibilityButton {...visibleModules} keyId="available" color="warning" label="Available" />
 									<VisibilityButton
@@ -175,7 +205,7 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 										color="primary"
 										label="Deprecated"
 									/>
-								</CButtonGroup>
+								</ButtonGroup>
 							</th>
 						</tr>
 					</thead>
@@ -285,7 +315,7 @@ const ModulesListRow = observer(function ModulesListRow({
 				'connectionlist-selected': isSelected,
 			})}
 		>
-			<td onClick={doEdit} className="hand">
+			<td onClick={doEdit} className="hand compact">
 				{icon && (
 					<span title={iconTitle ?? ''}>
 						<FontAwesomeIcon icon={icon} />
@@ -293,19 +323,17 @@ const ModulesListRow = observer(function ModulesListRow({
 				)}
 			</td>
 			<td onClick={doEdit} className="hand">
-				{!!moduleInfo.storeInfo?.deprecationReason && <FontAwesomeIcon icon={faWarning} title="Deprecated" />}
+				{!!moduleInfo.storeInfo?.deprecationReason && (
+					<InlineHelpCustom help="Deprecated" className="me-1">
+						<FontAwesomeIcon icon={faWarning} aria-label="Deprecated" />
+					</InlineHelpCustom>
+				)}
 				{moduleInfo.name}
 			</td>
 			<td className="compact">
-				<CButton
-					onMouseDown={doShowHelp}
-					color="white"
-					title="Show Help"
-					disabled={!moduleInfo.helpUrl}
-					style={{ textAlign: 'left' }}
-				>
+				<Button onMouseDown={doShowHelp} title="Show Help" disabled={!moduleInfo.helpUrl}>
 					<FontAwesomeIcon icon={faQuestionCircle} />
-				</CButton>
+				</Button>
 			</td>
 		</tr>
 	)
@@ -318,30 +346,22 @@ interface FilterTypeTabsProps {
 
 function FilterTypeTabs({ filterType, setFilterType }: FilterTypeTabsProps) {
 	return (
-		<CNav variant="tabs" role="tablist" className="remote-control-tabs">
-			<CNavItem>
-				<CNavLink active={filterType === null} onClick={() => setFilterType(null)} title="Show all module types">
+		<TabArea.Root
+			value={filterType}
+			onValueChange={(v) => setFilterType(v as ModuleInstanceType | null)}
+			className="remote-control-tabs"
+		>
+			<TabArea.List>
+				<TabArea.Tab value={null} title="Show all module types">
 					All Modules
-				</CNavLink>
-			</CNavItem>
-			<CNavItem>
-				<CNavLink
-					active={filterType === ModuleInstanceType.Connection}
-					onClick={() => setFilterType(ModuleInstanceType.Connection)}
-					title="Show only connection modules"
-				>
+				</TabArea.Tab>
+				<TabArea.Tab value={ModuleInstanceType.Connection} title="Show only connection modules">
 					Connection Modules
-				</CNavLink>
-			</CNavItem>
-			<CNavItem>
-				<CNavLink
-					active={filterType === ModuleInstanceType.Surface}
-					onClick={() => setFilterType(ModuleInstanceType.Surface)}
-					title="Show only surface modules"
-				>
+				</TabArea.Tab>
+				<TabArea.Tab value={ModuleInstanceType.Surface} title="Show only surface modules">
 					Surface Modules
-				</CNavLink>
-			</CNavItem>
-		</CNav>
+				</TabArea.Tab>
+			</TabArea.List>
+		</TabArea.Root>
 	)
 }

@@ -1,53 +1,55 @@
-import { ControlButtonNormal } from './ControlTypes/Button/Normal.js'
-import { ControlButtonPageDown } from './ControlTypes/PageDown.js'
-import { ControlButtonPageNumber } from './ControlTypes/PageNumber.js'
-import { ControlButtonPageUp } from './ControlTypes/PageUp.js'
-import { CreateBankControlId, CreatePresetControlId, CreateTriggerControlId } from '@companion-app/shared/ControlId.js'
-import { ControlTrigger } from './ControlTypes/Triggers/Trigger.js'
-import { nanoid } from 'nanoid'
+import crypto from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import debounceFn from 'debounce-fn'
+import { nanoid } from 'nanoid'
+import z from 'zod'
+import { CreateBankControlId, CreatePresetControlId, CreateTriggerControlId } from '@companion-app/shared/ControlId.js'
 import type { SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
-import type { TriggerCollection, TriggerModel } from '@companion-app/shared/Model/TriggerModel.js'
-import type { SomeControl } from './IControlFragments.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { EventEmitter } from 'events'
+import type { SomeControlModel, UIControlUpdate } from '@companion-app/shared/Model/Controls.js'
+import type {
+	ExpressionVariableCollection,
+	ExpressionVariableModel,
+} from '@companion-app/shared/Model/ExpressionVariableModel.js'
+import type { TriggerCollection, TriggerModel } from '@companion-app/shared/Model/TriggerModel.js'
+import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
+import { createStableObjectHash } from '@companion-app/shared/Util/Hash.js'
+import type { DataDatabase } from '../Data/Database.js'
+import type { CompositeElementIdString } from '../Instance/Definitions.js'
+import LogController from '../Log/Controller.js'
+import type { ActiveLearningStore } from '../Resources/ActiveLearningStore.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import { injectOverriddenLocalVariableValues } from '../Variables/Util.js'
+import type { VariablesAndExpressionParser } from '../Variables/VariablesAndExpressionParser.js'
+import { createActionSetsTrpcRouter } from './ActionSetsTrpcRouter.js'
 import type {
 	ControlChangeEvents,
 	ControlCommonEvents,
 	ControlDependencies,
 	ControlExternalDependencies,
 } from './ControlDependencies.js'
-import LogController from '../Log/Controller.js'
+import type { ControlStore } from './ControlStore.js'
+import { createControlsTrpcRouter } from './ControlsTrpcRouter.js'
+import { ControlButtonLayered } from './ControlTypes/Button/Layered.js'
+import { ControlButtonPreset } from './ControlTypes/Button/Preset.js'
+import { ControlExpressionVariable } from './ControlTypes/ExpressionVariable.js'
+import { ControlButtonPageDown } from './ControlTypes/PageDown.js'
+import { ControlButtonPageNumber } from './ControlTypes/PageNumber.js'
+import { ControlButtonPageUp } from './ControlTypes/PageUp.js'
+import { ControlTrigger } from './ControlTypes/Triggers/Trigger.js'
+import type { NewFeedbackValue } from './Entities/Types.js'
+import { createEntitiesTrpcRouter } from './EntitiesTrpcRouter.js'
+import { createEventsTrpcRouter } from './EventsTrpcRouter.js'
+import { ExpressionVariableCollections } from './ExpressionVariableCollections.js'
+import { ExpressionVariableNameMap } from './ExpressionVariableNameMap.js'
+import { createExpressionVariableTrpcRouter } from './ExpressionVariableTrpcRouter.js'
+import type { SomeControl } from './IControlFragments.js'
+import { createStepsTrpcRouter } from './StepsTrpcRouter.js'
+import { createStylesTrpcRouter } from './StylesTrpcRouter.js'
 import { TriggerCollections } from './TriggerCollections.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import type { TriggerEvents } from './TriggerEvents.js'
 import { createTriggersTrpcRouter } from './TriggersTrpcRouter.js'
 import { validateBankControlId, validateExpressionVariableControlId, validateTriggerControlId } from './Util.js'
-import { createEventsTrpcRouter } from './EventsTrpcRouter.js'
-import { createStepsTrpcRouter } from './StepsTrpcRouter.js'
-import { ActiveLearningStore } from '../Resources/ActiveLearningStore.js'
-import { createEntitiesTrpcRouter } from './EntitiesTrpcRouter.js'
-import { createActionSetsTrpcRouter } from './ActionSetsTrpcRouter.js'
-import { createControlsTrpcRouter } from './ControlsTrpcRouter.js'
-import z from 'zod'
-import type { SomeControlModel, UIControlUpdate } from '@companion-app/shared/Model/Controls.js'
-import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
-import type { VariablesAndExpressionParser } from '../Variables/VariablesAndExpressionParser.js'
-import { ControlExpressionVariable } from './ControlTypes/ExpressionVariable.js'
-import type {
-	ExpressionVariableCollection,
-	ExpressionVariableModel,
-} from '@companion-app/shared/Model/ExpressionVariableModel.js'
-import { ExpressionVariableCollections } from './ExpressionVariableCollections.js'
-import { createExpressionVariableTrpcRouter } from './ExpressionVariableTrpcRouter.js'
-import { ExpressionVariableNameMap } from './ExpressionVariableNameMap.js'
-import { ControlButtonPreset } from './ControlTypes/Button/Preset.js'
-import type { NewFeedbackValue } from './Entities/Types.js'
-import { createStableObjectHash } from '@companion-app/shared/Util/Hash.js'
-import crypto from 'crypto'
-import { injectOverriddenLocalVariableValues } from '../Variables/Util.js'
-import type { ControlStore } from './ControlStore.js'
-import type { TriggerEvents } from './TriggerEvents.js'
-import type { DataDatabase } from '../Data/Database.js'
 
 /**
  * The class that manages the controls
@@ -78,7 +80,7 @@ export class ControlsController {
 	/**
 	 * Active learning store
 	 */
-	readonly #activeLearningStore = new ActiveLearningStore()
+	readonly #activeLearningStore: ActiveLearningStore
 
 	readonly #triggerCollections: TriggerCollections
 
@@ -95,11 +97,13 @@ export class ControlsController {
 		db: DataDatabase,
 		store: ControlStore,
 		controlEvents: EventEmitter<ControlCommonEvents>,
+		activeLearningStore: ActiveLearningStore,
 		controlDeps: ControlExternalDependencies
 	) {
 		this.#store = store
 		this.#deps = controlDeps
 		this.#controlEvents = controlEvents
+		this.#activeLearningStore = activeLearningStore
 
 		this.#triggerCollections = new TriggerCollections(
 			db,
@@ -221,6 +225,7 @@ export class ControlsController {
 			),
 			actionSets: createActionSetsTrpcRouter(this.#store.controls),
 			steps: createStepsTrpcRouter(this.#store.controls),
+			styles: createStylesTrpcRouter(this.#store.controls),
 
 			...createControlsTrpcRouter(
 				this.#logger,
@@ -274,8 +279,8 @@ export class ControlsController {
 		const controlType = typeof controlObj === 'object' ? controlObj.type : controlObj
 		const controlObj2 = typeof controlObj === 'object' ? controlObj : null
 		if (category === 'all' || category === 'button') {
-			if (controlObj2?.type === 'button' || (controlType === 'button' && !controlObj2)) {
-				return new ControlButtonNormal(this.#createControlDependencies(), controlId, controlObj2, isImport)
+			if (controlObj2?.type === 'button-layered' || (controlType === 'button-layered' && !controlObj2)) {
+				return new ControlButtonLayered(this.#createControlDependencies(), controlId, controlObj2, isImport)
 			} else if (controlObj2?.type === 'pagenum' || (controlType === 'pagenum' && !controlObj2)) {
 				return new ControlButtonPageNumber(this.#createControlDependencies(), controlId, controlObj2, isImport)
 			} else if (controlObj2?.type === 'pageup' || (controlType === 'pageup' && !controlObj2)) {
@@ -322,14 +327,14 @@ export class ControlsController {
 	}
 
 	/**
-	 * Get all of the trigger controls
+	 * Get all of the button controls
 	 */
-	getAllButtons(): Array<ControlButtonNormal | ControlButtonPageDown | ControlButtonPageNumber | ControlButtonPageUp> {
-		const buttons: Array<ControlButtonNormal | ControlButtonPageDown | ControlButtonPageNumber | ControlButtonPageUp> =
+	getAllButtons(): Array<ControlButtonLayered | ControlButtonPageDown | ControlButtonPageNumber | ControlButtonPageUp> {
+		const buttons: Array<ControlButtonLayered | ControlButtonPageDown | ControlButtonPageNumber | ControlButtonPageUp> =
 			[]
 		for (const control of this.#store.controls.values()) {
 			if (
-				control instanceof ControlButtonNormal ||
+				control instanceof ControlButtonLayered ||
 				control instanceof ControlButtonPageDown ||
 				control instanceof ControlButtonPageNumber ||
 				control instanceof ControlButtonPageUp
@@ -407,10 +412,8 @@ export class ControlsController {
 
 			this.#controlEvents.emit('controlPlacedAt', location, newControlId)
 
-			newControl.triggerRedraw()
-
 			// Ensure it is stored to the db
-			newControl.commitChange()
+			newControl.commitChange(true)
 
 			return newControlId
 		}
@@ -508,8 +511,20 @@ export class ControlsController {
 				if (fromControlId && fromControlId !== control.controlId) continue
 
 				if (control.supportsEntities) control.entities.onVariablesChanged(allChangedVariablesSet)
-				control.onVariablesChanged(allChangedVariablesSet)
+				control.drawing?.onVariablesChanged(allChangedVariablesSet)
 			}
+		}
+	}
+
+	/**
+	 * Propagate composite element changes
+	 * @param allChangedElementIds - composite element ids with changes
+	 */
+	onCompositeElementsChanged(allChangedElementIds: ReadonlySet<CompositeElementIdString>): void {
+		if (allChangedElementIds.size === 0) return
+
+		for (const control of this.#store.controls.values()) {
+			control.drawing?.onCompositeElementsChanged(allChangedElementIds)
 		}
 	}
 
@@ -663,8 +678,8 @@ export class ControlsController {
 
 	createVariablesAndExpressionParser(
 		controlId: string | null | undefined,
-		overrideVariableValues: VariableValues | null
+		overrideVariableValues?: VariableValues | null
 	): VariablesAndExpressionParser {
-		return this.#store.createVariablesAndExpressionParser(controlId, overrideVariableValues)
+		return this.#store.createVariablesAndExpressionParser(controlId, overrideVariableValues ?? null)
 	}
 }

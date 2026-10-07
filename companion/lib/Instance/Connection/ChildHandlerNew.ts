@@ -1,50 +1,14 @@
-import LogController, { type Logger } from '../../Log/Controller.js'
-import { IpcWrapper, type IpcEventHandlers } from '../Common/IpcWrapper.js'
-import semver from 'semver'
 import type express from 'express'
-import type {
-	LogMessageMessage,
-	SetStatusMessage,
-	SetActionDefinitionsMessage,
-	SetFeedbackDefinitionsMessage,
-	UpdateFeedbackValuesMessage,
-	SetVariableValuesMessage,
-	SetVariableDefinitionsMessage,
-	SetPresetDefinitionsMessage,
-	SaveConfigMessage,
-	SendOscMessage,
-	RecordActionMessage,
-	SetCustomVariableMessage,
-	UpdateActionInstancesMessage,
-	UpdateFeedbackInstancesMessage,
-	ModuleIpcWrapper,
-	ModuleToHostEventsNew,
-	SharedUdpSocketMessageSend,
-} from './IpcTypesNew.js'
-import type { InstanceConfig } from '@companion-app/shared/Model/Instance.js'
-import { assertNever, type OSCMetaArgument, type CompanionHTTPRequest, type LogLevel } from '@companion-module/base'
+import semver from 'semver'
+import { ButtonDecorationRenderer } from '@companion-app/shared/Graphics/ButtonDecorationRenderer.js'
 import {
 	EntityModelType,
+	type ActionEntityModel,
 	type ReplaceableActionEntityModel,
 	type ReplaceableFeedbackEntityModel,
-	type ActionEntityModel,
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import type { RespawnMonitor } from '@companion-app/shared/Respawn.js'
-import {
-	ConnectionEntityManager,
-	type EntityManagerActionEntity,
-	type EntityManagerAdapter,
-	type EntityManagerFeedbackEntity,
-} from './EntityManager.js'
-import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
-import type { ChildProcessHandlerBase } from '../ProcessManager.js'
-import type {
-	ConnectionChildHandlerApi,
-	ConnectionChildHandlerDependencies,
-	RunActionExtras,
-} from './ChildHandlerApi.js'
-import type { SharedUdpSocketMessageJoin, SharedUdpSocketMessageLeave } from '@companion-module/base/host-api'
+import type { InstanceConfig } from '@companion-app/shared/Model/Instance.js'
 import {
 	exprVal,
 	isExpressionOrValue,
@@ -52,7 +16,49 @@ import {
 	type ExpressionableOptionsObject,
 	type SomeCompanionInputField,
 } from '@companion-app/shared/Model/Options.js'
+import type { RespawnMonitor } from '@companion-app/shared/Respawn.js'
 import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever, type CompanionHTTPRequest, type LogLevel, type OSCMetaArgument } from '@companion-module/base'
+import type { SharedUdpSocketMessageJoin, SharedUdpSocketMessageLeave } from '@companion-module/base/host-api'
+import type { JsonValue } from '@companion-module/host'
+import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
+import type { IControlStore } from '../../Controls/IControlStore.js'
+import LogController, { type Logger } from '../../Log/Controller.js'
+import { IpcWrapper, type IpcEventHandlers } from '../Common/IpcWrapper.js'
+import type { ChildProcessHandlerBase } from '../ProcessManager.js'
+import type {
+	ConnectionChildHandlerApi,
+	ConnectionChildHandlerDependencies,
+	RunActionExtras,
+} from './ChildHandlerApi.js'
+import {
+	ConnectionEntityManager,
+	type EntityManagerActionEntity,
+	type EntityManagerAdapter,
+	type EntityManagerFeedbackEntity,
+} from './EntityManager.js'
+import type {
+	LogMessageMessage,
+	ModuleIpcWrapper,
+	ModuleToHostEventsNew,
+	RecordActionMessage,
+	SaveConfigMessage,
+	SendOscMessage,
+	SetActionDefinitionsMessage,
+	SetCompositeElementDefinitionsMessage,
+	SetCustomVariableMessage,
+	SetFeedbackDefinitionsMessage,
+	SetPresetDefinitionsMessage,
+	SetStatusMessage,
+	SetVariableDefinitionsMessage,
+	SetVariableValuesMessage,
+	SharedUdpSocketMessageSend,
+	UpdateActionInstancesMessage,
+	UpdateFeedbackInstancesMessage,
+	UpdateFeedbackValuesMessage,
+} from './IpcTypesNew.js'
+
+const moduleFeedbackSize = { width: 72, height: 72 - ButtonDecorationRenderer.DEFAULT_HEIGHT } // Backwards compatibility for modules that expect feedback size
 
 export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, ConnectionChildHandlerApi {
 	logger: Logger
@@ -104,6 +110,7 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 
 				return {
 					connectionId: this.connectionId,
+					moduleApiVersion: apiVersion0,
 				}
 			},
 			'log-message': this.#handleLogMessage.bind(this),
@@ -112,6 +119,7 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 			setFeedbackDefinitions: this.#handleSetFeedbackDefinitions.bind(this),
 			setVariableDefinitions: this.#handleSetVariableDefinitions.bind(this),
 			setPresetDefinitions: this.#handleSetPresetDefinitions.bind(this),
+			setCompositeElementDefinitions: this.#handleSetCompositeElementDefinitions.bind(this),
 			setVariableValues: this.#handleSetVariableValues.bind(this),
 			updateFeedbackValues: this.#handleUpdateFeedbackValues.bind(this),
 			saveConfig: this.#handleSaveConfig.bind(this),
@@ -136,7 +144,7 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 		)
 
 		this.#entityManager = new ConnectionEntityManager(
-			new ConnectionNewEntityManagerAdapter(this.#ipcWrapper),
+			new ConnectionNewEntityManagerAdapter(this.#ipcWrapper, this.#deps.controls),
 			this.#deps.controls,
 			this.connectionId
 		)
@@ -252,7 +260,6 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 
 	async entityUpdate(entity: ControlEntityInstance, controlId: string): Promise<void> {
 		if (entity.connectionId !== this.connectionId) throw new Error(`Feedback is for a different connection`)
-		if (entity.disabled) return
 
 		this.#entityManager.trackEntity(entity, controlId)
 	}
@@ -322,7 +329,7 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 								feedbackId: entity.definitionId,
 								options: parseRes.parsedOptions,
 
-								image: control?.getBitmapSize() ?? undefined,
+								image: control?.supportsLayeredStyle ? moduleFeedbackSize : undefined,
 							},
 						},
 						undefined,
@@ -356,9 +363,9 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 	/**
 	 * Tell the child instance class to execute an action
 	 */
-	async actionRun(action: ActionEntityModel, extras: RunActionExtras): Promise<void> {
+	async actionRun(action: ActionEntityModel, extras: RunActionExtras): Promise<JsonValue | undefined> {
 		if (action.connectionId !== this.connectionId) throw new Error(`Action is for a different connection`)
-		if (action.disabled) return
+		if (action.disabled) return undefined
 
 		try {
 			// This means the new flow is being done, and the options must be parsed at this stage
@@ -373,10 +380,20 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 			const parser = this.#deps.controls.createVariablesAndExpressionParser(extras.controlId, null)
 			const parseRes = parser.parseEntityOptions(actionDefinition, action.options)
 			if (!parseRes.ok) {
+				let location = 'Unknown'
+
+				if (extras.surfaceId && extras.surfaceId.startsWith('trigger'))
+					location = `Trigger ${extras.surfaceId.split(':')[1]}`
+
+				if (extras.controlId && extras.controlId.startsWith('bank') && extras.location)
+					location = `Button ${extras.location.pageNumber}/${extras.location.row}/${extras.location.column}`
+
 				this.logger.warn(
 					`Failed to parse action options for action ${action.definitionId}: ${JSON.stringify(parseRes.optionErrors)}`
 				)
-				throw new Error(`Failed to parse action options. One or more options were invalid`)
+				throw new Error(
+					`Failed to parse action options. One or more options were invalid\nAction: ${actionDefinition.label} - Location: ${location} - Errors: ${JSON.stringify(parseRes.optionErrors)}`
+				)
 			}
 
 			const result = await this.#ipcWrapper.sendWithCb('executeAction', {
@@ -389,17 +406,25 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 
 				surfaceId: extras?.surfaceId,
 			})
-			if (result && !result.success) {
-				const message = result.errorMessage || 'Unknown error'
-				this.logger.warn(`Error executing action: ${message}`)
-				this.#sendToModuleLog('error', `Error executing action: ${message}`)
+
+			if (result.success) {
+				return result.result
 			}
+
+			const message = result.errorMessage || 'Unknown error'
+			this.logger.warn(`Error executing action: ${message}`)
+			this.#sendToModuleLog('error', `Error executing action: ${message}`)
 		} catch (e) {
 			this.logger.warn(`Error executing action: ${stringifyError(e)}`)
-			this.#sendToModuleLog('error', `Error executing action: ${stringifyError(e)}`)
+
+			if (e instanceof Error) {
+				this.#sendToModuleLog('error', `Error executing action: ${stringifyError(e.message)}`)
+			}
 
 			throw e
 		}
+
+		return undefined
 	}
 
 	/**
@@ -592,6 +617,18 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 		}
 	}
 
+	async #handleSetCompositeElementDefinitions(msg: SetCompositeElementDefinitionsMessage): Promise<void> {
+		try {
+			this.#sendToModuleLog('debug', `Updating composite element definitions (${msg.definitions.length} elements)`)
+
+			this.#deps.instanceDefinitions.setCompositeElementDefinitions(this.connectionId, msg.definitions)
+		} catch (e: any) {
+			this.logger.error(`setCompositeElementDefinitions: ${e}`)
+
+			throw new Error(`Failed to set Composite Graphics Element Definitions: ${e}`)
+		}
+	}
+
 	/**
 	 * Handle saving an updated config and/or secrets object from the child process
 	 */
@@ -672,7 +709,7 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 				this.#ipcWrapper.sendWithNoCb('sharedUdpSocketMessage', {
 					handleId,
 					portNumber: msg.portNumber,
-					message: message.toString('base64'),
+					message: message.toBase64(),
 					source: rInfo,
 				})
 			},
@@ -708,9 +745,11 @@ export class ConnectionChildHandlerNew implements ChildProcessHandlerBase, Conne
 
 class ConnectionNewEntityManagerAdapter implements EntityManagerAdapter {
 	readonly #ipcWrapper: ModuleIpcWrapper
+	readonly #controlsStore: IControlStore
 
-	constructor(ipcWrapper: ModuleIpcWrapper) {
+	constructor(ipcWrapper: ModuleIpcWrapper, controlsStore: IControlStore) {
 		this.#ipcWrapper = ipcWrapper
+		this.#controlsStore = controlsStore
 	}
 
 	async updateActions(actions: Map<string, EntityManagerActionEntity | null>) {
@@ -737,13 +776,15 @@ class ConnectionNewEntityManagerAdapter implements EntityManagerAdapter {
 
 		for (const [id, value] of feedbacks) {
 			if (value && !value.entity.disabled) {
+				const control = this.#controlsStore.getControl(value.controlId)
+
 				updateMessage.feedbacks[id] = {
 					id: value.entity.id,
 					controlId: value.controlId,
 					feedbackId: value.entity.definitionId,
 					options: value.parsedOptions,
 
-					image: value.imageSize,
+					image: control?.supportsLayeredStyle ? moduleFeedbackSize : undefined,
 				}
 			} else {
 				updateMessage.feedbacks[id] = null
@@ -774,6 +815,13 @@ class ConnectionNewEntityManagerAdapter implements EntityManagerAdapter {
 							type: EntityModelType.Action,
 							definitionId: action.actionId,
 							options: action.options,
+							storeResult: action.storeResult
+								? {
+										type: 'custom-variable',
+										variableName: action.storeResult.variableName,
+										createIfNotExists: false,
+									}
+								: undefined,
 							upgradeIndex: currentUpgradeIndex,
 						}) satisfies ReplaceableActionEntityModel
 				)

@@ -4,13 +4,49 @@ sidebar_position: 3
 description: Configure Stream Decks and control surfaces.
 ---
 
-**Surfaces** are the Stream Deck's or similar devices that translate the button grid in Companion to a physical device you can interact with.
+Surfaces in Companion map physical input devices such as keypads, knobs, and sliders to the button grid in Companion. Several of the most popular such surfaces are made by Elgato (the Stream Deck series) and XKeys. Integrations for controlling these surfaces are bundled with Companion. Starting with Companion 4.3 many other surfaces are supported through "independent" surface modules. See the [Surface Modules](../7_surfaces/index.md) help page for details.
 
-If any of your Stream Decks are not showing up, press the **Rescan USB** button. You can avoid needing to do this by enabling **Watch for new USB Devices** on the settings page.
+## Configured Surfaces
+
+Configured surfaces define the mapping from Companion's [buttons](./buttons/index.md) to the physical keys and knobs on the physical surface as well as certain surface-specific attributes such as button brightness.
+
+:::important
+
+Before Companion can recognize a new surface you must ensure that the appropriate [**surface integration** module](../7_surfaces/index.md) has been installed and enabled.
+
+:::
+
+:::warning[Elgato Devices]
+
+If your Stream Deck is missing from this list, you might need to close the Elgato Stream Deck application and click the Rescan button.
+
+:::
+
+If any of your surfaces are not in the configured surfaces list, press the **Rescan USB** button. You can avoid needing to do this by enabling **Watch for new USB Devices** in the settings panel on the right.
+
+:::note[Linux USB permissions]
+
+On Linux, USB surfaces need some udev rules installed before Companion can use them, and these rules
+depend on which surface modules you have enabled. When the rules need updating, Companion shows an
+alert on the Surfaces page. On a desktop install it can apply the rules for you; on a headless install
+the [install script](../1_getting-started/companion-pi/manual-install.md) sets them up. See the
+`README` included with the Linux download for the manual steps.
+
+:::
 
 ![Surfaces](images/surfaces.png?raw=true 'Surfaces')
 
 Here you can see all your current surfaces, both local and connected over Satellite, as well as any available emulators.
+
+## Enabling and Disabling Surfaces
+
+Each surface has an enable/disable toggle in the surface settings. Disabling a surface stops Companion from using it, but keeps its configuration intact. This is useful when running Companion alongside other software (such as the Elgato Stream Deck app) — you can reserve specific devices for Companion and leave others to be managed by the other application.
+
+:::tip
+
+This toggle doesn't apply to surfaces connected over Satellite
+
+:::
 
 ## Surface Settings
 

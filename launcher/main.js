@@ -1,20 +1,20 @@
 // @ts-check
-import path from 'path'
-import url, { fileURLToPath } from 'url'
-import fs from 'fs-extra'
-import { init, getCurrentScope } from '@sentry/electron/main'
-import systeminformation from 'systeminformation'
-import Store from 'electron-store'
-import electron, { ipcMain, app, BrowserWindow, dialog } from 'electron'
-import { nanoid } from 'nanoid'
-import stripAnsi from 'strip-ansi'
+import os from 'node:os'
+import path from 'node:path'
+import url, { fileURLToPath } from 'node:url'
+import { getCurrentScope, init } from '@sentry/electron/main'
 import chokidar from 'chokidar'
 import debounceFn from 'debounce-fn'
+import electron, { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import Store from 'electron-store'
 import fileStreamRotator from 'file-stream-rotator'
+import fs from 'fs-extra'
+import { nanoid } from 'nanoid'
+import stripAnsi from 'strip-ansi'
+import systeminformation from 'systeminformation'
 import { ConfigReleaseDirs } from '@companion-app/shared/Paths.js'
 import { RespawnMonitor } from '@companion-app/shared/Respawn.js'
-import { showSettings, getSettingsWindow } from './settings.js'
-import os from 'os'
+import { getSettingsWindow, showSettings } from './settings.js'
 
 // Show a warning in the launcher window
 /** @type {string | null} */
@@ -28,7 +28,7 @@ if (process.platform === 'darwin') {
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const semver = require('semver')
 
-		const minimumVersion = '12.0'
+		const minimumVersion = '13.5'
 		const supportedVersions = new semver.Range(`>=${minimumVersion}`)
 
 		/** @type {any} */
@@ -43,7 +43,8 @@ if (process.platform === 'darwin') {
 			app.quit()
 		}
 
-		const futureMinimumVersion = '12.0'
+		// Note: when updating this, the message inside window.html needs updating to match
+		const futureMinimumVersion = '13.5'
 		const futureSupportedVersions = new semver.Range(`>=${futureMinimumVersion}`)
 
 		if (productVersion && !futureSupportedVersions.test(productVersion)) {
@@ -140,6 +141,11 @@ if (!lock) {
 		syslog_port: 514,
 		syslog_use_tcp: false,
 		syslog_local_hostname: '',
+
+		// Dangerous features - disabled by default, see the docs before enabling
+		enable_shell_command_support: false,
+		enable_restricted_modules: false,
+		trusted_proxies: '',
 	}
 
 	try {
@@ -620,6 +626,21 @@ if (!lock) {
 					if (uiConfig.get('enable_syslog')) doRestartApp = true
 				}
 
+				if (configData.enable_shell_command_support !== undefined) {
+					uiConfig.set('enable_shell_command_support', configData.enable_shell_command_support)
+					doRestartApp = true
+				}
+
+				if (configData.enable_restricted_modules !== undefined) {
+					uiConfig.set('enable_restricted_modules', configData.enable_restricted_modules)
+					doRestartApp = true
+				}
+
+				if (configData.trusted_proxies !== undefined) {
+					uiConfig.set('trusted_proxies', configData.trusted_proxies)
+					doRestartApp = true
+				}
+
 				// Refresh config info to all windows
 				sendAppInfo()
 
@@ -919,7 +940,7 @@ if (!lock) {
 			let crashTimeout = null
 
 			// Find the node binary
-			const nodejsBasePath = path.join(companionRootPath, 'node-runtimes', 'node22')
+			const nodejsBasePath = path.join(companionRootPath, 'node-runtimes', 'node26')
 			const nodeBinPath = [
 				path.join(nodejsBasePath, 'bin/node'),
 				path.join(nodejsBasePath, 'node'),
@@ -948,12 +969,16 @@ if (!lock) {
 				}
 			})
 
+			/** @type {boolean} */
+			let disableSystemCa = false
+
 			child = new RespawnMonitor(
 				// @ts-expect-error - This isn't losing nullable types
 				() =>
 					[
 						// Build a new command string for each start
 						nodeBin,
+						disableSystemCa ? undefined : '--use-system-ca',
 						path.join(companionRootPath, 'main.js'),
 						`--machine-id=${machineId}`,
 						`--config-dir=${configDir}`,
@@ -969,12 +994,16 @@ if (!lock) {
 						uiConfig.get('enable_syslog') && uiConfig.get('syslog_local_hostname')
 							? `--syslog-localhost="${uiConfig.get('syslog_local_hostname')}"`
 							: undefined,
+						uiConfig.get('enable_shell_command_support') ? '--enable-shell-command-support' : undefined,
+						uiConfig.get('enable_restricted_modules') ? '--enable-restricted-modules' : undefined,
+						uiConfig.get('trusted_proxies') ? `--trusted-proxies=${uiConfig.get('trusted_proxies')}` : undefined,
 					].filter((v) => !!v),
 				{
 					name: `Companion process`,
 					env: {
 						...process.env,
 						COMPANION_IPC_PARENT: 1,
+						COMPANION_SKIP_SYSTEM_CA: disableSystemCa ? '1' : undefined,
 					},
 					maxRestarts: -1,
 					sleep: 1000,
@@ -1044,7 +1073,15 @@ if (!lock) {
 				customLog(data.toString())
 			})
 			child.on('stderr', (data) => {
-				customLog(data.toString())
+				const str = data.toString()
+				if (!disableSystemCa && str.includes('OpenSSL configuration error')) {
+					disableSystemCa = true
+					customLog(
+						'Detected OpenSSL configuration error, disabling --use-system-ca for future restarts',
+						'Application'
+					)
+				}
+				customLog(str)
 			})
 			child.on('warn', (data) => {
 				customLog(data.toString())

@@ -24,9 +24,11 @@ import { Route as AppRouteImport } from './routes/_app.tsx'
 import { Route as AppIndexRouteImport } from './routes/_app/index.tsx'
 import { Route as StandaloneEmulatorRouteImport } from './routes/_standalone/emulator.tsx'
 import { Route as AppTriggersRouteImport } from './routes/_app/triggers.tsx'
+import { Route as AppSurfacesRouteImport } from './routes/_app/surfaces.tsx'
 import { Route as AppModulesRouteImport } from './routes/_app/modules.tsx'
 import { Route as AppLogRouteImport } from './routes/_app/log.tsx'
 import { Route as AppImportExportRouteImport } from './routes/_app/import-export.tsx'
+import { Route as AppImageLibraryRouteImport } from './routes/_app/image-library.tsx'
 import { Route as AppConnectionsRouteImport } from './routes/_app/connections.tsx'
 import { Route as AppCloudRouteImport } from './routes/_app/cloud.tsx'
 import { Route as AppButtonsRouteImport } from './routes/_app/buttons.tsx'
@@ -34,42 +36,42 @@ import { Route as AppSplatRouteImport } from './routes/_app/$.tsx'
 import { Route as StandaloneEmulatorIndexRouteImport } from './routes/_standalone/emulator/index.tsx'
 import { Route as AppVariablesIndexRouteImport } from './routes/_app/variables/index.tsx'
 import { Route as AppTriggersIndexRouteImport } from './routes/_app/triggers/index.tsx'
+import { Route as AppSurfacesIndexRouteImport } from './routes/_app/surfaces/index.tsx'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index.tsx'
 import { Route as AppModulesIndexRouteImport } from './routes/_app/modules/index.tsx'
+import { Route as AppImageLibraryIndexRouteImport } from './routes/_app/image-library/index.tsx'
 import { Route as AppConnectionsIndexRouteImport } from './routes/_app/connections/index.tsx'
 import { Route as StandaloneConnectionDebugDotconnectionIdRouteImport } from './routes/_standalone/connection-debug.$connectionId.tsx'
 import { Route as AppVariablesExpressionRouteImport } from './routes/_app/variables/expression.tsx'
 import { Route as AppVariablesCustomRouteImport } from './routes/_app/variables/custom.tsx'
 import { Route as AppVariablesOldLabelRouteImport } from './routes/_app/variables/$oldLabel.tsx'
 import { Route as AppTriggersControlIdRouteImport } from './routes/_app/triggers/$controlId.tsx'
-import { Route as AppSurfacesRemoteRouteImport } from './routes/_app/surfaces/remote.tsx'
+import { Route as AppSurfacesRemoteRouteImport } from './routes/_app/surfaces_/remote.tsx'
 import { Route as AppSurfacesOutboundRouteImport } from './routes/_app/surfaces/outbound.tsx'
-import { Route as AppSurfacesIntegrationsRouteImport } from './routes/_app/surfaces/integrations.tsx'
 import { Route as AppSurfacesDiscoverRouteImport } from './routes/_app/surfaces/discover.tsx'
 import { Route as AppSurfacesConfiguredRouteImport } from './routes/_app/surfaces/configured.tsx'
-import { Route as AppSurfacesSplatRouteImport } from './routes/_app/surfaces/$.tsx'
-import { Route as AppSettingsSurfacesRouteImport } from './routes/_app/settings/surfaces.tsx'
+import { Route as AppSurfacesItemIdRouteImport } from './routes/_app/surfaces/$itemId.tsx'
 import { Route as AppSettingsProtocolsRouteImport } from './routes/_app/settings/protocols.tsx'
 import { Route as AppSettingsGeneralRouteImport } from './routes/_app/settings/general.tsx'
 import { Route as AppSettingsButtonsRouteImport } from './routes/_app/settings/buttons.tsx'
 import { Route as AppSettingsBackupsRouteImport } from './routes/_app/settings/backups.tsx'
 import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced.tsx'
+import { Route as AppImageLibraryImageNameRouteImport } from './routes/_app/image-library/$imageName.tsx'
 import { Route as AppConnectionsAddRouteImport } from './routes/_app/connections/add.tsx'
 import { Route as AppConnectionsConnectionIdRouteImport } from './routes/_app/connections/$connectionId.tsx'
 import { Route as AppButtonsPageRouteImport } from './routes/_app/buttons/$page.tsx'
 import { Route as AppVariablesExpressionIndexRouteImport } from './routes/_app/variables/expression/index.tsx'
-import { Route as AppSurfacesRemoteIndexRouteImport } from './routes/_app/surfaces/remote/index.tsx'
+import { Route as AppSurfacesRemoteIndexRouteImport } from './routes/_app/surfaces_/remote/index.tsx'
 import { Route as AppSurfacesIntegrationsIndexRouteImport } from './routes/_app/surfaces/integrations/index.tsx'
-import { Route as AppSurfacesConfiguredIndexRouteImport } from './routes/_app/surfaces/configured/index.tsx'
 import { Route as AppSettingsBackupsIndexRouteImport } from './routes/_app/settings/backups/index.tsx'
 import { Route as StandaloneSurfacesDotdebugDotinstanceIdRouteImport } from './routes/_standalone/surfaces.debug.$instanceId.tsx'
 import { Route as AppVariablesExpressionControlIdRouteImport } from './routes/_app/variables/expression/$controlId.tsx'
 import { Route as AppVariablesConnectionDotlabelRouteImport } from './routes/_app/variables/connection.$label.tsx'
-import { Route as AppSurfacesRemoteDiscoverRouteImport } from './routes/_app/surfaces/remote/discover.tsx'
-import { Route as AppSurfacesRemoteConnectionIdRouteImport } from './routes/_app/surfaces/remote/$connectionId.tsx'
+import { Route as AppSurfacesRemoteDiscoverRouteImport } from './routes/_app/surfaces_/remote/discover.tsx'
+import { Route as AppSurfacesRemoteConnectionIdRouteImport } from './routes/_app/surfaces_/remote/$connectionId.tsx'
 import { Route as AppSurfacesIntegrationsAddRouteImport } from './routes/_app/surfaces/integrations/add.tsx'
 import { Route as AppSurfacesIntegrationsInstanceIdRouteImport } from './routes/_app/surfaces/integrations/$instanceId.tsx'
-import { Route as AppSurfacesConfiguredItemIdRouteImport } from './routes/_app/surfaces/configured/$itemId.tsx'
+import { Route as AppSurfacesConfiguredDotsplatRouteImport } from './routes/_app/surfaces/configured.$.tsx'
 import { Route as AppSettingsBackupsRuleIdRouteImport } from './routes/_app/settings/backups/$ruleId.tsx'
 import { Route as AppModulesModuleTypeDotmoduleIdRouteImport } from './routes/_app/modules/$moduleType.$moduleId.tsx'
 
@@ -151,6 +153,11 @@ const AppTriggersRoute = AppTriggersRouteImport.update({
   path: '/triggers',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSurfacesRoute = AppSurfacesRouteImport.update({
+  id: '/surfaces',
+  path: '/surfaces',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppModulesRoute = AppModulesRouteImport.update({
   id: '/modules',
   path: '/modules',
@@ -164,6 +171,11 @@ const AppLogRoute = AppLogRouteImport.update({
 const AppImportExportRoute = AppImportExportRouteImport.update({
   id: '/import-export',
   path: '/import-export',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImageLibraryRoute = AppImageLibraryRouteImport.update({
+  id: '/image-library',
+  path: '/image-library',
   getParentRoute: () => AppRoute,
 } as any)
 const AppConnectionsRoute = AppConnectionsRouteImport.update({
@@ -201,6 +213,11 @@ const AppTriggersIndexRoute = AppTriggersIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppTriggersRoute,
 } as any)
+const AppSurfacesIndexRoute = AppSurfacesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSurfacesRoute,
+} as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -210,6 +227,11 @@ const AppModulesIndexRoute = AppModulesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppModulesRoute,
+} as any)
+const AppImageLibraryIndexRoute = AppImageLibraryIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppImageLibraryRoute,
 } as any)
 const AppConnectionsIndexRoute = AppConnectionsIndexRouteImport.update({
   id: '/',
@@ -253,39 +275,29 @@ const AppTriggersControlIdRoute = AppTriggersControlIdRouteImport.update({
   getParentRoute: () => AppTriggersRoute,
 } as any)
 const AppSurfacesRemoteRoute = AppSurfacesRemoteRouteImport.update({
-  id: '/surfaces/remote',
+  id: '/surfaces_/remote',
   path: '/surfaces/remote',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSurfacesOutboundRoute = AppSurfacesOutboundRouteImport.update({
-  id: '/surfaces/outbound',
-  path: '/surfaces/outbound',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSurfacesIntegrationsRoute = AppSurfacesIntegrationsRouteImport.update({
-  id: '/surfaces/integrations',
-  path: '/surfaces/integrations',
-  getParentRoute: () => AppRoute,
+  id: '/outbound',
+  path: '/outbound',
+  getParentRoute: () => AppSurfacesRoute,
 } as any)
 const AppSurfacesDiscoverRoute = AppSurfacesDiscoverRouteImport.update({
-  id: '/surfaces/discover',
-  path: '/surfaces/discover',
-  getParentRoute: () => AppRoute,
+  id: '/discover',
+  path: '/discover',
+  getParentRoute: () => AppSurfacesRoute,
 } as any)
 const AppSurfacesConfiguredRoute = AppSurfacesConfiguredRouteImport.update({
-  id: '/surfaces/configured',
-  path: '/surfaces/configured',
-  getParentRoute: () => AppRoute,
+  id: '/configured',
+  path: '/configured',
+  getParentRoute: () => AppSurfacesRoute,
 } as any)
-const AppSurfacesSplatRoute = AppSurfacesSplatRouteImport.update({
-  id: '/surfaces/$',
-  path: '/surfaces/$',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSettingsSurfacesRoute = AppSettingsSurfacesRouteImport.update({
-  id: '/settings/surfaces',
-  path: '/settings/surfaces',
-  getParentRoute: () => AppRoute,
+const AppSurfacesItemIdRoute = AppSurfacesItemIdRouteImport.update({
+  id: '/$itemId',
+  path: '/$itemId',
+  getParentRoute: () => AppSurfacesRoute,
 } as any)
 const AppSettingsProtocolsRoute = AppSettingsProtocolsRouteImport.update({
   id: '/settings/protocols',
@@ -312,6 +324,12 @@ const AppSettingsAdvancedRoute = AppSettingsAdvancedRouteImport.update({
   path: '/settings/advanced',
   getParentRoute: () => AppRoute,
 } as any)
+const AppImageLibraryImageNameRoute =
+  AppImageLibraryImageNameRouteImport.update({
+    id: '/$imageName',
+    path: '/$imageName',
+    getParentRoute: () => AppImageLibraryRoute,
+  } as any)
 const AppConnectionsAddRoute = AppConnectionsAddRouteImport.update({
   id: '/add',
   path: '/add',
@@ -341,15 +359,9 @@ const AppSurfacesRemoteIndexRoute = AppSurfacesRemoteIndexRouteImport.update({
 } as any)
 const AppSurfacesIntegrationsIndexRoute =
   AppSurfacesIntegrationsIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => AppSurfacesIntegrationsRoute,
-  } as any)
-const AppSurfacesConfiguredIndexRoute =
-  AppSurfacesConfiguredIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => AppSurfacesConfiguredRoute,
+    id: '/integrations/',
+    path: '/integrations/',
+    getParentRoute: () => AppSurfacesRoute,
   } as any)
 const AppSettingsBackupsIndexRoute = AppSettingsBackupsIndexRouteImport.update({
   id: '/',
@@ -388,20 +400,20 @@ const AppSurfacesRemoteConnectionIdRoute =
   } as any)
 const AppSurfacesIntegrationsAddRoute =
   AppSurfacesIntegrationsAddRouteImport.update({
-    id: '/add',
-    path: '/add',
-    getParentRoute: () => AppSurfacesIntegrationsRoute,
+    id: '/integrations/add',
+    path: '/integrations/add',
+    getParentRoute: () => AppSurfacesRoute,
   } as any)
 const AppSurfacesIntegrationsInstanceIdRoute =
   AppSurfacesIntegrationsInstanceIdRouteImport.update({
-    id: '/$instanceId',
-    path: '/$instanceId',
-    getParentRoute: () => AppSurfacesIntegrationsRoute,
+    id: '/integrations/$instanceId',
+    path: '/integrations/$instanceId',
+    getParentRoute: () => AppSurfacesRoute,
   } as any)
-const AppSurfacesConfiguredItemIdRoute =
-  AppSurfacesConfiguredItemIdRouteImport.update({
-    id: '/$itemId',
-    path: '/$itemId',
+const AppSurfacesConfiguredDotsplatRoute =
+  AppSurfacesConfiguredDotsplatRouteImport.update({
+    id: '/$',
+    path: '/$',
     getParentRoute: () => AppSurfacesConfiguredRoute,
   } as any)
 const AppSettingsBackupsRuleIdRoute =
@@ -432,25 +444,26 @@ export interface FileRoutesByFullPath {
   '/buttons': typeof AppButtonsRouteWithChildren
   '/cloud': typeof AppCloudRoute
   '/connections': typeof AppConnectionsRouteWithChildren
+  '/image-library': typeof AppImageLibraryRouteWithChildren
   '/import-export': typeof AppImportExportRoute
   '/log': typeof AppLogRoute
   '/modules': typeof AppModulesRouteWithChildren
+  '/surfaces': typeof AppSurfacesRouteWithChildren
   '/triggers': typeof AppTriggersRouteWithChildren
   '/emulator': typeof StandaloneEmulatorRouteWithChildren
   '/tablet': typeof StandaloneTabletDotlazyRoute
   '/buttons/$page': typeof AppButtonsPageRoute
   '/connections/$connectionId': typeof AppConnectionsConnectionIdRoute
   '/connections/add': typeof AppConnectionsAddRoute
+  '/image-library/$imageName': typeof AppImageLibraryImageNameRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/backups': typeof AppSettingsBackupsRouteWithChildren
   '/settings/buttons': typeof AppSettingsButtonsRoute
   '/settings/general': typeof AppSettingsGeneralRoute
   '/settings/protocols': typeof AppSettingsProtocolsRoute
-  '/settings/surfaces': typeof AppSettingsSurfacesRoute
-  '/surfaces/$': typeof AppSurfacesSplatRoute
+  '/surfaces/$itemId': typeof AppSurfacesItemIdRoute
   '/surfaces/configured': typeof AppSurfacesConfiguredRouteWithChildren
   '/surfaces/discover': typeof AppSurfacesDiscoverRoute
-  '/surfaces/integrations': typeof AppSurfacesIntegrationsRouteWithChildren
   '/surfaces/outbound': typeof AppSurfacesOutboundRoute
   '/surfaces/remote': typeof AppSurfacesRemoteRouteWithChildren
   '/triggers/$controlId': typeof AppTriggersControlIdRoute
@@ -460,14 +473,16 @@ export interface FileRoutesByFullPath {
   '/connection-debug/$connectionId': typeof StandaloneConnectionDebugDotconnectionIdRoute
   '/emulator/$emulatorId': typeof StandaloneEmulatorEmulatorIdDotlazyRoute
   '/connections/': typeof AppConnectionsIndexRoute
+  '/image-library/': typeof AppImageLibraryIndexRoute
   '/modules/': typeof AppModulesIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
+  '/surfaces/': typeof AppSurfacesIndexRoute
   '/triggers/': typeof AppTriggersIndexRoute
   '/variables/': typeof AppVariablesIndexRoute
   '/emulator/': typeof StandaloneEmulatorIndexRoute
   '/modules/$moduleType/$moduleId': typeof AppModulesModuleTypeDotmoduleIdRoute
   '/settings/backups/$ruleId': typeof AppSettingsBackupsRuleIdRoute
-  '/surfaces/configured/$itemId': typeof AppSurfacesConfiguredItemIdRoute
+  '/surfaces/configured/$': typeof AppSurfacesConfiguredDotsplatRoute
   '/surfaces/integrations/$instanceId': typeof AppSurfacesIntegrationsInstanceIdRoute
   '/surfaces/integrations/add': typeof AppSurfacesIntegrationsAddRoute
   '/surfaces/remote/$connectionId': typeof AppSurfacesRemoteConnectionIdRoute
@@ -476,7 +491,6 @@ export interface FileRoutesByFullPath {
   '/variables/expression/$controlId': typeof AppVariablesExpressionControlIdRoute
   '/surfaces/debug/$instanceId': typeof StandaloneSurfacesDotdebugDotinstanceIdRoute
   '/settings/backups/': typeof AppSettingsBackupsIndexRoute
-  '/surfaces/configured/': typeof AppSurfacesConfiguredIndexRoute
   '/surfaces/integrations/': typeof AppSurfacesIntegrationsIndexRoute
   '/surfaces/remote/': typeof AppSurfacesRemoteIndexRoute
   '/variables/expression/': typeof AppVariablesExpressionIndexRoute
@@ -501,12 +515,13 @@ export interface FileRoutesByTo {
   '/buttons/$page': typeof AppButtonsPageRoute
   '/connections/$connectionId': typeof AppConnectionsConnectionIdRoute
   '/connections/add': typeof AppConnectionsAddRoute
+  '/image-library/$imageName': typeof AppImageLibraryImageNameRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/buttons': typeof AppSettingsButtonsRoute
   '/settings/general': typeof AppSettingsGeneralRoute
   '/settings/protocols': typeof AppSettingsProtocolsRoute
-  '/settings/surfaces': typeof AppSettingsSurfacesRoute
-  '/surfaces/$': typeof AppSurfacesSplatRoute
+  '/surfaces/$itemId': typeof AppSurfacesItemIdRoute
+  '/surfaces/configured': typeof AppSurfacesConfiguredRouteWithChildren
   '/surfaces/discover': typeof AppSurfacesDiscoverRoute
   '/surfaces/outbound': typeof AppSurfacesOutboundRoute
   '/triggers/$controlId': typeof AppTriggersControlIdRoute
@@ -515,14 +530,16 @@ export interface FileRoutesByTo {
   '/connection-debug/$connectionId': typeof StandaloneConnectionDebugDotconnectionIdRoute
   '/emulator/$emulatorId': typeof StandaloneEmulatorEmulatorIdDotlazyRoute
   '/connections': typeof AppConnectionsIndexRoute
+  '/image-library': typeof AppImageLibraryIndexRoute
   '/modules': typeof AppModulesIndexRoute
   '/settings': typeof AppSettingsIndexRoute
+  '/surfaces': typeof AppSurfacesIndexRoute
   '/triggers': typeof AppTriggersIndexRoute
   '/variables': typeof AppVariablesIndexRoute
   '/emulator': typeof StandaloneEmulatorIndexRoute
   '/modules/$moduleType/$moduleId': typeof AppModulesModuleTypeDotmoduleIdRoute
   '/settings/backups/$ruleId': typeof AppSettingsBackupsRuleIdRoute
-  '/surfaces/configured/$itemId': typeof AppSurfacesConfiguredItemIdRoute
+  '/surfaces/configured/$': typeof AppSurfacesConfiguredDotsplatRoute
   '/surfaces/integrations/$instanceId': typeof AppSurfacesIntegrationsInstanceIdRoute
   '/surfaces/integrations/add': typeof AppSurfacesIntegrationsAddRoute
   '/surfaces/remote/$connectionId': typeof AppSurfacesRemoteConnectionIdRoute
@@ -531,7 +548,6 @@ export interface FileRoutesByTo {
   '/variables/expression/$controlId': typeof AppVariablesExpressionControlIdRoute
   '/surfaces/debug/$instanceId': typeof StandaloneSurfacesDotdebugDotinstanceIdRoute
   '/settings/backups': typeof AppSettingsBackupsIndexRoute
-  '/surfaces/configured': typeof AppSurfacesConfiguredIndexRoute
   '/surfaces/integrations': typeof AppSurfacesIntegrationsIndexRoute
   '/surfaces/remote': typeof AppSurfacesRemoteIndexRoute
   '/variables/expression': typeof AppVariablesExpressionIndexRoute
@@ -552,9 +568,11 @@ export interface FileRoutesById {
   '/_app/buttons': typeof AppButtonsRouteWithChildren
   '/_app/cloud': typeof AppCloudRoute
   '/_app/connections': typeof AppConnectionsRouteWithChildren
+  '/_app/image-library': typeof AppImageLibraryRouteWithChildren
   '/_app/import-export': typeof AppImportExportRoute
   '/_app/log': typeof AppLogRoute
   '/_app/modules': typeof AppModulesRouteWithChildren
+  '/_app/surfaces': typeof AppSurfacesRouteWithChildren
   '/_app/triggers': typeof AppTriggersRouteWithChildren
   '/_standalone/emulator': typeof StandaloneEmulatorRouteWithChildren
   '/_standalone/tablet': typeof StandaloneTabletDotlazyRoute
@@ -562,18 +580,17 @@ export interface FileRoutesById {
   '/_app/buttons/$page': typeof AppButtonsPageRoute
   '/_app/connections/$connectionId': typeof AppConnectionsConnectionIdRoute
   '/_app/connections/add': typeof AppConnectionsAddRoute
+  '/_app/image-library/$imageName': typeof AppImageLibraryImageNameRoute
   '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/backups': typeof AppSettingsBackupsRouteWithChildren
   '/_app/settings/buttons': typeof AppSettingsButtonsRoute
   '/_app/settings/general': typeof AppSettingsGeneralRoute
   '/_app/settings/protocols': typeof AppSettingsProtocolsRoute
-  '/_app/settings/surfaces': typeof AppSettingsSurfacesRoute
-  '/_app/surfaces/$': typeof AppSurfacesSplatRoute
+  '/_app/surfaces/$itemId': typeof AppSurfacesItemIdRoute
   '/_app/surfaces/configured': typeof AppSurfacesConfiguredRouteWithChildren
   '/_app/surfaces/discover': typeof AppSurfacesDiscoverRoute
-  '/_app/surfaces/integrations': typeof AppSurfacesIntegrationsRouteWithChildren
   '/_app/surfaces/outbound': typeof AppSurfacesOutboundRoute
-  '/_app/surfaces/remote': typeof AppSurfacesRemoteRouteWithChildren
+  '/_app/surfaces_/remote': typeof AppSurfacesRemoteRouteWithChildren
   '/_app/triggers/$controlId': typeof AppTriggersControlIdRoute
   '/_app/variables/$oldLabel': typeof AppVariablesOldLabelRoute
   '/_app/variables/custom': typeof AppVariablesCustomRoute
@@ -581,25 +598,26 @@ export interface FileRoutesById {
   '/_standalone/connection-debug/$connectionId': typeof StandaloneConnectionDebugDotconnectionIdRoute
   '/_standalone/emulator/$emulatorId': typeof StandaloneEmulatorEmulatorIdDotlazyRoute
   '/_app/connections/': typeof AppConnectionsIndexRoute
+  '/_app/image-library/': typeof AppImageLibraryIndexRoute
   '/_app/modules/': typeof AppModulesIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/surfaces/': typeof AppSurfacesIndexRoute
   '/_app/triggers/': typeof AppTriggersIndexRoute
   '/_app/variables/': typeof AppVariablesIndexRoute
   '/_standalone/emulator/': typeof StandaloneEmulatorIndexRoute
   '/_app/modules/$moduleType/$moduleId': typeof AppModulesModuleTypeDotmoduleIdRoute
   '/_app/settings/backups/$ruleId': typeof AppSettingsBackupsRuleIdRoute
-  '/_app/surfaces/configured/$itemId': typeof AppSurfacesConfiguredItemIdRoute
+  '/_app/surfaces/configured/$': typeof AppSurfacesConfiguredDotsplatRoute
   '/_app/surfaces/integrations/$instanceId': typeof AppSurfacesIntegrationsInstanceIdRoute
   '/_app/surfaces/integrations/add': typeof AppSurfacesIntegrationsAddRoute
-  '/_app/surfaces/remote/$connectionId': typeof AppSurfacesRemoteConnectionIdRoute
-  '/_app/surfaces/remote/discover': typeof AppSurfacesRemoteDiscoverRoute
+  '/_app/surfaces_/remote/$connectionId': typeof AppSurfacesRemoteConnectionIdRoute
+  '/_app/surfaces_/remote/discover': typeof AppSurfacesRemoteDiscoverRoute
   '/_app/variables/connection/$label': typeof AppVariablesConnectionDotlabelRoute
   '/_app/variables/expression/$controlId': typeof AppVariablesExpressionControlIdRoute
   '/_standalone/surfaces/debug/$instanceId': typeof StandaloneSurfacesDotdebugDotinstanceIdRoute
   '/_app/settings/backups/': typeof AppSettingsBackupsIndexRoute
-  '/_app/surfaces/configured/': typeof AppSurfacesConfiguredIndexRoute
   '/_app/surfaces/integrations/': typeof AppSurfacesIntegrationsIndexRoute
-  '/_app/surfaces/remote/': typeof AppSurfacesRemoteIndexRoute
+  '/_app/surfaces_/remote/': typeof AppSurfacesRemoteIndexRoute
   '/_app/variables/expression/': typeof AppVariablesExpressionIndexRoute
 }
 export interface FileRouteTypes {
@@ -619,25 +637,26 @@ export interface FileRouteTypes {
     | '/buttons'
     | '/cloud'
     | '/connections'
+    | '/image-library'
     | '/import-export'
     | '/log'
     | '/modules'
+    | '/surfaces'
     | '/triggers'
     | '/emulator'
     | '/tablet'
     | '/buttons/$page'
     | '/connections/$connectionId'
     | '/connections/add'
+    | '/image-library/$imageName'
     | '/settings/advanced'
     | '/settings/backups'
     | '/settings/buttons'
     | '/settings/general'
     | '/settings/protocols'
-    | '/settings/surfaces'
-    | '/surfaces/$'
+    | '/surfaces/$itemId'
     | '/surfaces/configured'
     | '/surfaces/discover'
-    | '/surfaces/integrations'
     | '/surfaces/outbound'
     | '/surfaces/remote'
     | '/triggers/$controlId'
@@ -647,14 +666,16 @@ export interface FileRouteTypes {
     | '/connection-debug/$connectionId'
     | '/emulator/$emulatorId'
     | '/connections/'
+    | '/image-library/'
     | '/modules/'
     | '/settings/'
+    | '/surfaces/'
     | '/triggers/'
     | '/variables/'
     | '/emulator/'
     | '/modules/$moduleType/$moduleId'
     | '/settings/backups/$ruleId'
-    | '/surfaces/configured/$itemId'
+    | '/surfaces/configured/$'
     | '/surfaces/integrations/$instanceId'
     | '/surfaces/integrations/add'
     | '/surfaces/remote/$connectionId'
@@ -663,7 +684,6 @@ export interface FileRouteTypes {
     | '/variables/expression/$controlId'
     | '/surfaces/debug/$instanceId'
     | '/settings/backups/'
-    | '/surfaces/configured/'
     | '/surfaces/integrations/'
     | '/surfaces/remote/'
     | '/variables/expression/'
@@ -688,12 +708,13 @@ export interface FileRouteTypes {
     | '/buttons/$page'
     | '/connections/$connectionId'
     | '/connections/add'
+    | '/image-library/$imageName'
     | '/settings/advanced'
     | '/settings/buttons'
     | '/settings/general'
     | '/settings/protocols'
-    | '/settings/surfaces'
-    | '/surfaces/$'
+    | '/surfaces/$itemId'
+    | '/surfaces/configured'
     | '/surfaces/discover'
     | '/surfaces/outbound'
     | '/triggers/$controlId'
@@ -702,14 +723,16 @@ export interface FileRouteTypes {
     | '/connection-debug/$connectionId'
     | '/emulator/$emulatorId'
     | '/connections'
+    | '/image-library'
     | '/modules'
     | '/settings'
+    | '/surfaces'
     | '/triggers'
     | '/variables'
     | '/emulator'
     | '/modules/$moduleType/$moduleId'
     | '/settings/backups/$ruleId'
-    | '/surfaces/configured/$itemId'
+    | '/surfaces/configured/$'
     | '/surfaces/integrations/$instanceId'
     | '/surfaces/integrations/add'
     | '/surfaces/remote/$connectionId'
@@ -718,7 +741,6 @@ export interface FileRouteTypes {
     | '/variables/expression/$controlId'
     | '/surfaces/debug/$instanceId'
     | '/settings/backups'
-    | '/surfaces/configured'
     | '/surfaces/integrations'
     | '/surfaces/remote'
     | '/variables/expression'
@@ -738,9 +760,11 @@ export interface FileRouteTypes {
     | '/_app/buttons'
     | '/_app/cloud'
     | '/_app/connections'
+    | '/_app/image-library'
     | '/_app/import-export'
     | '/_app/log'
     | '/_app/modules'
+    | '/_app/surfaces'
     | '/_app/triggers'
     | '/_standalone/emulator'
     | '/_standalone/tablet'
@@ -748,18 +772,17 @@ export interface FileRouteTypes {
     | '/_app/buttons/$page'
     | '/_app/connections/$connectionId'
     | '/_app/connections/add'
+    | '/_app/image-library/$imageName'
     | '/_app/settings/advanced'
     | '/_app/settings/backups'
     | '/_app/settings/buttons'
     | '/_app/settings/general'
     | '/_app/settings/protocols'
-    | '/_app/settings/surfaces'
-    | '/_app/surfaces/$'
+    | '/_app/surfaces/$itemId'
     | '/_app/surfaces/configured'
     | '/_app/surfaces/discover'
-    | '/_app/surfaces/integrations'
     | '/_app/surfaces/outbound'
-    | '/_app/surfaces/remote'
+    | '/_app/surfaces_/remote'
     | '/_app/triggers/$controlId'
     | '/_app/variables/$oldLabel'
     | '/_app/variables/custom'
@@ -767,25 +790,26 @@ export interface FileRouteTypes {
     | '/_standalone/connection-debug/$connectionId'
     | '/_standalone/emulator/$emulatorId'
     | '/_app/connections/'
+    | '/_app/image-library/'
     | '/_app/modules/'
     | '/_app/settings/'
+    | '/_app/surfaces/'
     | '/_app/triggers/'
     | '/_app/variables/'
     | '/_standalone/emulator/'
     | '/_app/modules/$moduleType/$moduleId'
     | '/_app/settings/backups/$ruleId'
-    | '/_app/surfaces/configured/$itemId'
+    | '/_app/surfaces/configured/$'
     | '/_app/surfaces/integrations/$instanceId'
     | '/_app/surfaces/integrations/add'
-    | '/_app/surfaces/remote/$connectionId'
-    | '/_app/surfaces/remote/discover'
+    | '/_app/surfaces_/remote/$connectionId'
+    | '/_app/surfaces_/remote/discover'
     | '/_app/variables/connection/$label'
     | '/_app/variables/expression/$controlId'
     | '/_standalone/surfaces/debug/$instanceId'
     | '/_app/settings/backups/'
-    | '/_app/surfaces/configured/'
     | '/_app/surfaces/integrations/'
-    | '/_app/surfaces/remote/'
+    | '/_app/surfaces_/remote/'
     | '/_app/variables/expression/'
   fileRoutesById: FileRoutesById
 }
@@ -906,6 +930,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTriggersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/surfaces': {
+      id: '/_app/surfaces'
+      path: '/surfaces'
+      fullPath: '/surfaces'
+      preLoaderRoute: typeof AppSurfacesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/modules': {
       id: '/_app/modules'
       path: '/modules'
@@ -925,6 +956,13 @@ declare module '@tanstack/react-router' {
       path: '/import-export'
       fullPath: '/import-export'
       preLoaderRoute: typeof AppImportExportRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/image-library': {
+      id: '/_app/image-library'
+      path: '/image-library'
+      fullPath: '/image-library'
+      preLoaderRoute: typeof AppImageLibraryRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/connections': {
@@ -976,6 +1014,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTriggersIndexRouteImport
       parentRoute: typeof AppTriggersRoute
     }
+    '/_app/surfaces/': {
+      id: '/_app/surfaces/'
+      path: '/'
+      fullPath: '/surfaces/'
+      preLoaderRoute: typeof AppSurfacesIndexRouteImport
+      parentRoute: typeof AppSurfacesRoute
+    }
     '/_app/settings/': {
       id: '/_app/settings/'
       path: '/settings'
@@ -989,6 +1034,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/modules/'
       preLoaderRoute: typeof AppModulesIndexRouteImport
       parentRoute: typeof AppModulesRoute
+    }
+    '/_app/image-library/': {
+      id: '/_app/image-library/'
+      path: '/'
+      fullPath: '/image-library/'
+      preLoaderRoute: typeof AppImageLibraryIndexRouteImport
+      parentRoute: typeof AppImageLibraryRoute
     }
     '/_app/connections/': {
       id: '/_app/connections/'
@@ -1039,8 +1091,8 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTriggersControlIdRouteImport
       parentRoute: typeof AppTriggersRoute
     }
-    '/_app/surfaces/remote': {
-      id: '/_app/surfaces/remote'
+    '/_app/surfaces_/remote': {
+      id: '/_app/surfaces_/remote'
       path: '/surfaces/remote'
       fullPath: '/surfaces/remote'
       preLoaderRoute: typeof AppSurfacesRemoteRouteImport
@@ -1048,45 +1100,31 @@ declare module '@tanstack/react-router' {
     }
     '/_app/surfaces/outbound': {
       id: '/_app/surfaces/outbound'
-      path: '/surfaces/outbound'
+      path: '/outbound'
       fullPath: '/surfaces/outbound'
       preLoaderRoute: typeof AppSurfacesOutboundRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/surfaces/integrations': {
-      id: '/_app/surfaces/integrations'
-      path: '/surfaces/integrations'
-      fullPath: '/surfaces/integrations'
-      preLoaderRoute: typeof AppSurfacesIntegrationsRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSurfacesRoute
     }
     '/_app/surfaces/discover': {
       id: '/_app/surfaces/discover'
-      path: '/surfaces/discover'
+      path: '/discover'
       fullPath: '/surfaces/discover'
       preLoaderRoute: typeof AppSurfacesDiscoverRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSurfacesRoute
     }
     '/_app/surfaces/configured': {
       id: '/_app/surfaces/configured'
-      path: '/surfaces/configured'
+      path: '/configured'
       fullPath: '/surfaces/configured'
       preLoaderRoute: typeof AppSurfacesConfiguredRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSurfacesRoute
     }
-    '/_app/surfaces/$': {
-      id: '/_app/surfaces/$'
-      path: '/surfaces/$'
-      fullPath: '/surfaces/$'
-      preLoaderRoute: typeof AppSurfacesSplatRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/settings/surfaces': {
-      id: '/_app/settings/surfaces'
-      path: '/settings/surfaces'
-      fullPath: '/settings/surfaces'
-      preLoaderRoute: typeof AppSettingsSurfacesRouteImport
-      parentRoute: typeof AppRoute
+    '/_app/surfaces/$itemId': {
+      id: '/_app/surfaces/$itemId'
+      path: '/$itemId'
+      fullPath: '/surfaces/$itemId'
+      preLoaderRoute: typeof AppSurfacesItemIdRouteImport
+      parentRoute: typeof AppSurfacesRoute
     }
     '/_app/settings/protocols': {
       id: '/_app/settings/protocols'
@@ -1123,6 +1161,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAdvancedRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/image-library/$imageName': {
+      id: '/_app/image-library/$imageName'
+      path: '/$imageName'
+      fullPath: '/image-library/$imageName'
+      preLoaderRoute: typeof AppImageLibraryImageNameRouteImport
+      parentRoute: typeof AppImageLibraryRoute
+    }
     '/_app/connections/add': {
       id: '/_app/connections/add'
       path: '/add'
@@ -1151,8 +1196,8 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVariablesExpressionIndexRouteImport
       parentRoute: typeof AppVariablesExpressionRoute
     }
-    '/_app/surfaces/remote/': {
-      id: '/_app/surfaces/remote/'
+    '/_app/surfaces_/remote/': {
+      id: '/_app/surfaces_/remote/'
       path: '/'
       fullPath: '/surfaces/remote/'
       preLoaderRoute: typeof AppSurfacesRemoteIndexRouteImport
@@ -1160,17 +1205,10 @@ declare module '@tanstack/react-router' {
     }
     '/_app/surfaces/integrations/': {
       id: '/_app/surfaces/integrations/'
-      path: '/'
+      path: '/integrations'
       fullPath: '/surfaces/integrations/'
       preLoaderRoute: typeof AppSurfacesIntegrationsIndexRouteImport
-      parentRoute: typeof AppSurfacesIntegrationsRoute
-    }
-    '/_app/surfaces/configured/': {
-      id: '/_app/surfaces/configured/'
-      path: '/'
-      fullPath: '/surfaces/configured/'
-      preLoaderRoute: typeof AppSurfacesConfiguredIndexRouteImport
-      parentRoute: typeof AppSurfacesConfiguredRoute
+      parentRoute: typeof AppSurfacesRoute
     }
     '/_app/settings/backups/': {
       id: '/_app/settings/backups/'
@@ -1200,15 +1238,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVariablesConnectionDotlabelRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/surfaces/remote/discover': {
-      id: '/_app/surfaces/remote/discover'
+    '/_app/surfaces_/remote/discover': {
+      id: '/_app/surfaces_/remote/discover'
       path: '/discover'
       fullPath: '/surfaces/remote/discover'
       preLoaderRoute: typeof AppSurfacesRemoteDiscoverRouteImport
       parentRoute: typeof AppSurfacesRemoteRoute
     }
-    '/_app/surfaces/remote/$connectionId': {
-      id: '/_app/surfaces/remote/$connectionId'
+    '/_app/surfaces_/remote/$connectionId': {
+      id: '/_app/surfaces_/remote/$connectionId'
       path: '/$connectionId'
       fullPath: '/surfaces/remote/$connectionId'
       preLoaderRoute: typeof AppSurfacesRemoteConnectionIdRouteImport
@@ -1216,23 +1254,23 @@ declare module '@tanstack/react-router' {
     }
     '/_app/surfaces/integrations/add': {
       id: '/_app/surfaces/integrations/add'
-      path: '/add'
+      path: '/integrations/add'
       fullPath: '/surfaces/integrations/add'
       preLoaderRoute: typeof AppSurfacesIntegrationsAddRouteImport
-      parentRoute: typeof AppSurfacesIntegrationsRoute
+      parentRoute: typeof AppSurfacesRoute
     }
     '/_app/surfaces/integrations/$instanceId': {
       id: '/_app/surfaces/integrations/$instanceId'
-      path: '/$instanceId'
+      path: '/integrations/$instanceId'
       fullPath: '/surfaces/integrations/$instanceId'
       preLoaderRoute: typeof AppSurfacesIntegrationsInstanceIdRouteImport
-      parentRoute: typeof AppSurfacesIntegrationsRoute
+      parentRoute: typeof AppSurfacesRoute
     }
-    '/_app/surfaces/configured/$itemId': {
-      id: '/_app/surfaces/configured/$itemId'
-      path: '/$itemId'
-      fullPath: '/surfaces/configured/$itemId'
-      preLoaderRoute: typeof AppSurfacesConfiguredItemIdRouteImport
+    '/_app/surfaces/configured/$': {
+      id: '/_app/surfaces/configured/$'
+      path: '/$'
+      fullPath: '/surfaces/configured/$'
+      preLoaderRoute: typeof AppSurfacesConfiguredDotsplatRouteImport
       parentRoute: typeof AppSurfacesConfiguredRoute
     }
     '/_app/settings/backups/$ruleId': {
@@ -1280,6 +1318,20 @@ const AppConnectionsRouteWithChildren = AppConnectionsRoute._addFileChildren(
   AppConnectionsRouteChildren,
 )
 
+interface AppImageLibraryRouteChildren {
+  AppImageLibraryImageNameRoute: typeof AppImageLibraryImageNameRoute
+  AppImageLibraryIndexRoute: typeof AppImageLibraryIndexRoute
+}
+
+const AppImageLibraryRouteChildren: AppImageLibraryRouteChildren = {
+  AppImageLibraryImageNameRoute: AppImageLibraryImageNameRoute,
+  AppImageLibraryIndexRoute: AppImageLibraryIndexRoute,
+}
+
+const AppImageLibraryRouteWithChildren = AppImageLibraryRoute._addFileChildren(
+  AppImageLibraryRouteChildren,
+)
+
 interface AppModulesRouteChildren {
   AppModulesIndexRoute: typeof AppModulesIndexRoute
   AppModulesModuleTypeDotmoduleIdRoute: typeof AppModulesModuleTypeDotmoduleIdRoute
@@ -1292,6 +1344,46 @@ const AppModulesRouteChildren: AppModulesRouteChildren = {
 
 const AppModulesRouteWithChildren = AppModulesRoute._addFileChildren(
   AppModulesRouteChildren,
+)
+
+interface AppSurfacesConfiguredRouteChildren {
+  AppSurfacesConfiguredDotsplatRoute: typeof AppSurfacesConfiguredDotsplatRoute
+}
+
+const AppSurfacesConfiguredRouteChildren: AppSurfacesConfiguredRouteChildren = {
+  AppSurfacesConfiguredDotsplatRoute: AppSurfacesConfiguredDotsplatRoute,
+}
+
+const AppSurfacesConfiguredRouteWithChildren =
+  AppSurfacesConfiguredRoute._addFileChildren(
+    AppSurfacesConfiguredRouteChildren,
+  )
+
+interface AppSurfacesRouteChildren {
+  AppSurfacesItemIdRoute: typeof AppSurfacesItemIdRoute
+  AppSurfacesConfiguredRoute: typeof AppSurfacesConfiguredRouteWithChildren
+  AppSurfacesDiscoverRoute: typeof AppSurfacesDiscoverRoute
+  AppSurfacesOutboundRoute: typeof AppSurfacesOutboundRoute
+  AppSurfacesIndexRoute: typeof AppSurfacesIndexRoute
+  AppSurfacesIntegrationsInstanceIdRoute: typeof AppSurfacesIntegrationsInstanceIdRoute
+  AppSurfacesIntegrationsAddRoute: typeof AppSurfacesIntegrationsAddRoute
+  AppSurfacesIntegrationsIndexRoute: typeof AppSurfacesIntegrationsIndexRoute
+}
+
+const AppSurfacesRouteChildren: AppSurfacesRouteChildren = {
+  AppSurfacesItemIdRoute: AppSurfacesItemIdRoute,
+  AppSurfacesConfiguredRoute: AppSurfacesConfiguredRouteWithChildren,
+  AppSurfacesDiscoverRoute: AppSurfacesDiscoverRoute,
+  AppSurfacesOutboundRoute: AppSurfacesOutboundRoute,
+  AppSurfacesIndexRoute: AppSurfacesIndexRoute,
+  AppSurfacesIntegrationsInstanceIdRoute:
+    AppSurfacesIntegrationsInstanceIdRoute,
+  AppSurfacesIntegrationsAddRoute: AppSurfacesIntegrationsAddRoute,
+  AppSurfacesIntegrationsIndexRoute: AppSurfacesIntegrationsIndexRoute,
+}
+
+const AppSurfacesRouteWithChildren = AppSurfacesRoute._addFileChildren(
+  AppSurfacesRouteChildren,
 )
 
 interface AppTriggersRouteChildren {
@@ -1320,40 +1412,6 @@ const AppSettingsBackupsRouteChildren: AppSettingsBackupsRouteChildren = {
 
 const AppSettingsBackupsRouteWithChildren =
   AppSettingsBackupsRoute._addFileChildren(AppSettingsBackupsRouteChildren)
-
-interface AppSurfacesConfiguredRouteChildren {
-  AppSurfacesConfiguredItemIdRoute: typeof AppSurfacesConfiguredItemIdRoute
-  AppSurfacesConfiguredIndexRoute: typeof AppSurfacesConfiguredIndexRoute
-}
-
-const AppSurfacesConfiguredRouteChildren: AppSurfacesConfiguredRouteChildren = {
-  AppSurfacesConfiguredItemIdRoute: AppSurfacesConfiguredItemIdRoute,
-  AppSurfacesConfiguredIndexRoute: AppSurfacesConfiguredIndexRoute,
-}
-
-const AppSurfacesConfiguredRouteWithChildren =
-  AppSurfacesConfiguredRoute._addFileChildren(
-    AppSurfacesConfiguredRouteChildren,
-  )
-
-interface AppSurfacesIntegrationsRouteChildren {
-  AppSurfacesIntegrationsInstanceIdRoute: typeof AppSurfacesIntegrationsInstanceIdRoute
-  AppSurfacesIntegrationsAddRoute: typeof AppSurfacesIntegrationsAddRoute
-  AppSurfacesIntegrationsIndexRoute: typeof AppSurfacesIntegrationsIndexRoute
-}
-
-const AppSurfacesIntegrationsRouteChildren: AppSurfacesIntegrationsRouteChildren =
-  {
-    AppSurfacesIntegrationsInstanceIdRoute:
-      AppSurfacesIntegrationsInstanceIdRoute,
-    AppSurfacesIntegrationsAddRoute: AppSurfacesIntegrationsAddRoute,
-    AppSurfacesIntegrationsIndexRoute: AppSurfacesIntegrationsIndexRoute,
-  }
-
-const AppSurfacesIntegrationsRouteWithChildren =
-  AppSurfacesIntegrationsRoute._addFileChildren(
-    AppSurfacesIntegrationsRouteChildren,
-  )
 
 interface AppSurfacesRemoteRouteChildren {
   AppSurfacesRemoteConnectionIdRoute: typeof AppSurfacesRemoteConnectionIdRoute
@@ -1391,9 +1449,11 @@ interface AppRouteChildren {
   AppButtonsRoute: typeof AppButtonsRouteWithChildren
   AppCloudRoute: typeof AppCloudRoute
   AppConnectionsRoute: typeof AppConnectionsRouteWithChildren
+  AppImageLibraryRoute: typeof AppImageLibraryRouteWithChildren
   AppImportExportRoute: typeof AppImportExportRoute
   AppLogRoute: typeof AppLogRoute
   AppModulesRoute: typeof AppModulesRouteWithChildren
+  AppSurfacesRoute: typeof AppSurfacesRouteWithChildren
   AppTriggersRoute: typeof AppTriggersRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
@@ -1401,12 +1461,6 @@ interface AppRouteChildren {
   AppSettingsButtonsRoute: typeof AppSettingsButtonsRoute
   AppSettingsGeneralRoute: typeof AppSettingsGeneralRoute
   AppSettingsProtocolsRoute: typeof AppSettingsProtocolsRoute
-  AppSettingsSurfacesRoute: typeof AppSettingsSurfacesRoute
-  AppSurfacesSplatRoute: typeof AppSurfacesSplatRoute
-  AppSurfacesConfiguredRoute: typeof AppSurfacesConfiguredRouteWithChildren
-  AppSurfacesDiscoverRoute: typeof AppSurfacesDiscoverRoute
-  AppSurfacesIntegrationsRoute: typeof AppSurfacesIntegrationsRouteWithChildren
-  AppSurfacesOutboundRoute: typeof AppSurfacesOutboundRoute
   AppSurfacesRemoteRoute: typeof AppSurfacesRemoteRouteWithChildren
   AppVariablesOldLabelRoute: typeof AppVariablesOldLabelRoute
   AppVariablesCustomRoute: typeof AppVariablesCustomRoute
@@ -1421,9 +1475,11 @@ const AppRouteChildren: AppRouteChildren = {
   AppButtonsRoute: AppButtonsRouteWithChildren,
   AppCloudRoute: AppCloudRoute,
   AppConnectionsRoute: AppConnectionsRouteWithChildren,
+  AppImageLibraryRoute: AppImageLibraryRouteWithChildren,
   AppImportExportRoute: AppImportExportRoute,
   AppLogRoute: AppLogRoute,
   AppModulesRoute: AppModulesRouteWithChildren,
+  AppSurfacesRoute: AppSurfacesRouteWithChildren,
   AppTriggersRoute: AppTriggersRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
   AppSettingsAdvancedRoute: AppSettingsAdvancedRoute,
@@ -1431,12 +1487,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsButtonsRoute: AppSettingsButtonsRoute,
   AppSettingsGeneralRoute: AppSettingsGeneralRoute,
   AppSettingsProtocolsRoute: AppSettingsProtocolsRoute,
-  AppSettingsSurfacesRoute: AppSettingsSurfacesRoute,
-  AppSurfacesSplatRoute: AppSurfacesSplatRoute,
-  AppSurfacesConfiguredRoute: AppSurfacesConfiguredRouteWithChildren,
-  AppSurfacesDiscoverRoute: AppSurfacesDiscoverRoute,
-  AppSurfacesIntegrationsRoute: AppSurfacesIntegrationsRouteWithChildren,
-  AppSurfacesOutboundRoute: AppSurfacesOutboundRoute,
   AppSurfacesRemoteRoute: AppSurfacesRemoteRouteWithChildren,
   AppVariablesOldLabelRoute: AppVariablesOldLabelRoute,
   AppVariablesCustomRoute: AppVariablesCustomRoute,

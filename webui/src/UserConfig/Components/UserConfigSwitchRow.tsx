@@ -1,8 +1,7 @@
-import React from 'react'
-import { CFormSwitch } from '@coreui/react'
-import { ResetButton, type UserConfigProps } from './Common.js'
-import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
 import { observer } from 'mobx-react-lite'
+import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
+import { SwitchInputField } from '~/Components/SwitchInputField.js'
+import { ResetButton, type UserConfigProps } from './Common.js'
 
 interface UserConfigSwitchRowProps {
 	userConfig: UserConfigProps
@@ -10,6 +9,7 @@ interface UserConfigSwitchRowProps {
 	field: keyof UserConfigModel
 	requiresRestart?: boolean
 	inverted?: boolean
+	title?: string
 }
 export const UserConfigSwitchRow = observer(function UserConfigSwitchRow({
 	userConfig,
@@ -17,11 +17,12 @@ export const UserConfigSwitchRow = observer(function UserConfigSwitchRow({
 	field,
 	requiresRestart,
 	inverted,
+	title,
 }: UserConfigSwitchRowProps) {
 	const invertIfNeeded = (value: boolean) => (inverted ? !value : value)
 	return (
-		<tr>
-			<td>
+		<tr title={title}>
+			<td style={{ width: '100%' }}>
 				{label}
 				{requiresRestart && (
 					<>
@@ -31,15 +32,15 @@ export const UserConfigSwitchRow = observer(function UserConfigSwitchRow({
 				)}
 			</td>
 			<td>
-				<CFormSwitch
-					className="float-right"
-					color="success"
-					checked={invertIfNeeded(!!userConfig.config[field])}
-					size="xl"
-					onChange={(e) => userConfig.setValue(field, invertIfNeeded(e.currentTarget.checked))}
-				/>
+				<div className="float-right">
+					<SwitchInputField
+						id={undefined} // Future: set this for better accessibility
+						value={invertIfNeeded(!!userConfig.config[field])}
+						setValue={(val) => userConfig.setValue(field, invertIfNeeded(val))}
+					/>
+				</div>
 			</td>
-			<td>
+			<td className="pe-3">
 				<ResetButton userConfig={userConfig} field={field} />
 			</td>
 		</tr>

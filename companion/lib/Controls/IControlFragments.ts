@@ -1,43 +1,116 @@
-import type { ButtonStatus } from '@companion-app/shared/Model/ButtonModel.js'
-import type { ControlBase } from './ControlBase.js'
-import type { ControlEntityListPoolBase } from './Entities/EntityListPoolBase.js'
-import type { ControlActionSetAndStepsManager } from './Entities/ControlActionSetAndStepsManager.js'
-import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
-import type { ButtonStyleProperties } from '@companion-app/shared/Model/StyleModel.js'
 import type { JsonObject, JsonValue } from 'type-fest'
+import type { SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
+import type { ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
+import type { SomeButtonGraphicsElement } from '@companion-app/shared/Model/StyleLayersModel.js'
+import type { ButtonGraphicsElementUsage, ButtonStyleProperties } from '@companion-app/shared/Model/StyleModel.js'
+import type { ControlBase } from './ControlBase.js'
+import type { SomeStepManager } from './Entities/ControlActionSetAndStepsManager.js'
+import type { SomeEntityPool } from './Entities/EntityListPoolEditingMixin.js'
 
 export type SomeControl<TJson> = ControlBase<TJson> &
-	(ControlWithStyle | ControlWithoutStyle) &
+	(ControlWithLayeredStyle | ControlWithoutLayeredStyle) &
 	(ControlWithEntities | ControlWithoutEntities) &
 	(ControlWithActions | ControlWithoutActions) &
 	(ControlWithEvents | ControlWithoutEvents) &
 	(ControlWithActionSets | ControlWithoutActionSets) &
 	(ControlWithOptions | ControlWithoutOptions) &
-	(ControlWithPushed | ControlWithoutPushed)
+	(ControlWithPushed | ControlWithoutPushed) &
+	(ControlWithConvert | ControlWithoutConvert)
 
-export interface ControlWithStyle extends ControlBase<any> {
-	readonly supportsStyle: true
-
-	readonly baseStyle: ButtonStyleProperties
-
-	readonly button_status: ButtonStatus
-
-	/**
-	 * Update the style fields of this control
-	 * @param diff - config diff to apply
-	 * @returns true if any changes were made
-	 */
-	styleSetFields(diff: Record<string, any>): boolean
+export interface ControlWithoutLayeredStyle extends ControlBase<any> {
+	readonly supportsLayeredStyle: false
 }
 
-export interface ControlWithoutStyle extends ControlBase<any> {
-	readonly supportsStyle: false
+export interface ControlWithLayeredStyle extends ControlBase<any> {
+	readonly supportsLayeredStyle: true
+
+	/**
+	 * Add an element to the layered style
+	 * @param type Element type to add
+	 * @param index Index to insert the element at, or null to append
+	 */
+	layeredStyleAddElement(type: string, afterElementId: string | null): string
+
+	/**
+	 * Remove an element from the layered style
+	 * @param id Element id to remove
+	 * @returns true if the element was removed
+	 */
+	layeredStyleRemoveElement(id: string): boolean
+
+	/**
+	 * Duplicate an element in the layered style, inserting the copy immediately after the original
+	 * @param id Element id to duplicate
+	 * @returns the new element's id, or false if not possible
+	 */
+	layeredStyleDuplicateElement(id: string): string | false
+
+	/**
+	 * Move an element in the layered style
+	 * @param id Element id to move
+	 * @param parentElementId Parent element id to move the element to
+	 * @param newIndex New index of the element
+	 * @returns true if the element was moved
+	 */
+	layeredStyleMoveElement(id: string, parentElementId: string | null, newIndex: number): boolean
+
+	/**
+	 * Update the name of an element in the layered style
+	 * @param id Element id to update
+	 * @param name New name for the element
+	 * @returns true if the element was updated
+	 */
+	layeredStyleSetElementName(id: string, name: string): boolean
+
+	/**
+	 * Update the usage of an element in the layered style
+	 * @param id Element id to update
+	 * @param usage New usage for the element
+	 * @returns true if the element was updated
+	 */
+	layeredStyleSetElementUsage(id: string, name: ButtonGraphicsElementUsage): boolean
+
+	/**
+	 * Update an option on an element from the layered style
+	 * @param id Element id to update
+	 * @param key Option key to update
+	 * @param value New ExpressionOrValue for the option
+	 * @returns true if any changes were made
+	 */
+	layeredStyleUpdateOption(id: string, key: string, value: ExpressionOrValue<JsonValue | undefined>): boolean
+
+	/**
+	 * Update the style from legacy properties
+	 * Future: Once the old button style is removed, this should be reworked to utilise the new style system better
+	 * @param diff The properties to update
+	 * @returns true if any changes were made
+	 */
+	layeredStyleUpdateFromLegacyProperties(diff: Partial<ButtonStyleProperties>): boolean
+
+	/**
+	 * Get an element from the layered style by ID
+	 * @param id Element ID to find
+	 * @returns The element if found, undefined otherwise
+	 */
+	layeredStyleGetElementById(id: string): SomeButtonGraphicsElement | undefined
+
+	/**
+	 * Get the selected element IDs for each usage in the layered style
+	 */
+	layeredStyleSelectedElementIds(): { [usage in ButtonGraphicsElementUsage]: string | undefined }
 }
 
 export interface ControlWithEntities extends ControlBase<any> {
 	readonly supportsEntities: true
 
-	readonly entities: ControlEntityListPoolBase
+	/**
+	 * The entity pool, as a read-only-or-editable discriminated union. The structural edit mutators live only
+	 * on the editable side; editing code narrows on `entities.isEditable` to reach them. A read-only control
+	 * (e.g. a preset reference) constructs a read-only pool, so the mutators are genuinely absent - read-only
+	 * by construction, with the discriminant living on the pool rather than a per-control capability flag.
+	 */
+	readonly entities: SomeEntityPool
 }
 
 export interface ControlWithoutEntities extends ControlBase<any> {
@@ -115,7 +188,13 @@ export interface ControlWithoutEvents extends ControlBase<any> {
 export interface ControlWithActionSets extends ControlBase<any> {
 	readonly supportsActionSets: true
 
-	readonly actionSets: ControlActionSetAndStepsManager
+	/**
+	 * The step/action-set surface, as a runtime-only-or-editable discriminated union. The structural edit
+	 * mutators live only on the editable side; editing code narrows on `actionSets.isEditable` to reach them,
+	 * while runtime navigation is always available. (Same discriminant as {@link ControlWithEntities.entities};
+	 * for a button they are the same pool object.)
+	 */
+	readonly actionSets: SomeStepManager
 
 	/**
 	 * Execute a rotate of this control
@@ -162,4 +241,19 @@ export interface ControlWithPushed extends ControlBase<any> {
 
 export interface ControlWithoutPushed extends ControlBase<any> {
 	readonly supportsPushed: false
+}
+
+export interface ControlWithConvert extends ControlBase<any> {
+	readonly supportsConvert: true
+
+	/**
+	 * Convert this control to another type of control.
+	 * This is intended to convert some 'automatic' controls, to a 'manual' editable form
+	 * @returns The new model for the converted control
+	 */
+	convertControl(): SomeButtonModel
+}
+
+export interface ControlWithoutConvert extends ControlBase<any> {
+	readonly supportsConvert: false
 }

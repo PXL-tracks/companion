@@ -1,15 +1,16 @@
-import React, { useCallback, useRef, useMemo } from 'react'
-import { CCallout, CCol, CRow } from '@coreui/react'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import type { RecordSessionUpdate } from '@companion-app/shared/Model/ActionRecorderModel.js'
-import { RecorderSessionFinishModal } from './RecorderSessionFinishModal.js'
-import { RecorderSessionHeading } from './RecorderSessionHeading.js'
-import { RecorderSession } from './RecorderSession.js'
-import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
 import { useSubscription } from '@trpc/tanstack-react-query'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useMemo, useRef } from 'react'
+import type { RecordSessionUpdate } from '@companion-app/shared/Model/ActionRecorderModel.js'
+import { Callout } from '~/Components/Callout.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
 import { trpc } from '~/Resources/TRPC.js'
 import { useComputed } from '~/Resources/util.js'
-import { observer } from 'mobx-react-lite'
+import { RecorderSession } from './RecorderSession.js'
+import { RecorderSessionFinishModal } from './RecorderSessionFinishModal.js'
+import { RecorderSessionHeading } from './RecorderSessionHeading.js'
 import { ActionRecorderSessionStore } from './SessionStore.js'
 
 export const ActionRecorder = observer(function ActionRecorder(): React.JSX.Element {
@@ -59,7 +60,7 @@ export const ActionRecorder = observer(function ActionRecorder(): React.JSX.Elem
 	)
 
 	return (
-		<CRow className="action-recorder-panel">
+		<Grid.Row className="action-recorder-panel">
 			<GenericConfirmModal ref={confirmRef} />
 
 			{sessionsStore.isFinishing && selectedSessionId ? (
@@ -68,7 +69,7 @@ export const ActionRecorder = observer(function ActionRecorder(): React.JSX.Elem
 				''
 			)}
 
-			<CCol xs={12} className={'row-heading'}>
+			<Grid.Col xs={12} className="sticky-heading pt-3">
 				<h5>Action Recorder</h5>
 				<p>
 					You can use this panel to record actions as you make changes directly on a configured device. <br />
@@ -83,15 +84,15 @@ export const ActionRecorder = observer(function ActionRecorder(): React.JSX.Elem
 						/>
 					)}
 				</div>
-			</CCol>
+			</Grid.Col>
 
 			{selectedSessionId ? (
 				<PanelCollapseHelperProvider storageId="action_recorder" knownPanelIds={actionIds}>
 					<RecorderSession sessionId={selectedSessionId} sessionInfo={sessionsStore.selectedSessionInfo} />
 				</PanelCollapseHelperProvider>
 			) : (
-				<CCallout color="danger">There is no session, this looks like a bug!</CCallout>
+				<Callout color="danger">There is no session, this looks like a bug!</Callout>
 			)}
-		</CRow>
+		</Grid.Row>
 	)
 })

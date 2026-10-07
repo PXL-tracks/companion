@@ -9,21 +9,17 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
-import { ExpressionFunctions } from '@companion-app/shared/Expression/ExpressionFunctions.js'
-import { type GetVariableValueProps, ResolveExpression } from '@companion-app/shared/Expression/ExpressionResolve.js'
-import { ParseExpression } from '@companion-app/shared/Expression/ExpressionParse.js'
-import type { ExecuteExpressionResult } from '@companion-app/shared/Expression/ExpressionResult.js'
+import type { JsonValue, ReadonlyDeep } from 'type-fest'
+import type { ExecuteExpressionResult } from '@companion-app/shared/ExpressionResult.js'
 import {
-	stringifyVariableValue,
-	type VariableValues,
-	type VariableValue,
-} from '@companion-app/shared/Model/Variables.js'
-import type { ReadonlyDeep } from 'type-fest'
-import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
-import { stringifyError } from '@companion-app/shared/Stringify.js'
-import type { VariablesBlinker } from './VariablesBlinker.js'
+	ParseExpression,
+	ResolveExpression,
+	type GetVariableValueProps,
+	type ResolveExpressionLimits,
+} from '@companion-app/shared/Expressions.js'
+import { getCompiledIsVisibleExpressionFn } from '@companion-app/shared/IsVisible.js'
 import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import { EntityModelType, type SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 import {
 	exprVal,
 	isExpressionOrValue,
@@ -31,10 +27,20 @@ import {
 	type ExpressionOrValue,
 	type SomeCompanionInputField,
 } from '@companion-app/shared/Model/Options.js'
-import { EntityModelType, type SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import {
+	stringifyVariableValue,
+	type VariableValue,
+	type VariableValues,
+} from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import LogController from '../Log/Controller.js'
+import type { VariablesBlinker } from './VariablesBlinker.js'
 
 // Everybody stand back. I know regular expressions. - xckd #208 /ck/kc/
-const VARIABLE_REGEX = /\$\(([^:$)]+):([^)$]+)\)/
+const VARIABLE_REGEX = /\$\((([^:$)]+):([^)$]+))\)/
+// Like VARIABLE_REGEX but allows $ in the variable name part, to support nested variables
+const REPLACE_VARIABLE_REGEX = /\$\(([^:$)]+):([^)]+)\)/
 
 const logger = LogController.createLogger('Variables/Util')
 
@@ -75,6 +81,15 @@ export function visitEntityOptionsForVariables<T>(
 	if (definition.optionsSupportExpressions) {
 		// Modern approach: check field types
 		for (const field of definition.options) {
+			const optionValue = options[field.id]
+
+			if (field.deferParsing) {
+				// Deferred fields are passed through as-is; the action handler will parse them
+				// with an enhanced parser after resolving the target context.
+				result[field.id] = visitor(field, optionValue, null)
+				continue
+			}
+
 			const fieldType: VisitEntityOptionValueOptions = {
 				allowExpression: !field.disableAutoExpression,
 				parseVariables: false,
@@ -86,7 +101,6 @@ export function visitEntityOptionsForVariables<T>(
 				fieldType.forceExpression = true
 			}
 
-			const optionValue = options[field.id]
 			result[field.id] = visitor(field, optionValue, fieldType)
 		}
 	} else {
@@ -109,6 +123,55 @@ export function visitEntityOptionsForVariables<T>(
 	}
 
 	return result
+}
+
+/**
+ * Determine which of an entity's option fields are currently hidden by their `isVisible` logic.
+ *
+ * Mirrors the frontend's restricted visibility path (`useOptionsVisibility`): visibility depends
+ * only on the raw values of sibling options that cannot themselves be expressions
+ * (`disableAutoExpression`), plus the static `isVisibleData`. It never resolves expressions or
+ * runtime variables, so it can be computed directly from the raw options object. Evaluation
+ * fails open (treated as visible) on any error, so this can only ever suppress spurious
+ * validation - never hide a field that should be validated.
+ *
+ * Only meaningful for definitions with `optionsSupportExpressions` - legacy definitions pass
+ * their fields through without validation, so there are no errors to suppress.
+ */
+export function computeHiddenEntityOptionFields(
+	definition: ClientEntityDefinition,
+	options: ExpressionableOptionsObject
+): Set<string> {
+	const hiddenFields = new Set<string>()
+
+	if (!definition.optionsSupportExpressions) return hiddenFields
+
+	const allowedReferences = new Set<string>()
+	for (const field of definition.options) {
+		if (field.disableAutoExpression) allowedReferences.add(field.id)
+	}
+
+	const restrictedGetOptionValue = (optionId: string): JsonValue | undefined => {
+		if (!allowedReferences.has(optionId)) {
+			throw new Error(`Access to option "${optionId}" not allowed, as it is either unknown or can be an expression.`)
+		}
+		return options[optionId]?.value
+	}
+
+	for (const field of definition.options) {
+		if (!field.isVisibleUi) continue
+
+		// The function form is a stringified module function and must never run on the backend;
+		// leave those fields visible (validated as before).
+		const compiled = getCompiledIsVisibleExpressionFn(field.isVisibleUi)
+		if (!compiled) continue
+
+		if (!compiled(restrictedGetOptionValue, field.isVisibleUi.data)) {
+			hiddenFields.add(field.id)
+		}
+	}
+
+	return hiddenFields
 }
 
 export function parseVariablesInString(
@@ -136,9 +199,10 @@ export function parseVariablesInString(
 			break
 		}
 
-		const fullId = matches[0]
-		let connectionLabel = matches[1]
-		let variableId = matches[2]
+		const fullReference = matches[0]
+		const fullId = matches[1]
+		let connectionLabel = matches[2]
+		let variableId = matches[3]
 
 		if (connectionLabel === 'internal' && variableId.substring(0, 7) === 'custom_') {
 			connectionLabel = 'custom'
@@ -182,8 +246,10 @@ export function parseVariablesInString(
 		if (value === undefined) value = undefinedValue
 
 		// Pass a function, to avoid special interpreting of `$$` and other sequences
+		// Replace all occurrences of this reference in one pass, so that the iteration limit
+		// guards against unbounded recursion rather than capping the total number of references
 		const cachedValueConst = stringifyVariableValue(value) ?? ''
-		string = string.replace(fullId, () => cachedValueConst)
+		string = string.replaceAll(fullReference, () => cachedValueConst)
 	}
 
 	return {
@@ -200,19 +266,25 @@ export function replaceAllVariables(string: string, newLabel: string, preserveLa
 		let matchCount = 0
 		let matches: RegExpExecArray | null
 		let fromIndex = 0
-		while ((matches = VARIABLE_REGEX.exec(string.slice(fromIndex))) !== null) {
+		while ((matches = REPLACE_VARIABLE_REGEX.exec(string.slice(fromIndex))) !== null) {
 			if (matchCount++ > 100) {
 				// Crudely avoid infinite loops with an iteration limit
 				// logger.info(`Reached iteration limit for variable parsing`)
 				break
 			}
 
-			// ensure we don't try and match the same thing again
-			fromIndex = matches.index + fromIndex + 1
+			// Index of this match within the current string
+			const matchIndex = fromIndex + matches.index
 
-			if (matches[2] !== undefined && !preserveLabels.has(matches[1])) {
-				string = string.replace(matches[0], `$(${newLabel}:${matches[2]})`)
+			if (!preserveLabels.has(matches[1])) {
+				// Splice the replacement in at the exact match position, so that identical
+				// earlier (preserved) occurrences are not replaced by mistake
+				string =
+					string.slice(0, matchIndex) + `$(${newLabel}:${matches[2]})` + string.slice(matchIndex + matches[0].length)
 			}
+
+			// ensure we don't try and match the same thing again, but allow matching nested variables
+			fromIndex = matchIndex + 1
 		}
 	}
 
@@ -220,7 +292,11 @@ export function replaceAllVariables(string: string, newLabel: string, preserveLa
 }
 
 /**
- * A view of a simple cache for variable values, allowing for lazy evaluation and writing back of lazily computed values
+ * A view of a simple cache for variable values, allowing for lazy evaluation
+ * and writing back of lazily computed values.
+ *
+ * Variable ids in this interface have type `${connectionLabel}:${variableId}`,
+ * e.g. `"custom:foo"`.  They are not enclosed in `$()`.
  */
 export interface VariableValueCache {
 	has(id: string): boolean
@@ -240,7 +316,9 @@ export function executeExpression(
 	str: string,
 	rawVariableValues: ReadonlyDeep<VariableValueData>,
 	requiredType: string | undefined,
-	cachedVariableValues: VariableValueCache
+	cachedVariableValues: VariableValueCache,
+	defaultTimezone: string | undefined,
+	limits?: ResolveExpressionLimits
 ): ExecuteExpressionResult {
 	const referencedVariableIds = new Set<string>()
 
@@ -248,7 +326,7 @@ export function executeExpression(
 		const getVariableValue = (props: GetVariableValueProps): VariableValue | undefined => {
 			referencedVariableIds.add(props.variableId)
 
-			const fullId = `$(${props.variableId})`
+			const fullId = props.variableId
 			// First check for an injected value
 			let value: VariableValue | undefined
 			if (cachedVariableValues.has(fullId)) {
@@ -278,9 +356,9 @@ export function executeExpression(
 				const valueMatch = value.match(VARIABLE_REGEX)
 				if (valueMatch && valueMatch[0] === value) {
 					return getVariableValue({
-						variableId: `${valueMatch[1]}:${valueMatch[2]}`,
-						label: valueMatch[1],
-						name: valueMatch[2],
+						variableId: valueMatch[1],
+						label: valueMatch[2],
+						name: valueMatch[3],
 					})
 				} else {
 					// Wrap the cache, to inject $RE for this variable to avoid unbound recursion
@@ -307,8 +385,17 @@ export function executeExpression(
 			return value
 		}
 
-		const functions = {
-			...ExpressionFunctions,
+		let value = ResolveExpression(ParseExpression(str), {
+			...limits,
+			defaultTimezone: () => {
+				// Reading the default timezone registers a dependency on the active timezone variable, so
+				// the expression re-evaluates when the user changes it. Only date/time functions that fall
+				// back to the default (i.e. no explicit `tz` argument) reach this.
+				referencedVariableIds.add('internal:timezone')
+				return defaultTimezone || undefined
+			},
+
+			getVariableValue,
 			blink(interval: any, dutyCycle: any): 0 | 1 {
 				// Validate the interval
 				const int = Number(interval)
@@ -338,9 +425,7 @@ export function executeExpression(
 
 				return result.text
 			},
-		}
-
-		let value = ResolveExpression(ParseExpression(str), getVariableValue, functions)
+		})
 
 		// Fix up the result for some types
 		switch (requiredType) {
@@ -349,6 +434,13 @@ export function executeExpression(
 				break
 			case 'number':
 				value = Number(value)
+				break
+			case 'boolean':
+				// A missing value (e.g. a variable from a disabled connection) is left as-is so the
+				// type check below yields ok:false and consumers use their default, instead of
+				// coercing undefined/null to a hard `false`. Mirrors the NaN/undefined handling
+				// that getNumber/getString already apply.
+				if (value !== null && value !== undefined) value = Boolean(value)
 				break
 		}
 

@@ -1,18 +1,18 @@
+import type { JsonValue } from 'type-fest'
 import type {
 	CheckDeviceResult,
+	DiscoveredRemoteSurfaceInfo,
 	HostCapabilities,
 	HostSurfaceEvents,
 	OpenDeviceResult,
-	SurfaceHostContext,
-	SurfaceFirmwareUpdateInfo,
-	DiscoveredRemoteSurfaceInfo,
 	ShouldOpenSurfaceResult,
+	SurfaceFirmwareUpdateInfo,
+	SurfaceHostContext,
 } from '@companion-surface/host'
 import type { SurfaceIpcWrapper } from '../IpcTypes.js'
-import { LockingGraphicsGeneratorImpl } from './LockingGraphics.js'
 import { CardGenerator } from './Cards.js'
+import { LockingGraphicsGeneratorImpl } from './LockingGraphics.js'
 import { convertOpenDeviceResult } from './Util.js'
-import type { JsonValue } from 'type-fest'
 
 /**
  * The context of methods and properties provided to the surfaces, which they can use to report events or make requests.
@@ -23,7 +23,9 @@ export class HostContext implements SurfaceHostContext {
 	readonly lockingGraphics = new LockingGraphicsGeneratorImpl()
 	readonly cardsGenerator = new CardGenerator()
 
-	readonly capabilities: HostCapabilities = {}
+	readonly capabilities: HostCapabilities = {
+		supportsNonSquareButtons: true,
+	}
 
 	readonly surfaceEvents: HostSurfaceEvents
 

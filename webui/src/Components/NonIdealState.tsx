@@ -1,7 +1,6 @@
 import type { IconProp } from '@fortawesome/fontawesome-svg-core'
 import { faTrash } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import React from 'react'
 
 export const NonIdealState = ({
 	text,
@@ -20,7 +19,7 @@ export const NonIdealState = ({
 		<>
 			<div className={className} style={{ padding: '5vh', textAlign: 'center', ...style }}>
 				<div style={{ opacity: 0.6 }}>
-					<FontAwesomeIcon icon={icon} size="3x" />
+					<FontAwesomeIcon icon={icon} size="3x" className="non-ideal-svg" />
 				</div>
 				<div style={{ padding: 10, fontWeight: 400 }}>
 					{text && text}

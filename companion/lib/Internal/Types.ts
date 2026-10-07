@@ -1,16 +1,17 @@
+import type { EventEmitter } from 'node:events'
+import type { SetOptional } from 'type-fest'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import type { ActionEntityModel, FeedbackEntityModel, FeedbackValue } from '@companion-app/shared/Model/EntityModel.js'
+import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import type { VariableDefinition, VariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { CompanionFeedbackButtonStyleResult, CompanionOptionValues } from '@companion-module/base'
+import type { JsonValue } from '@companion-module/host'
+import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
 import type { VisitorReferencesCollectorVisitor } from '../Resources/Visitors/ReferencesCollector.js'
 import type { VisitorReferencesUpdaterVisitor } from '../Resources/Visitors/ReferencesUpdater.js'
-import type { CompanionFeedbackButtonStyleResult, CompanionOptionValues } from '@companion-module/base'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
-import type { SetOptional } from 'type-fest'
-import type { ActionEntityModel, FeedbackEntityModel, FeedbackValue } from '@companion-app/shared/Model/EntityModel.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { EventEmitter } from 'events'
-import type { VariableDefinition, VariableValue } from '@companion-app/shared/Model/Variables.js'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
 import type { VariablesAndExpressionParser } from '../Variables/VariablesAndExpressionParser.js'
-import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
 
 export interface FeedbackForInternalExecution {
 	controlId: string
@@ -61,6 +62,22 @@ export interface InternalModuleFragmentEvents {
 	setVariables: [variables: Record<string, VariableValue | undefined>]
 }
 
+/**
+ * Executing an internal action using an internal module fragment returns this
+ * if it handled the action.  The embedded result is the result of the action.
+ * (Note that the action definition must specify that it returns a result using
+ * `hasResult: true`, or the result will be ignored.)
+ */
+export type ActionResult = { result: JsonValue | undefined }
+
+/**
+ * The result of asking an internal module fragment to execute an action.
+ *
+ * If the fragment doesn't handle the action, this will be `null`.  Otherwise
+ * the result returned by the action will be stored in the `result` property.
+ */
+export type InternalActionResult = ActionResult | null
+
 export interface InternalModuleFragment extends EventEmitter<InternalModuleFragmentEvents> {
 	getActionDefinitions?: () => Record<string, InternalActionDefinition>
 
@@ -72,7 +89,7 @@ export interface InternalModuleFragment extends EventEmitter<InternalModuleFragm
 		action: ActionForInternalExecution,
 		extras: RunActionExtras,
 		parser: VariablesAndExpressionParser
-	): Promise<boolean> | boolean
+	): Promise<InternalActionResult> | InternalActionResult
 
 	/**
 	 * Perform an upgrade for an action
@@ -111,17 +128,26 @@ export interface ExecuteFeedbackResultWithReferences {
 export type InternalActionDefinition = SetOptional<
 	Omit<
 		ClientEntityDefinition,
-		'entityType' | 'showInvert' | 'feedbackType' | 'feedbackStyle' | 'hasLifecycleFunctions'
+		| 'entityType'
+		| 'showInvert'
+		| 'feedbackType'
+		| 'feedbackStyle'
+		| 'hasLifecycleFunctions'
+		| 'feedbackAffectedProperties'
 	>,
 	| 'sortKey'
 	| 'hasLearn'
 	| 'learnTimeout'
+	| 'actionHasResult'
 	| 'showButtonPreview'
 	| 'supportsChildGroups'
 	| 'optionsToMonitorForInvalidations'
 >
 
 export type InternalFeedbackDefinition = SetOptional<
-	Omit<ClientEntityDefinition, 'entityType' | 'hasLifecycleFunctions' | 'optionsToMonitorForInvalidations'>,
-	'sortKey' | 'hasLearn' | 'learnTimeout' | 'showButtonPreview' | 'supportsChildGroups'
+	Omit<
+		ClientEntityDefinition,
+		'entityType' | 'hasLifecycleFunctions' | 'optionsToMonitorForInvalidations' | 'actionHasResult'
+	>,
+	'sortKey' | 'hasLearn' | 'learnTimeout' | 'showButtonPreview' | 'supportsChildGroups' | 'feedbackAffectedProperties'
 >

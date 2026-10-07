@@ -1,22 +1,28 @@
-import React, { useCallback } from 'react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { Feedback } from '@dnd-kit/dom'
+import { useDraggable } from '@dnd-kit/react'
 import { faCaretDown, faCaretRight } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useSubscription } from '@trpc/tanstack-react-query'
 import { observer } from 'mobx-react-lite'
-import { usePanelCollapseHelperContextForPanel } from '~/Helpers/CollapseHelper.js'
+import { useCallback } from 'react'
 import type {
 	UIPresetGroup,
 	UIPresetGroupSimple,
 	UIPresetGroupTemplate,
 	UIPresetSection,
 } from '@companion-app/shared/Model/Presets.js'
-import { useSubscription } from '@trpc/tanstack-react-query'
-import { useDrag } from 'react-dnd'
-import { ButtonPreviewBase, RedImage } from '~/Components/ButtonPreview'
-import { trpc } from '~/Resources/TRPC'
-import type { PresetDragItem } from './PresetDragItem'
-import { assertNever, useComputed } from '~/Resources/util'
 import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
 import { createStableObjectHash } from '@companion-app/shared/Util/Hash.js'
+import { ButtonPreviewBase, RedImage } from '~/Components/ButtonPreview'
+import { usePanelCollapseHelperContextForPanel } from '~/Helpers/CollapseHelper.js'
+import { trpc } from '~/Resources/TRPC'
+import { assertNever, useComputed } from '~/Resources/util'
+import type { PresetDragItem } from './PresetDragItem'
+
+// Presets drag a clone (the original stays put in the pool) with no drop animation so a
+// released preset doesn't fly back. Configured per-draggable so it doesn't affect the default
+// sortable feedback (placeholder + settle animation) used everywhere else.
+const PRESET_FEEDBACK_PLUGINS = [Feedback.configure({ feedback: 'clone', dropAnimation: null })]
 
 interface PresetSectionCollapseProps {
 	section: UIPresetSection
@@ -162,13 +168,17 @@ interface PresetIconPreviewProps {
 	variableValues: VariableValues | null
 }
 function PresetIconPreview({ connectionId, presetId, title, variableValues }: Readonly<PresetIconPreviewProps>) {
-	const [, drag] = useDrag<PresetDragItem>({
+	const dragData: PresetDragItem = {
+		connectionId,
+		presetId,
+		variableValues: variableValues,
+	}
+	const dragId = `preset:${connectionId}:${presetId}:${variableValues ? createStableObjectHash(variableValues) : 'base'}`
+	const { ref: drag, isDragSource } = useDraggable<PresetDragItem>({
+		id: dragId,
 		type: 'preset',
-		item: {
-			connectionId,
-			presetId,
-			variableValues: variableValues,
-		},
+		data: dragData,
+		plugins: PRESET_FEEDBACK_PLUGINS,
 	})
 
 	const sub = useSubscription(
@@ -195,6 +205,7 @@ function PresetIconPreview({ connectionId, presetId, title, variableValues }: Re
 		<ButtonPreviewBase
 			fixedSize
 			dragRef={drag}
+			className={isDragSource ? 'preset-drag-source' : undefined}
 			title={title}
 			preview={sub.error ? RedImage : sub.data}
 			onClick={sub.error ? onClick : undefined}

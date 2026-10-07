@@ -4,13 +4,16 @@ on: [push]
 permissions:
   contents: read
 
+env:
+  API_PRODUCT: companion
+
 jobs:
   check-types:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -29,6 +32,7 @@ jobs:
           yarn --immutable
 
           yarn build:ts
+          yarn build:graphics-types
 
       - name: Check types
         run: |
@@ -41,9 +45,9 @@ jobs:
 
     outputs:
       version: ${{ steps.filenames.outputs.longversion }}
-      do-docker: ${{ steps.upload.outputs.branch }}
+      upload-url: ${{ steps.upload-beta.outputs.upload-url || steps.upload-stable.outputs.upload-url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -54,7 +58,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .cache
           key: linux-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -87,25 +91,25 @@ jobs:
         run: |
           VERSION=$(cat ./dist/BUILD)
 
-          echo "sourcename=electron-output/companion-x64.tar.gz" >> $GITHUB_OUTPUT
+          mv electron-output/companion-x64.tar.gz electron-output/companion-linux-x64-${VERSION}.tar.gz
+
+          echo "sourcename=electron-output/companion-linux-x64-${VERSION}.tar.gz" >> $GITHUB_OUTPUT
           echo "targetname=companion-linux-x64-${VERSION}.tar.gz" >> $GITHUB_OUTPUT
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
+          # archive: false uploads the file as-is (no extra zip layer); the artifact name
+          # is taken from the filename, so sourcename is renamed to match the s3 targetname
           archive: false
-          name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
-      - name: Upload build
-        id: upload
-        uses: bitfocus/actions/upload-and-notify@main
+      - name: Upload build (beta)
+        id: upload-beta
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
         with:
-          long-version: ${{ steps.filenames.outputs.longversion }}
-          beta-branch: main
-          dev-branch: develop
-
           source-filename: ${{ steps.filenames.outputs.sourcename }}
           destination-filename: ${{ steps.filenames.outputs.targetname }}
           s3-host: ${{ vars.S3_HOST }}
@@ -113,7 +117,28 @@ jobs:
           s3-access-key: ${{ secrets.S3_KEY }}
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
-          api-product: companion
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "linux-tgz"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        id: upload-stable
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
           api-target: "linux-tgz"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
@@ -122,8 +147,11 @@ jobs:
     needs: check-types
     timeout-minutes: 20
 
+    outputs:
+      upload-url: ${{ steps.upload-beta.outputs.upload-url || steps.upload-stable.outputs.upload-url }}
+
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -134,7 +162,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .cache
           key: linux-arm64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -167,24 +195,25 @@ jobs:
         run: |
           VERSION=$(cat ./dist/BUILD)
 
-          echo "sourcename=electron-output/companion-arm64.tar.gz" >> $GITHUB_OUTPUT
+          mv electron-output/companion-arm64.tar.gz electron-output/companion-linux-arm64-${VERSION}.tar.gz
+
+          echo "sourcename=electron-output/companion-linux-arm64-${VERSION}.tar.gz" >> $GITHUB_OUTPUT
           echo "targetname=companion-linux-arm64-${VERSION}.tar.gz" >> $GITHUB_OUTPUT
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
+          # archive: false uploads the file as-is (no extra zip layer); the artifact name
+          # is taken from the filename, so sourcename is renamed to match the s3 targetname
           archive: false
-          name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
-      - name: Upload build
-        uses: bitfocus/actions/upload-and-notify@main
+      - name: Upload build (beta)
+        id: upload-beta
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
         with:
-          long-version: ${{ steps.filenames.outputs.longversion }}
-          beta-branch: main
-          dev-branch: develop
-
           source-filename: ${{ steps.filenames.outputs.sourcename }}
           destination-filename: ${{ steps.filenames.outputs.targetname }}
           s3-host: ${{ vars.S3_HOST }}
@@ -192,12 +221,34 @@ jobs:
           s3-access-key: ${{ secrets.S3_KEY }}
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
-          api-product: companion
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "linux-arm64-tgz"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        id: upload-stable
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
           api-target: "linux-arm64-tgz"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
       - name: Trigger companion-pi build
         if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
         run: |
           gh workflow run companionpi.yml \
             --repo bitfocus/companion-pi \
@@ -211,7 +262,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -222,7 +273,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .cache
           key: macos-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -257,24 +308,24 @@ jobs:
         run: |
           VERSION=$(cat ./dist/BUILD)
 
-          echo "sourcename=electron-output/companion-mac-x64.dmg" >> $GITHUB_OUTPUT
+          mv electron-output/companion-mac-x64.dmg electron-output/companion-mac-x64-${VERSION}.dmg
+
+          echo "sourcename=electron-output/companion-mac-x64-${VERSION}.dmg" >> $GITHUB_OUTPUT
           echo "targetname=companion-mac-x64-${VERSION}.dmg" >> $GITHUB_OUTPUT
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
+          # archive: false uploads the file as-is (no extra zip layer); the artifact name
+          # is taken from the filename, so sourcename is renamed to match the s3 targetname
           archive: false
-          name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
-      - name: Upload build
-        uses: bitfocus/actions/upload-and-notify@main
+      - name: Upload build (beta)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
         with:
-          long-version: ${{ steps.filenames.outputs.longversion }}
-          beta-branch: main
-          dev-branch: develop
-
           source-filename: ${{ steps.filenames.outputs.sourcename }}
           destination-filename: ${{ steps.filenames.outputs.targetname }}
           s3-host: ${{ vars.S3_HOST }}
@@ -282,7 +333,27 @@ jobs:
           s3-access-key: ${{ secrets.S3_KEY }}
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
-          api-product: companion
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "mac-intel"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
           api-target: "mac-intel"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
@@ -292,7 +363,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -303,7 +374,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .cache
           key: macos-arm64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -340,24 +411,24 @@ jobs:
         run: |
           VERSION=$(cat ./dist/BUILD)
 
-          echo "sourcename=electron-output/companion-mac-arm64.dmg" >> $GITHUB_OUTPUT
+          mv electron-output/companion-mac-arm64.dmg electron-output/companion-mac-arm64-${VERSION}.dmg
+
+          echo "sourcename=electron-output/companion-mac-arm64-${VERSION}.dmg" >> $GITHUB_OUTPUT
           echo "targetname=companion-mac-arm64-${VERSION}.dmg" >> $GITHUB_OUTPUT
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
+          # archive: false uploads the file as-is (no extra zip layer); the artifact name
+          # is taken from the filename, so sourcename is renamed to match the s3 targetname
           archive: false
-          name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
-      - name: Upload build
-        uses: bitfocus/actions/upload-and-notify@main
+      - name: Upload build (beta)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
         with:
-          long-version: ${{ steps.filenames.outputs.longversion }}
-          beta-branch: main
-          dev-branch: develop
-
           source-filename: ${{ steps.filenames.outputs.sourcename }}
           destination-filename: ${{ steps.filenames.outputs.targetname }}
           s3-host: ${{ vars.S3_HOST }}
@@ -365,7 +436,27 @@ jobs:
           s3-access-key: ${{ secrets.S3_KEY }}
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
-          api-product: companion
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "mac-arm"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
           api-target: "mac-arm"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
@@ -375,7 +466,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -386,7 +477,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .cache
           key: windows-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -394,7 +485,7 @@ jobs:
       - name: build & package
         shell: bash
         run: |
-          corepack enable
+          npm install -g corepack --force
 
           # try and avoid timeout errors
           yarn config set httpTimeout 100000
@@ -434,24 +525,24 @@ jobs:
         run: |
           VERSION=$(cat ./dist/BUILD)
 
-          echo "sourcename=electron-output/companion-win64.exe" >> $GITHUB_OUTPUT
+          mv electron-output/companion-win64.exe electron-output/companion-win64-${VERSION}.exe
+
+          echo "sourcename=electron-output/companion-win64-${VERSION}.exe" >> $GITHUB_OUTPUT
           echo "targetname=companion-win64-${VERSION}.exe" >> $GITHUB_OUTPUT
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
+          # archive: false uploads the file as-is (no extra zip layer); the artifact name
+          # is taken from the filename, so sourcename is renamed to match the s3 targetname
           archive: false
-          name: ${{ steps.filenames.outputs.targetname }}
           path: ${{ steps.filenames.outputs.sourcename }}
           retention-days: 1
-      - name: Upload build
-        uses: bitfocus/actions/upload-and-notify@main
+      - name: Upload build (beta)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
         with:
-          long-version: ${{ steps.filenames.outputs.longversion }}
-          beta-branch: main
-          dev-branch: develop
-
           source-filename: ${{ steps.filenames.outputs.sourcename }}
           destination-filename: ${{ steps.filenames.outputs.targetname }}
           s3-host: ${{ vars.S3_HOST }}
@@ -459,8 +550,144 @@ jobs:
           s3-access-key: ${{ secrets.S3_KEY }}
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
-          api-product: companion
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
           api-target: "win-x64"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "win-x64"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+
+  win32-arm64:
+    runs-on: ${{ (startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[build-signed]')) && fromJSON('["self-hosted", "Windows", "codecert", "X64"]') || 'windows-11-arm'}}
+    needs: check-types
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
+      - name: Cache build sources
+        uses: actions/cache@v6
+        with:
+          path: .cache
+          key: windows-arm64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
+
+      - name: install
+        shell: bash
+        run: |
+          npm install -g corepack --force
+
+          # try and avoid timeout errors
+          yarn config set httpTimeout 100000
+
+          yarn --immutable
+        env:
+          CI: 1
+
+      - name: build & package (unsigned)
+        if: ${{ runner.environment != 'self-hosted' }}
+        run: |
+          yarn tsx tools/build/complete.mts win32-arm64
+        env:
+          CI: 1
+          SENTRY_DSN: ${{ vars.SENTRY2_DSN }}
+          VITE_SENTRY_DSN: ${{ vars.SENTRY2_UI_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY2_AUTH_TOKEN }}
+
+      - name: build & package (signed)
+        if: ${{ runner.environment == 'self-hosted' }}
+        run: |
+          yarn tsx tools/build/complete.mts win32-arm64
+        env:
+          CI: 1
+          SENTRY_DSN: ${{ vars.SENTRY2_DSN }}
+          VITE_SENTRY_DSN: ${{ vars.SENTRY2_UI_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY2_AUTH_TOKEN }}
+          CSC_LINK: c:\\actions-runner-bitfocusas\\codesign.cer
+          BF_CODECERT_KEY: ${{ secrets.BF_CODECERT_KEY }}
+          # the wincert machine has issues using the default cache location
+          ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+          NODE_OPTIONS: --max_old_space_size=4096
+          # x64 host cannot execute an arm64 node binary; the native windows-11-arm build is the launch gate
+          SKIP_LAUNCH_CHECK: true
+
+      - name: Determine files to upload
+        id: filenames
+        shell: bash
+        run: |
+          VERSION=$(cat ./dist/BUILD)
+
+          mv electron-output/companion-winarm64.exe electron-output/companion-winarm64-${VERSION}.exe
+
+          echo "sourcename=electron-output/companion-winarm64-${VERSION}.exe" >> $GITHUB_OUTPUT
+          echo "targetname=companion-winarm64-${VERSION}.exe" >> $GITHUB_OUTPUT
+          echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          # archive: false uploads the file as-is (no extra zip layer); the artifact name
+          # is taken from the filename, so sourcename is renamed to match the s3 targetname
+          archive: false
+          path: ${{ steps.filenames.outputs.sourcename }}
+          retention-days: 1
+      - name: Upload build (beta)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.S3_HOST }}
+          s3-bucket: ${{ vars.S3_BUCKET }}
+          s3-access-key: ${{ secrets.S3_KEY }}
+          s3-secret-key: ${{ secrets.S3_SECRET }}
+
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "win-arm64"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "win-arm64"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
 
   docker-image:
@@ -477,12 +704,29 @@ jobs:
 
     env:
       IMAGE_NAME: companion
+      # GHCR shows the package description from the index (manifest-list) annotation, so metadata-action
+      # must emit annotations at that level (default is 'manifest' only) for our multi-arch push.
+      DOCKER_METADATA_ANNOTATIONS_LEVELS: index
 
     steps:
+      - uses: actions/checkout@v7
+        if: ${{ needs.linux-x64.outputs.upload-url }}
+        with:
+          persist-credentials: false
+
+      - name: Read image description
+        if: ${{ needs.linux-x64.outputs.upload-url }}
+        run: |
+          {
+            echo 'IMAGE_DESCRIPTION<<EOF'
+            cat assets/docker/README.md
+            echo EOF
+          } >> "$GITHUB_ENV"
+
       - name: Docker meta
-        if: ${{ needs.linux-x64.outputs.do-docker }}
+        if: ${{ needs.linux-x64.outputs.upload-url }}
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}
@@ -490,27 +734,26 @@ jobs:
             type=raw,value=${{ needs.linux-x64.outputs.version }}
             type=ref,event=tag
             type=ref,event=branch
+          labels: |
+            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
+          annotations: |
+            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
 
       - name: Set up QEMU
         if: ${{ steps.meta.outputs.tags }}
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         if: ${{ steps.meta.outputs.tags }}
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to registry
         if: ${{ steps.meta.outputs.tags }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/checkout@v6
-        if: ${{ steps.meta.outputs.tags }}
-        with:
-          persist-credentials: false
 
       - name: Check s4 cdn
         env:
@@ -521,7 +764,7 @@ jobs:
           nslookup s4.bitfocus.io
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         if: ${{ steps.meta.outputs.tags }}
         env:
           DOCKER_BUILD_SUMMARY: false
@@ -531,6 +774,8 @@ jobs:
           platforms: linux/amd64,linux/arm64/v8
           push: true
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           tags: "${{ steps.meta.outputs.tags }}"
           build-args: |
-            build_name=${{ needs.linux-x64.outputs.version }}
+            linux_x64_url=${{ needs.linux-x64.outputs.upload-url }}
+            linux_arm64_url=${{ needs.linux-arm64.outputs.upload-url }}

@@ -1,24 +1,16 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
-import {
-	CModalBody,
-	CModalHeader,
-	CModalFooter,
-	CButton,
-	CNav,
-	CNavItem,
-	CNavLink,
-	CTabContent,
-	CTabPane,
-	CAlert,
-} from '@coreui/react'
-import { observer } from 'mobx-react-lite'
 import { useQuery } from '@tanstack/react-query'
-import { CModalExt } from '~/Components/CModalExt.js'
+import { observer } from 'mobx-react-lite'
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useState } from 'react'
+import semver from 'semver'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Modal } from '~/Components/Modal.js'
+import { TabArea } from '~/Components/TabArea.js'
+import { useLocalStorage } from '~/Hooks/useLocalStorage.js'
+import { makeAbsolutePath } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { shouldAutoOpenWizard } from '~/Wizard/Constants.js'
 import { MyErrorBoundary } from '../Resources/Error.js'
 import { DocsContent } from './DocsContent.js'
-import { useLocalStorage } from 'usehooks-ts'
-import semver from 'semver'
-import { makeAbsolutePath } from '~/Resources/util.js'
 
 interface WhatsNewPage {
 	version: string
@@ -32,9 +24,19 @@ export interface WhatsNewModalRef {
 
 export const WhatsNewModal = observer(
 	forwardRef<WhatsNewModalRef>(function HelpModal(_props, ref) {
+		const { userConfig, wizardOpen } = useContext(RootAppStoreContext)
+
 		const [show, setShow] = useState(false)
 		const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined)
-		const [storedLatest, setStoredLatest] = useLocalStorage<string | undefined>('whatsnew', undefined)
+		const [storedLatest, setStoredLatest] = useLocalStorage<string | undefined>('whatsnew', undefined, { sync: true })
+
+		// The setup wizard takes priority on launch: don't auto-pop What's New while it is pending or open.
+		// Once the wizard finishes (it bumps setup_wizard and clears wizardOpen), this re-evaluates and shows.
+		// Wait for the config to load first, so we know whether the wizard is pending before deciding.
+		const setupWizardVersion = userConfig.properties?.setup_wizard
+		const configLoaded = setupWizardVersion !== undefined
+		const isWizardPending = configLoaded && shouldAutoOpenWizard(setupWizardVersion)
+		const isWizardActive = wizardOpen.get()
 
 		// Load pages manifest using proper React Query
 		const {
@@ -58,11 +60,12 @@ export const WhatsNewModal = observer(
 
 		// Check if we should auto-show the modal for new versions
 		useEffect(() => {
+			if (!configLoaded || isWizardPending || isWizardActive) return
 			if (latestPage && (!storedLatest || semver.lt(storedLatest, latestPage.version))) {
 				setShow(true)
 				console.log('New version detected, showing WhatsNewModal')
 			}
-		}, [latestPage, storedLatest])
+		}, [latestPage, storedLatest, configLoaded, isWizardPending, isWizardActive])
 
 		// Set initial selected version when pages load
 		useEffect(() => {
@@ -73,7 +76,6 @@ export const WhatsNewModal = observer(
 
 		const selectedPage = selectedVersion && pages?.find((page) => page.file === selectedVersion)
 
-		const doClose = useCallback(() => setShow(false), [])
 		const onClosed = useCallback(() => {
 			if (latestPage) {
 				setStoredLatest(latestPage.version)
@@ -91,46 +93,50 @@ export const WhatsNewModal = observer(
 		)
 
 		return (
-			<CModalExt visible={show} onClose={doClose} onClosed={onClosed} size="lg" className="modal-whatsnew">
-				<CModalHeader closeButton>
-					<h5>What's New in Companion</h5>
-				</CModalHeader>
-				<CModalBody>
-					{isPending && <div className="p-3">Loading...</div>}
-					{error && (
-						<CAlert color="danger">
-							Failed to load What's New content: {error instanceof Error ? error.message : 'Unknown error'}
-						</CAlert>
-					)}
-					{pages && pages.length > 0 && (
-						<>
-							<CNav variant="tabs">
-								{pages.map((page) => (
-									<CNavItem key={page.version}>
-										<CNavLink active={selectedVersion === page.file} onClick={() => setSelectedVersion(page.file)}>
-											{page.label}
-										</CNavLink>
-									</CNavItem>
-								))}
-							</CNav>
-							<CTabContent className="default-scroll">
-								{selectedPage && (
-									<CTabPane className="" visible>
-										<MyErrorBoundary>
-											<DocsContent file={selectedPage.file} />
-										</MyErrorBoundary>
-									</CTabPane>
+			<Modal.Root
+				open={show}
+				onOpenChange={setShow}
+				onOpenChangeComplete={(open) => {
+					if (!open) onClosed()
+				}}
+			>
+				<Modal.Portal>
+					<Modal.Backdrop />
+					<Modal.Viewport>
+						<Modal.Popup size="lg" scrollable className="modal-whatsnew">
+							<Modal.Header closeButton>
+								<Modal.Title>What's New in Companion</Modal.Title>
+							</Modal.Header>
+							<Modal.Body>
+								{isPending && <div className="p-3">Loading...</div>}
+								{error && (
+									<StaticAlert color="danger">
+										Failed to load What's New content: {error instanceof Error ? error.message : 'Unknown error'}
+									</StaticAlert>
 								)}
-							</CTabContent>
-						</>
-					)}
-				</CModalBody>
-				<CModalFooter>
-					<CButton color="secondary" onClick={doClose}>
-						Close
-					</CButton>
-				</CModalFooter>
-			</CModalExt>
+								{pages && pages.length > 0 && (
+									<TabArea.Root value={selectedVersion} onValueChange={setSelectedVersion}>
+										<TabArea.List>
+											{pages.map((page) => (
+												<TabArea.Tab key={page.version} value={page.file}>
+													{page.label}
+												</TabArea.Tab>
+											))}
+										</TabArea.List>
+										{selectedPage && (
+											<TabArea.Panel value={selectedPage.file}>
+												<MyErrorBoundary>
+													<DocsContent file={selectedPage.file} />
+												</MyErrorBoundary>
+											</TabArea.Panel>
+										)}
+									</TabArea.Root>
+								)}
+							</Modal.Body>
+						</Modal.Popup>
+					</Modal.Viewport>
+				</Modal.Portal>
+			</Modal.Root>
 		)
 	})
 )

@@ -1,19 +1,21 @@
-import React, { useCallback, useContext } from 'react'
-import { CButton, CButtonGroup, CCol, CRow } from '@coreui/react'
-import { VariablesTable } from '~/Components/VariablesTable.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
+import { faArrowLeft, faArrowRight, faDollarSign, faSquareRootVariable } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowLeft, faArrowRight } from '@fortawesome/free-solid-svg-icons'
-import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams } from '@tanstack/react-router'
+import { observer } from 'mobx-react-lite'
+import { memo, useCallback, useContext } from 'react'
+import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
+import { Button, ButtonGroup, LinkButton } from '~/Components/Button'
 import { CollapsibleTree, type CollapsibleTreeHeaderProps } from '~/Components/CollapsibleTree/CollapsibleTree.js'
-import { usePanelCollapseHelper } from '~/Helpers/CollapseHelper.js'
 import {
 	useConnectionLeafTree,
-	type ConnectionLeafItem,
 	type CollectionGroupMeta,
+	type ConnectionLeafItem,
 } from '~/Components/CollapsibleTree/useConnectionLeafTree.js'
-import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
+import { Grid } from '~/Components/Grid'
+import { VariablesTable } from '~/Components/VariablesTable.js'
+import { usePanelCollapseHelper } from '~/Helpers/CollapseHelper.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 const VariableLeaf = observer(function VariableLeaf({ leaf }: { leaf: ConnectionLeafItem }) {
 	const { variablesStore } = useContext(RootAppStoreContext)
@@ -43,7 +45,7 @@ const VariableLeaf = observer(function VariableLeaf({ leaf }: { leaf: Connection
 	)
 })
 
-const VariableGroupHeader = React.memo(function VariableGroupHeader({
+const VariableGroupHeader = memo(function VariableGroupHeader({
 	node,
 }: CollapsibleTreeHeaderProps<ConnectionLeafItem, CollectionGroupMeta>) {
 	return <span>{node.metadata.label}</span>
@@ -80,10 +82,13 @@ export const ConnectionVariablesPage = observer(function VariablesConnectionList
 		: []
 
 	return (
-		<CRow>
-			<CCol xs={12} className="flex-column-layout">
+		<Grid.Row>
+			<Grid.Col xs={12} className="flex-column-layout">
 				<div className="fixed-header">
-					<h4>Variables</h4>
+					<h4 className="button-inline">
+						Variables
+						<ContextHelpButton action="/user-guide/config/variables" />
+					</h4>
 					<p>
 						Variables are dynamic placeholders that can be used in text, actions, and feedbacks. They automatically
 						update with live content, making it easy to create customized and responsive displays.
@@ -92,12 +97,17 @@ export const ConnectionVariablesPage = observer(function VariablesConnectionList
 
 				<div className="scrollable-content">
 					<div className="variables-category-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-						<CButton color="info" as={Link} to="/variables/custom" className="mb-3">
-							<h6 className="mb-0 py-1">Custom Variables</h6>
-						</CButton>
-						<CButton color="info" as={Link} to="/variables/expression" className="mb-3">
-							<h6 className="mb-0 py-1">Expression Variables</h6>
-						</CButton>
+						<LinkButton color="info" to="/variables/custom" className="mb-3">
+							<h6 className="mb-0 py-1">
+								<FontAwesomeIcon icon={faDollarSign} className="me-1" />
+								Custom Variables
+							</h6>
+						</LinkButton>
+						<LinkButton color="info" to="/variables/expression" className="mb-3">
+							<h6 className="mb-0 py-1">
+								<FontAwesomeIcon icon={faSquareRootVariable} className="me-1" /> Expression Variables
+							</h6>
+						</LinkButton>
 					</div>
 
 					<CollapsibleTree
@@ -111,8 +121,8 @@ export const ConnectionVariablesPage = observer(function VariablesConnectionList
 						onLeafClick={(leaf) => void navigate({ to: `/variables/connection/${leaf.connectionLabel}` })}
 					/>
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })
 
@@ -126,15 +136,15 @@ export function VariablesListPage(): React.JSX.Element {
 		<div className="variables-panel">
 			<div>
 				<h4 style={{ marginBottom: '0.8rem' }}>Variables</h4>
-				<CButtonGroup size="sm">
-					<CButton color="primary" as={Link} to="/variables">
+				<ButtonGroup>
+					<LinkButton color="primary" size="sm" to="/variables">
 						<FontAwesomeIcon icon={faArrowLeft} />
 						&nbsp; Go back
-					</CButton>
-					<CButton color="secondary" disabled>
+					</LinkButton>
+					<Button color="secondary" size="sm" disabled>
 						{label}
-					</CButton>
-				</CButtonGroup>
+					</Button>
+				</ButtonGroup>
 			</div>
 
 			<VariablesTable label={label} />

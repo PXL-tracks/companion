@@ -4,7 +4,6 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"rootDir": "./lib",
-		"baseUrl": "./",
 		"paths": {
 			"*": ["./node_modules/*"]
 		},
@@ -13,7 +12,7 @@
 		"strictPropertyInitialization": false,
 		"composite": true,
 
-		"target": "es2022",
+		"target": "es2024",
 		"noImplicitAny": true,
 		"sourceMap": true,
 		"declaration": true,
@@ -22,10 +21,9 @@
 		"listFiles": false,
 		"traceResolution": false,
 		"pretty": true,
-		"lib": ["es2022"],
+		"lib": ["es2024"],
 		"types": ["node"],
 		"strict": true,
-		"alwaysStrict": false,
 		"forceConsistentCasingInFileNames": true,
 		"noFallthroughCasesInSwitch": true,
 		"noImplicitReturns": true,

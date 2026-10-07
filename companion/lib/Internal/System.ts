@@ -9,33 +9,35 @@
  * this program.
  */
 
-import os from 'os'
-import { exec } from 'child_process'
-import isEqual from 'fast-deep-equal'
-import LogController from '../Log/Controller.js'
-import systeminformation from 'systeminformation'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
-import type {
-	ActionForInternalExecution,
-	ActionForVisitor,
-	FeedbackForVisitor,
-	InternalActionDefinition,
-	InternalModuleFragment,
-	InternalModuleFragmentEvents,
-	InternalVisitor,
-} from './Types.js'
-import type { VariablesController } from '../Variables/Controller.js'
-import { promisify } from 'util'
-import { EventEmitter } from 'events'
-import type { DataUserConfig } from '../Data/UserConfig.js'
+import { exec } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import os from 'node:os'
+import { promisify } from 'node:util'
 import debounceFn from 'debounce-fn'
-import type { AppInfo } from '../Registry.js'
+import isEqual from 'fast-deep-equal'
+import systeminformation from 'systeminformation'
+import { CompanionFieldVariablesSupport, type IsVisibleUiFn } from '@companion-app/shared/Model/Options.js'
 import {
 	stringifyVariableValue,
 	type VariableDefinition,
 	type VariableValues,
 } from '@companion-app/shared/Model/Variables.js'
-import { CompanionFieldVariablesSupport } from '@companion-app/shared/Model/Options.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import LogController from '../Log/Controller.js'
+import type { AppInfo } from '../Registry.js'
+import { describeHowToEnableDangerousFeature } from '../Resources/Util.js'
+import type { VariablesController } from '../Variables/Controller.js'
+import type {
+	ActionForInternalExecution,
+	ActionForVisitor,
+	FeedbackForVisitor,
+	InternalActionDefinition,
+	InternalActionResult,
+	InternalModuleFragment,
+	InternalModuleFragmentEvents,
+	InternalVisitor,
+} from './Types.js'
 
 const execAsync = promisify(exec)
 
@@ -132,6 +134,10 @@ export class InternalSystem extends EventEmitter<InternalModuleFragmentEvents> i
 			() => {
 				const values: VariableValues = {
 					installation_name: this.#userConfigController.getKey('installName'),
+
+					// Some internal values needed for the drawing
+					_graphics_page_plusminus: !!this.#userConfigController.getKey('page_plusminus'),
+					_graphics_page_direction_flipped: !!this.#userConfigController.getKey('page_direction_flipped'),
 				}
 
 				this.emit('setVariables', values)
@@ -257,16 +263,48 @@ export class InternalSystem extends EventEmitter<InternalModuleFragmentEvents> i
 	}
 
 	getActionDefinitions(): Record<string, InternalActionDefinition> {
+		const shellCommandEnabled = this.#appInfo.options.enableShellCommandSupport
+		// When disabled, the real fields are kept (so their defaults still populate and any
+		// already-configured values are never pruned), but hidden in the UI behind a placeholder.
+		const hideWhenDisabled: IsVisibleUiFn | undefined = shellCommandEnabled
+			? undefined
+			: { type: 'expression', fn: 'false' }
+
 		const actions: Record<string, InternalActionDefinition> = {
 			exec: {
 				label: 'System: Run shell command (local)',
 				description: undefined,
 				options: [
+					...(shellCommandEnabled
+						? []
+						: [
+								{
+									type: 'static-text' as const,
+									id: 'disabled',
+									label: 'Disabled',
+									value:
+										'Running shell commands is disabled.<br/>This is a dangerous feature that allows running arbitrary commands on this computer, so it must be enabled explicitly. ' +
+										describeHowToEnableDangerousFeature(
+											'<code>--enable-shell-command-support</code>',
+											'<code>COMPANION_ENABLE_SHELL_COMMAND_SUPPORT</code>'
+										),
+								},
+							]),
 					{
 						type: 'textinput',
 						label: 'Command',
 						id: 'path',
 						useVariables: CompanionFieldVariablesSupport.InternalParser,
+						isVisibleUi: hideWhenDisabled,
+					},
+					{
+						type: 'textinput',
+						label: 'Working Directory',
+						id: 'cwd',
+						useVariables: CompanionFieldVariablesSupport.InternalParser,
+						description:
+							'Optional. If not set, the command will be run with the current working directory of companion',
+						isVisibleUi: hideWhenDisabled,
 					},
 					{
 						type: 'number',
@@ -275,6 +313,8 @@ export class InternalSystem extends EventEmitter<InternalModuleFragmentEvents> i
 						default: 5000,
 						min: 500,
 						max: 20000,
+						clampValues: true,
+						isVisibleUi: hideWhenDisabled,
 					},
 					{
 						type: 'internal:custom_variable',
@@ -283,6 +323,7 @@ export class InternalSystem extends EventEmitter<InternalModuleFragmentEvents> i
 						includeNone: true,
 						expressionDescription:
 							'The name of the custom variable. Just the portion after the "custom:" prefix. Make sure to wrap it in quotes!',
+						isVisibleUi: hideWhenDisabled,
 					},
 				],
 				optionsSupportExpressions: true,
@@ -325,50 +366,69 @@ export class InternalSystem extends EventEmitter<InternalModuleFragmentEvents> i
 		return actions
 	}
 
-	async executeAction(action: ActionForInternalExecution, _extras: RunActionExtras): Promise<boolean> {
-		if (action.definitionId === 'exec') {
-			if (action.options.path) {
-				const command = stringifyVariableValue(action.options.path)
-				this.#logger.silly(`Running command: '${command}'`)
-
-				if (!command || command.trim() === '') {
-					this.#logger.warn('No command specified')
-					return true
+	async executeAction(action: ActionForInternalExecution, _extras: RunActionExtras): Promise<InternalActionResult> {
+		switch (action.definitionId) {
+			case 'exec': {
+				if (!this.#appInfo.options.enableShellCommandSupport) {
+					this.#logger.warn(
+						'Rejected shell command action: the "run shell command" feature is disabled. ' +
+							describeHowToEnableDangerousFeature(
+								'--enable-shell-command-support',
+								'COMPANION_ENABLE_SHELL_COMMAND_SUPPORT'
+							)
+					)
+					break
 				}
+				if (action.options.path) {
+					const command = stringifyVariableValue(action.options.path)
+					const cwdRaw = stringifyVariableValue(action.options.cwd) || undefined
+					const cwd = cwdRaw?.trim() !== '' ? cwdRaw : undefined
+					this.#logger.silly(`Running command: '${command}' in '${cwd ?? process.cwd()}'`)
 
-				try {
-					const { stdout } = await execAsync(command, {
-						timeout: Number(action.options.timeout) || 5000,
-					})
-
-					// Trim EOL character(s) appended by the OS
-					let stdoutStr = stdout.toString()
-					if (stdoutStr.endsWith(os.EOL)) stdoutStr = stdoutStr.substring(0, stdoutStr.length - os.EOL.length)
-
-					const targetVarName = stringifyVariableValue(action.options.targetVariable)
-					if (targetVarName) {
-						this.#variableController.custom.setValue(targetVarName, stdoutStr)
+					if (!command || command.trim() === '') {
+						this.#logger.warn('No command specified')
+						break
 					}
-				} catch (error) {
-					this.#logger.error('Shell command failed. Guru meditation: ' + JSON.stringify(error))
-					this.#logger.silly(error)
-				}
-			}
-			return true
-		} else if (action.definitionId === 'custom_log') {
-			const message = stringifyVariableValue(action.options.message)
-			this.#customMessageLogger.info(message ?? '')
 
-			return true
-		} else if (action.definitionId === 'app_restart') {
-			this.#requestExit(true, true)
-			return true
-		} else if (action.definitionId === 'app_exit') {
-			this.#requestExit(true, false)
-			return true
-		} else {
-			return false
+					try {
+						const { stdout } = await execAsync(command, {
+							cwd: cwd,
+							timeout: Number(action.options.timeout) || 5000,
+						})
+
+						// Trim EOL character(s) appended by the OS
+						let stdoutStr = stdout.toString()
+						if (stdoutStr.endsWith(os.EOL)) stdoutStr = stdoutStr.substring(0, stdoutStr.length - os.EOL.length)
+
+						const targetVarName = stringifyVariableValue(action.options.targetVariable)
+						if (targetVarName) {
+							this.#variableController.custom.setValue(targetVarName, stdoutStr)
+						}
+					} catch (error) {
+						this.#logger.error('Shell command failed. Guru meditation: ' + JSON.stringify(error))
+						this.#logger.silly(error)
+					}
+				}
+				break
+			}
+			case 'custom_log': {
+				const message = stringifyVariableValue(action.options.message)
+				this.#customMessageLogger.info(message ?? '')
+				break
+			}
+			case 'app_restart': {
+				this.#requestExit(true, true)
+				break
+			}
+			case 'app_exit': {
+				this.#requestExit(true, false)
+				break
+			}
+			default:
+				return null
 		}
+
+		return { result: undefined }
 	}
 
 	visitReferences(visitor: InternalVisitor, actions: ActionForVisitor[], _feedbacks: FeedbackForVisitor[]): void {

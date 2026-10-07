@@ -1,3 +1,4 @@
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
 import {
 	CompanionFieldVariablesSupport,
@@ -25,87 +26,91 @@ import type {
 	CompanionInputFieldNumber,
 	CompanionInputFieldStaticText,
 	CompanionInputFieldTextInput,
+	Complete,
 	SomeCompanionActionInputField,
 	SomeCompanionConfigField,
 	SomeCompanionFeedbackInputField,
-	Complete,
 } from '@companion-module/base'
 
 export function translateConnectionConfigFields(fields: SomeCompanionConfigField[]): SomeCompanionInputField[] {
-	return fields.map((raw) => {
-		const o = raw
-		switch (o.type) {
-			case 'bonjour-device':
-				return {
-					...translateCommonFields(o),
-					type: 'bonjour-device',
-					width: o.width,
-				} satisfies Complete<CompanionInputFieldBonjourDeviceExtended>
-			case 'secret-text':
-				return {
-					...translateCommonFields(o),
-					type: 'secret-text',
-					width: o.width,
-					default: o.default,
-					minLength: o.minLength,
-					regex: o.regex,
-				} satisfies Complete<CompanionInputFieldSecretExtended>
+	return fields
+		.filter((raw) => !BANNED_PROPS.has(raw.id))
+		.map((raw) => {
+			const o = raw
+			switch (o.type) {
+				case 'bonjour-device':
+					return {
+						...translateCommonFields(o),
+						type: 'bonjour-device',
+						width: o.width,
+					} satisfies Complete<CompanionInputFieldBonjourDeviceExtended>
+				case 'secret-text':
+					return {
+						...translateCommonFields(o),
+						type: 'secret-text',
+						width: o.width,
+						default: o.default,
+						minLength: o.minLength,
+						regex: o.regex,
+					} satisfies Complete<CompanionInputFieldSecretExtended>
 
-			case 'static-text':
-				return translateStaticTextField(o, o.width)
-			case 'textinput':
-				return translateTextInputField(o, o.width, false)
-			case 'checkbox':
-				return translateCheckboxField(o, o.width)
-			case 'colorpicker':
-				return translateColorPickerField(o, o.width)
-			case 'number':
-				return translateNumberField(o, o.width)
-			case 'dropdown':
-				return translateDropdownField(o, o.width)
-			case 'multidropdown':
-				return translateMultiDropdownField(o, o.width)
+				case 'static-text':
+					return translateStaticTextField(o, o.width)
+				case 'textinput':
+					return translateTextInputField(o, o.width, false)
+				case 'checkbox':
+					return translateCheckboxField(o, o.width)
+				case 'colorpicker':
+					return translateColorPickerField(o, o.width)
+				case 'number':
+					return translateNumberField(o, o.width)
+				case 'dropdown':
+					return translateDropdownField(o, o.width)
+				case 'multidropdown':
+					return translateMultiDropdownField(o, o.width)
 
-			default:
-				assertNever(o)
-				return generateUnsupportedField(raw, raw.width)
-		}
-	})
+				default:
+					assertNever(o)
+					return generateUnsupportedField(raw, raw.width)
+			}
+		})
 }
 
 export function translateEntityInputFields(
 	fields: (SomeCompanionActionInputField | SomeCompanionFeedbackInputField)[],
 	entityType: EntityModelType
 ): SomeCompanionInputField[] {
-	return fields.map((raw) => {
-		const o = raw
-		switch (o.type) {
-			case 'static-text':
-				return translateStaticTextField(o, 0)
-			case 'textinput':
-				return translateTextInputField(o, 0, true)
-			case 'checkbox':
-				return translateCheckboxField(o, 0)
-			case 'colorpicker':
-				return translateColorPickerField(o, 0)
-			case 'number':
-				return translateNumberField(o, 0)
-			case 'dropdown':
-				return translateDropdownField(o, 0)
-			case 'multidropdown':
-				return translateMultiDropdownField(o, 0)
-			case 'custom-variable':
-				if (entityType === EntityModelType.Action) {
-					return translateCustomVariableField(o, 0)
-				} else {
-					return generateUnsupportedField(raw, 0)
-				}
+	return fields
+		.filter((f) => !BANNED_PROPS.has(f.id))
+		.map((raw) => {
+			const o = raw
+			switch (o.type) {
+				case 'static-text':
+					return translateStaticTextField(o, 0)
+				case 'textinput':
+					return translateTextInputField(o, 0, true)
+				case 'checkbox':
+					return translateCheckboxField(o, 0)
+				case 'colorpicker':
+					return translateColorPickerField(o, 0)
+				case 'number':
+					return translateNumberField(o, 0)
+				case 'dropdown':
+					return translateDropdownField(o, 0)
+				case 'multidropdown':
+					return translateMultiDropdownField(o, 0)
+				case 'custom-variable':
+					if (entityType === EntityModelType.Action) {
+						return translateCustomVariableField(o, 0)
+					} else {
+						return generateUnsupportedField(raw, 0)
+					}
 
-			default:
-				assertNever(o)
-				return generateUnsupportedField(o, 0)
-		}
-	})
+				default:
+					assertNever(o)
+					return generateUnsupportedField(o, 0)
+			}
+		})
 }
 
 function generateUnsupportedField<T extends CompanionInputFieldBase>(
@@ -151,6 +156,7 @@ function translateTextInputField(
 		multiline: field.multiline,
 		placeholder: undefined, // Not supported from modules
 		disableSanitisation: false, // Not supported from modules
+		unwrapPastedVariableNamespace: undefined, // Not supported from modules
 	}
 }
 function translateCheckboxField(
@@ -173,8 +179,8 @@ function translateColorPickerField(
 		...translateCommonFields(field),
 		type: 'colorpicker',
 		default: field.default,
-		enableAlpha: field.enableAlpha,
-		returnType: field.returnType,
+		enableAlpha: field.enableAlpha ?? false,
+		returnType: field.returnType ?? 'number',
 		presetColors: field.presetColors,
 		width: width,
 	}
@@ -194,6 +200,9 @@ function translateNumberField(
 		range: field.range,
 		showMinAsNegativeInfinity: field.showMinAsNegativeInfinity,
 		showMaxAsPositiveInfinity: field.showMaxAsPositiveInfinity,
+		clampValues: field.clampValues,
+		asInteger: field.asInteger,
+		allowNull: false,
 	}
 }
 function translateDropdownField(
@@ -208,7 +217,6 @@ function translateDropdownField(
 		choices: field.choices,
 		allowCustom: field.allowCustom,
 		regex: field.regex,
-		minChoicesForSearch: field.minChoicesForSearch,
 	}
 }
 function translateMultiDropdownField(
@@ -223,9 +231,9 @@ function translateMultiDropdownField(
 		choices: field.choices,
 		allowCustom: false, // Not supported from modules
 		regex: undefined, // Not supported from modules
-		minChoicesForSearch: field.minChoicesForSearch,
 		minSelection: field.minSelection,
 		maxSelection: field.maxSelection,
+		sortSelection: field.sortSelection,
 	}
 }
 function translateCustomVariableField(
@@ -252,6 +260,8 @@ function translateCommonFields(
 	| 'isVisibleUi'
 	| 'disableAutoExpression'
 	| 'allowInvalidValues'
+	| 'deferParsing'
+	| 'contextVariableResolution'
 > {
 	return {
 		id: field.id,
@@ -268,5 +278,7 @@ function translateCommonFields(
 			: undefined,
 		disableAutoExpression: field.disableAutoExpression ?? false,
 		allowInvalidValues: field.allowInvalidValues ?? false,
+		deferParsing: undefined,
+		contextVariableResolution: undefined,
 	}
 }

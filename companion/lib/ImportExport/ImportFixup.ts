@@ -1,13 +1,13 @@
 import { validateActionSetId } from '@companion-app/shared/ControlId.js'
 import type { ActionSetsModel } from '@companion-app/shared/Model/ActionModel.js'
-import type { SomeButtonModel, NormalButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import type { ButtonModelBase, LayeredButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
 import type { SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 import type { ExportControlv6, ExportTriggerContentv6 } from '@companion-app/shared/Model/ExportModel.js'
-import { VisitorReferencesUpdater } from '../Resources/Visitors/ReferencesUpdater.js'
 import type { ExpressionVariableModel } from '@companion-app/shared/Model/ExpressionVariableModel.js'
 import type { TriggerModel } from '@companion-app/shared/Model/TriggerModel.js'
-import type { Logger } from '../Log/Controller.js'
 import type { InternalController } from '../Internal/Controller.js'
+import type { Logger } from '../Log/Controller.js'
+import { VisitorReferencesUpdater } from '../Resources/Visitors/ReferencesUpdater.js'
 
 export type InstanceAppliedRemappings = Record<
 	string,
@@ -17,7 +17,8 @@ export type InstanceAppliedRemappings = Record<
 export function fixupTriggerControl(
 	internalModule: InternalController,
 	control: ExportTriggerContentv6,
-	instanceIdMap: InstanceAppliedRemappings
+	instanceIdMap: InstanceAppliedRemappings,
+	outboundSurfaceIdRemap: Record<string, string> | undefined
 ): TriggerModel {
 	// Future: this does not feel durable
 
@@ -37,7 +38,7 @@ export function fixupTriggerControl(
 		options: structuredClone(control.options),
 		actions: [],
 		condition: [],
-		events: control.events,
+		events: control.events ? structuredClone(control.events) : [],
 		localVariables: [],
 	}
 
@@ -53,8 +54,8 @@ export function fixupTriggerControl(
 		result.localVariables = fixupEntitiesRecursive(instanceIdMap, structuredClone(control.localVariables))
 	}
 
-	new VisitorReferencesUpdater(internalModule, connectionLabelRemap, connectionIdRemap)
-		.visitEntities([], result.condition.concat(result.actions))
+	new VisitorReferencesUpdater(internalModule, connectionLabelRemap, connectionIdRemap, outboundSurfaceIdRemap)
+		.visitEntities([], [...result.localVariables, ...result.condition, ...result.actions])
 		.visitEvents(result.events || [])
 
 	return result
@@ -63,7 +64,8 @@ export function fixupTriggerControl(
 export function fixupExpressionVariableControl(
 	internalModule: InternalController,
 	control: ExpressionVariableModel,
-	instanceIdMap: InstanceAppliedRemappings
+	instanceIdMap: InstanceAppliedRemappings,
+	outboundSurfaceIdRemap: Record<string, string>
 ): ExpressionVariableModel {
 	// Future: this does not feel durable
 
@@ -93,33 +95,44 @@ export function fixupExpressionVariableControl(
 		result.localVariables = fixupEntitiesRecursive(instanceIdMap, structuredClone(control.localVariables))
 	}
 
-	const visitor = new VisitorReferencesUpdater(internalModule, connectionLabelRemap, connectionIdRemap).visitEntities(
-		[],
-		result.localVariables
-	)
+	const visitor = new VisitorReferencesUpdater(
+		internalModule,
+		connectionLabelRemap,
+		connectionIdRemap,
+		outboundSurfaceIdRemap
+	).visitEntities([], result.localVariables)
 	if (result.entity) visitor.visitEntities([], [result.entity])
 
 	return result
 }
 
-export function fixupControl(
+export function fixupLayeredButtonControl(
 	logger: Logger,
 	control: ExportControlv6,
 	referencesUpdater: VisitorReferencesUpdater,
 	instanceIdMap: InstanceAppliedRemappings
-): SomeButtonModel | null {
-	// Future: this does not feel durable
-
-	if (control.type === 'pagenum' || control.type === 'pageup' || control.type === 'pagedown') {
-		return {
-			type: control.type,
-		}
-	}
-
-	const result: NormalButtonModel = {
-		type: 'button',
+): LayeredButtonModel {
+	const result: LayeredButtonModel = {
+		type: 'button-layered',
 		options: structuredClone(control.options),
 		style: structuredClone(control.style),
+		...fixupButtonControlBase(logger, control, referencesUpdater, instanceIdMap),
+	}
+
+	referencesUpdater.visitDrawElements(result.style.layers)
+
+	return result
+}
+
+function fixupButtonControlBase(
+	logger: Logger,
+	control: ExportControlv6,
+	referencesUpdater: VisitorReferencesUpdater,
+	instanceIdMap: InstanceAppliedRemappings
+): ButtonModelBase {
+	// Future: this does not feel durable
+
+	const result: ButtonModelBase = {
 		feedbacks: [],
 		steps: {},
 		localVariables: [],
@@ -162,7 +175,7 @@ export function fixupControl(
 		}
 	}
 
-	referencesUpdater.visitEntities([], allEntities).visitButtonDrawStyle(result.style)
+	referencesUpdater.visitEntities([], allEntities)
 
 	return result
 }

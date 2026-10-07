@@ -1,8 +1,8 @@
-import { debounce } from 'lodash-es'
-import React, { type Context, createContext, useContext, useEffect, useMemo } from 'react'
+import { colord } from 'colord'
+import debounceFn from 'debounce-fn'
+import { createContext, useContext, useEffect, useMemo, type Context } from 'react'
 import type { Color, ColorResult, HexColor, HsvColor, RgbColor } from '../colors'
 import { ColorsStore } from './store'
-import { colord } from 'colord'
 
 export type OnChangeFn<TColor> = (color: TColor, event: React.SyntheticEvent | MouseEvent) => void
 
@@ -53,7 +53,7 @@ export function ColorProvider({
 	}, [store, passedColor])
 
 	const handler = (fn: any, data: any, event: any) => fn(data, event)
-	const debouncedChangeHandler = useMemo(() => debounce(handler, 100), [])
+	const debouncedChangeHandler = useMemo(() => debounceFn(handler, { wait: 100 }), [])
 
 	const contextValue = useMemo<ColorContextType>(
 		() => ({

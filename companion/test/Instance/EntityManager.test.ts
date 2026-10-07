@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-	ConnectionEntityManager,
-	EntityManagerActionEntity,
-	EntityManagerAdapter,
-	EntityManagerFeedbackEntity,
-} from '../../lib/Instance/Connection/EntityManager.js'
-import {
 	EntityModelType,
 	ReplaceableActionEntityModel,
 	ReplaceableFeedbackEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
 import { CompanionOptionValues } from '@companion-module/host'
+import {
+	ConnectionEntityManager,
+	EntityManagerActionEntity,
+	EntityManagerAdapter,
+	EntityManagerFeedbackEntity,
+} from '../../lib/Instance/Connection/EntityManager.js'
 
 // Mock dependencies
 vi.mock('nanoid', () => ({
@@ -29,10 +29,9 @@ describe('InstanceEntityManager', () => {
 
 	const mockControl = {
 		entities: {
-			entityReplace: vi.fn(),
+			entityReplaceForUpgrade: vi.fn(),
 		},
 		supportsEntities: true,
-		getBitmapSize: vi.fn().mockReturnValue({ width: 72, height: 58 }),
 	}
 
 	const mockVariablesParser = {
@@ -211,7 +210,7 @@ describe('InstanceEntityManager', () => {
 	})
 
 	describe('trackEntity for feedback', () => {
-		it('should add a feedback entity and include image size', () => {
+		it('should add a feedback entity', () => {
 			const mockFeedback = {
 				id: 'feedback-1',
 				type: EntityModelType.Feedback,
@@ -236,9 +235,6 @@ describe('InstanceEntityManager', () => {
 			// Verify the entity is being processed
 			vi.runAllTimers()
 
-			expect(mockControlsController.getControl).toHaveBeenCalledWith('control-1')
-			expect(mockControl.getBitmapSize).toHaveBeenCalled()
-
 			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
 			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledWith(
 				new Map<string, EntityManagerFeedbackEntity | null>([
@@ -254,7 +250,6 @@ describe('InstanceEntityManager', () => {
 								options: {},
 							} as any,
 							parsedOptions: {},
-							imageSize: { width: 72, height: 58 },
 						} satisfies EntityManagerFeedbackEntity,
 					],
 				])
@@ -352,7 +347,6 @@ describe('InstanceEntityManager', () => {
 								options: {},
 							} as any,
 							parsedOptions: {},
-							imageSize: { width: 72, height: 58 },
 						} satisfies EntityManagerFeedbackEntity,
 					],
 				])
@@ -419,7 +413,6 @@ describe('InstanceEntityManager', () => {
 								options: {},
 							} as any,
 							parsedOptions: {},
-							imageSize: { width: 72, height: 58 },
 						} satisfies EntityManagerFeedbackEntity,
 					],
 					['feedback-2', null],
@@ -435,7 +428,6 @@ describe('InstanceEntityManager', () => {
 								options: {},
 							} as any,
 							parsedOptions: {},
-							imageSize: { width: 72, height: 58 },
 						} satisfies EntityManagerFeedbackEntity,
 					],
 				])
@@ -700,7 +692,6 @@ describe('InstanceEntityManager', () => {
 								options: { field1: '$(var:test)' },
 							} as any,
 							parsedOptions: { field1: '$(var:test)' },
-							imageSize: { width: 72, height: 58 },
 						} satisfies EntityManagerFeedbackEntity,
 					],
 				])
@@ -782,7 +773,7 @@ describe('InstanceEntityManager', () => {
 			// Mock the control
 			const mockControl = {
 				entities: {
-					entityReplace: vi.fn(),
+					entityReplaceForUpgrade: vi.fn(),
 				},
 				supportsEntities: true,
 			}
@@ -810,8 +801,8 @@ describe('InstanceEntityManager', () => {
 			// Wait for the Promise microtasks to resolve
 			await vi.runAllTimersAsync()
 
-			// Verify that the entityReplace was called with the upgraded entity
-			expect(mockControl.entities.entityReplace).toHaveBeenCalledWith(
+			// Verify that the entityReplaceForUpgrade was called with the upgraded entity
+			expect(mockControl.entities.entityReplaceForUpgrade).toHaveBeenCalledWith(
 				expect.objectContaining({
 					id: 'entity-1',
 					type: EntityModelType.Action,
@@ -1165,23 +1156,8 @@ describe('InstanceEntityManager', () => {
 			const entityCount = 50
 			const mockEntities: any[] = []
 
-			// Create multiple mock controls with proper getBitmapSize implementation
 			for (let i = 0; i < entityCount; i++) {
-				const controlId = `control-${i}`
 				const isAction = i % 2 === 0
-
-				// For feedback entities, ensure there's a proper control with getBitmapSize
-				if (!isAction) {
-					mockControlsController.getControl.mockImplementation((id) => {
-						if (id === controlId) {
-							return {
-								...mockControl,
-								getBitmapSize: vi.fn().mockReturnValue({ width: 72, height: 58 }),
-							}
-						}
-						return mockControl
-					})
-				}
 
 				const mockEntity = {
 					id: `entity-${i}`,
@@ -1253,8 +1229,61 @@ describe('InstanceEntityManager', () => {
 					upgradeIndex: 5,
 				},
 				parsedOptions: { index: 'value-0' },
-				imageSize: { width: 72, height: 58 },
 			} satisfies EntityManagerFeedbackEntity)
+		})
+
+		it('should limit the number of update batches in flight at once', async () => {
+			// Make updateActions hang so that batches stay in flight until we release them
+			const releases: Array<() => void> = []
+			mockAdapter.updateActions.mockImplementation(
+				async () =>
+					new Promise<void>((resolve) => {
+						releases.push(resolve)
+					})
+			)
+
+			entityManager.start(5)
+
+			// Enough actions to require more than the in-flight limit of batches (batch size is 50)
+			const entityCount = 350
+			for (let i = 0; i < entityCount; i++) {
+				const mockEntity = {
+					id: `entity-${i}`,
+					type: EntityModelType.Action,
+					definitionId: `def-${i}`,
+					upgradeIndex: 5,
+					asEntityModel: vi.fn().mockReturnValue({
+						id: `entity-${i}`,
+						type: EntityModelType.Action,
+						definitionId: `def-${i}`,
+						connectionId: 'connection-1',
+						options: {},
+						upgradeIndex: 5,
+					}),
+					getEntityDefinition: vi.fn().mockReturnValue({
+						hasLifecycleFunctions: true,
+						options: [],
+						optionsToIgnoreForSubscribe: [],
+					}),
+				}
+				entityManager.trackEntity(mockEntity as any, `control-${i}`)
+			}
+
+			vi.runAllTimers()
+
+			// Only the in-flight limit worth of batches should have been sent so far
+			expect(mockAdapter.updateActions).toHaveBeenCalledTimes(5)
+
+			// Release the in-flight batches (and let subsequently-started ones resolve immediately),
+			// which should drain the rest of the queue
+			mockAdapter.updateActions.mockResolvedValue(undefined)
+			releases.forEach((release) => release())
+			await vi.runAllTimersAsync()
+
+			// All batches should have been sent, and it must have taken more than one round
+			const totalEntitiesSent = mockAdapter.updateActions.mock.calls.reduce((sum, [payload]) => sum + payload.size, 0)
+			expect(mockAdapter.updateActions.mock.calls.length).toBeGreaterThan(5)
+			expect(totalEntitiesSent).toBe(entityCount)
 		})
 	})
 
@@ -1315,7 +1344,7 @@ describe('InstanceEntityManager', () => {
 			await vi.runAllTimersAsync()
 
 			// The entity should not get updated in the control since it was deleted
-			expect(mockControl.entities.entityReplace).not.toHaveBeenCalled()
+			expect(mockControl.entities.entityReplaceForUpgrade).not.toHaveBeenCalled()
 		})
 	})
 
@@ -1504,6 +1533,92 @@ describe('InstanceEntityManager', () => {
 			expect(mockAdapter.updateFeedbacks).toHaveBeenCalledTimes(0)
 		})
 
+		it('should not subscribe a disabled entity to the module', () => {
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				disabled: true,
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: {},
+					upgradeIndex: 5,
+					disabled: true,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+
+			vi.runAllTimers()
+
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+			expect(mockAdapter.upgradeActions).not.toHaveBeenCalled()
+			expect(mockAdapter.upgradeFeedbacks).not.toHaveBeenCalled()
+		})
+
+		it('should run upgrade scripts for a disabled entity that is out of date', async () => {
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				disabled: true,
+				upgradeIndex: 3, // Lower than the current index (5)
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: {},
+					upgradeIndex: 3,
+					disabled: true,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+
+			vi.runAllTimers()
+
+			// Upgrade should be sent
+			expect(mockAdapter.upgradeActions).toHaveBeenCalledWith(
+				[
+					{
+						controlId: 'control-1',
+						entity: {
+							id: 'entity-1',
+							type: EntityModelType.Action,
+							definitionId: 'action-1',
+							connectionId: 'connection-1',
+							options: {},
+							upgradeIndex: 3,
+							disabled: true,
+						},
+					} satisfies Omit<EntityManagerActionEntity, 'parsedOptions'>,
+				],
+				5
+			)
+
+			// But no subscribe should follow
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+			expect(mockAdapter.updateFeedbacks).not.toHaveBeenCalled()
+		})
+
 		it('should skip upgrading entities without lifecycle functions even with old upgradeIndex', async () => {
 			const mockEntityWithoutLifecycle = {
 				id: 'entity-without-lifecycle',
@@ -1552,6 +1667,120 @@ describe('InstanceEntityManager', () => {
 			// Should only be called once (for upgrade), not for regular processing
 			expect(mockAdapter.upgradeActions).toHaveBeenCalledTimes(1)
 			expect(mockAdapter.upgradeFeedbacks).toHaveBeenCalledTimes(0)
+		})
+
+		it('should send null to module when entity transitions from enabled to disabled', () => {
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				disabled: false,
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: {},
+					upgradeIndex: 5,
+					disabled: false,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			// Entity is subscribed
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					['entity-1', expect.objectContaining({ controlId: 'control-1' })],
+				])
+			)
+
+			mockAdapter.updateActions.mockClear()
+
+			// Entity becomes disabled — forgetEntity is called
+			entityManager.forgetEntity('entity-1')
+			vi.runAllTimers()
+
+			// Module should be told to unsubscribe (null)
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([['entity-1', null]])
+			)
+		})
+
+		it('should subscribe to module when entity transitions from disabled to enabled', () => {
+			const mockEntity = {
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				disabled: true,
+				upgradeIndex: 5,
+				asEntityModel: vi.fn().mockReturnValue({
+					id: 'entity-1',
+					type: EntityModelType.Action,
+					definitionId: 'action-1',
+					connectionId: 'connection-1',
+					options: {},
+					upgradeIndex: 5,
+					disabled: true,
+				}),
+				getEntityDefinition: vi.fn().mockReturnValue({
+					hasLifecycleFunctions: true,
+					options: [],
+					optionsToIgnoreForSubscribe: [],
+				}),
+			}
+
+			entityManager.start(5)
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			// Nothing sent while disabled
+			expect(mockAdapter.updateActions).not.toHaveBeenCalled()
+
+			// Entity becomes enabled — trackEntity is called with disabled: false
+			mockEntity.disabled = false
+			mockEntity.asEntityModel.mockReturnValue({
+				id: 'entity-1',
+				type: EntityModelType.Action,
+				definitionId: 'action-1',
+				connectionId: 'connection-1',
+				options: {},
+				upgradeIndex: 5,
+				disabled: false,
+			})
+
+			entityManager.trackEntity(mockEntity as any, 'control-1')
+			vi.runAllTimers()
+
+			// Module should now receive the subscription
+			expect(mockAdapter.updateActions).toHaveBeenCalledWith(
+				new Map<string, EntityManagerActionEntity | null>([
+					[
+						'entity-1',
+						{
+							controlId: 'control-1',
+							entity: {
+								id: 'entity-1',
+								type: EntityModelType.Action,
+								definitionId: 'action-1',
+								connectionId: 'connection-1',
+								options: {},
+								upgradeIndex: 5,
+								disabled: false,
+							} as any,
+							parsedOptions: {},
+						} satisfies EntityManagerActionEntity,
+					],
+				])
+			)
 		})
 	})
 
@@ -1644,7 +1873,6 @@ describe('InstanceEntityManager', () => {
 								upgradeIndex: 5,
 							} as any,
 							parsedOptions: {},
-							imageSize: { width: 72, height: 58 },
 						} satisfies EntityManagerFeedbackEntity,
 					],
 				])
@@ -1739,7 +1967,7 @@ describe('InstanceEntityManager', () => {
 			// Setup control mocks for each entity
 			mockControlsController.getControl.mockImplementation(() => ({
 				...mockControl,
-				getBitmapSize: vi.fn().mockReturnValue({ width: 72, height: 58 }),
+				getBitmapFeedbackSize: vi.fn().mockReturnValue({ width: 72, height: 58 }),
 			}))
 
 			// Setup IPC wrapper to return upgrade results
@@ -1803,7 +2031,6 @@ describe('InstanceEntityManager', () => {
 							options: {},
 							upgradeIndex: 3,
 						},
-						imageSize: undefined,
 					},
 				] satisfies Omit<EntityManagerFeedbackEntity, 'parsedOptions'>[],
 				5

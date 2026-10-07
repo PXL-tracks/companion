@@ -1,11 +1,11 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { CRow } from '@coreui/react'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { Grid } from '~/Components/Grid'
 import { LoadingRetryOrError } from '~/Resources/Loading.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
+import { PresetDefinitionsStore, usePresetsDefinitions } from './PresetDefinitionsStore.js'
 import { PresetsConnectionList } from './PresetsConnectionList.js'
 import { PresetsSectionsList } from './PresetsSectionsList.js'
-import { PresetDefinitionsStore, usePresetsDefinitions } from './PresetDefinitionsStore.js'
 
 interface ConnectionPresetsProps {
 	resetToken: string
@@ -31,9 +31,9 @@ export const ConnectionPresets = observer(function ConnectionPresets({ resetToke
 	if (!isReady) {
 		// Show loading or an error
 		return (
-			<CRow>
+			<Grid.Row>
 				<LoadingRetryOrError error={loadError} dataReady={false} doRetry={restartSub} design="pulse" />
-			</CRow>
+			</Grid.Row>
 		)
 	}
 

@@ -1,26 +1,22 @@
-import React, { useContext } from 'react'
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Navigate } from '@tanstack/react-router'
+import { observer } from 'mobx-react-lite'
+import { useContext } from 'react'
 import { RootAppStoreContext } from '~/Stores/RootAppStore'
-import { useComputed } from '~/Resources/util'
 import { SurfaceInstanceEditPanel } from '~/Surfaces/Instances/SurfaceInstanceEdit/SurfaceInstanceEditPanel'
+
+const ModuleConfigComponent = observer(function ModuleConfigComponent() {
+	const { instanceId } = Route.useParams()
+	const { surfaceInstances } = useContext(RootAppStoreContext)
+
+	// Ensure the selected instance is valid
+	// note: Currently Companion displays a "loading" bar until surfaceInstances have been loaded, so we don't test for "data is ready"
+	if (!surfaceInstances.instances.has(instanceId)) {
+		return <Navigate to="/surfaces/integrations" replace />
+	} else {
+		return <SurfaceInstanceEditPanel key={instanceId} instanceId={instanceId} />
+	}
+})
 
 export const Route = createFileRoute('/_app/surfaces/integrations/$instanceId')({
 	component: ModuleConfigComponent,
 })
-
-function ModuleConfigComponent() {
-	const { instanceId } = Route.useParams()
-
-	const { surfaceInstances } = useContext(RootAppStoreContext)
-
-	const navigate = useNavigate({ from: '/surfaces/integrations/$instanceId' })
-
-	// Ensure the selected instance is valid
-	useComputed(() => {
-		if (!surfaceInstances.instances.has(instanceId)) {
-			void navigate({ to: `/surfaces/integrations` })
-		}
-	}, [navigate, surfaceInstances, instanceId])
-
-	return <SurfaceInstanceEditPanel key={instanceId} instanceId={instanceId} />
-}

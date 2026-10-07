@@ -1,26 +1,28 @@
+import { initTRPC } from '@trpc/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { InstanceDefinitions } from '../../lib/Instance/Definitions.js'
-import type { InstanceConfigStore } from '../../lib/Instance/ConfigStore.js'
+import type { LayeredButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
 import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import { EntityModelType, FeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
 import {
+	InstanceVersionUpdatePolicy,
 	ModuleInstanceType,
 	type InstanceConfig,
-	InstanceVersionUpdatePolicy,
 } from '@companion-app/shared/Model/Instance.js'
+import { CompanionFieldVariablesSupport, exprExpr, exprVal } from '@companion-app/shared/Model/Options.js'
 import type {
 	PresetDefinition,
 	UIPresetDefinition,
-	UIPresetDefinitionUpdateAdd,
 	UIPresetDefinitionUpdateInit,
 	UIPresetGroupSimple,
 	UIPresetSection,
 } from '@companion-app/shared/Model/Presets.js'
-import type { NormalButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
-import { CompanionFieldVariablesSupport, exprExpr, exprVal } from '@companion-app/shared/Model/Options.js'
+import type { SomeButtonGraphicsElement } from '@companion-app/shared/Model/StyleLayersModel.js'
+import { ButtonGraphicsElementUsage } from '@companion-app/shared/Model/StyleModel.js'
+import type { InstanceConfigStore } from '../../lib/Instance/ConfigStore.js'
+import { InstanceDefinitions } from '../../lib/Instance/Definitions.js'
 import { EventDefinitions } from '../../lib/Resources/EventDefinitions.js'
-import { initTRPC } from '@trpc/server'
 import type { TrpcContext } from '../../lib/UI/TRPC.js'
+import { createMockTrpcContext } from '../Util.js'
 import { SubscriptionTester } from '../utils/SubscriptionTester.js'
 
 // Deterministic nanoid
@@ -62,9 +64,11 @@ function makeActionDefinition(overrides: Partial<ClientEntityDefinition> = {}): 
 		hasLearn: false,
 		learnTimeout: undefined,
 		showInvert: false,
+		actionHasResult: false,
 		optionsSupportExpressions: false,
-		showButtonPreview: false,
 		supportsChildGroups: [],
+		showButtonPreview: false,
+		feedbackAffectedProperties: undefined,
 		...overrides,
 	}
 }
@@ -77,21 +81,11 @@ function makeFeedbackDefinition(overrides: Partial<ClientEntityDefinition> = {})
 	}
 }
 
-function makeButtonPresetModel(overrides: Partial<NormalButtonModel> = {}): NormalButtonModel {
+function makeButtonPresetModel(overrides: Partial<LayeredButtonModel> = {}): LayeredButtonModel {
 	return {
-		type: 'button',
-		options: { rotaryActions: false, stepProgression: 'auto' },
-		style: {
-			text: 'Hello $(internal:label)',
-			textExpression: false,
-			size: 'auto',
-			alignment: 'center:center',
-			pngalignment: 'center:center',
-			color: 0xffffff,
-			bgcolor: 0x000000,
-			show_topbar: 'default',
-			png64: null,
-		},
+		type: 'button-layered',
+		options: { rotaryActions: false, stepProgression: 'auto', canModifyStyleInApis: false },
+		style: { layers: [] },
 		feedbacks: [],
 		steps: {
 			step1: {
@@ -109,13 +103,35 @@ function makeButtonPresetModel(overrides: Partial<NormalButtonModel> = {}): Norm
 	}
 }
 
+function makeTextLayer(id: string, text: string): SomeButtonGraphicsElement {
+	return {
+		type: 'text',
+		id,
+		name: id,
+		usage: ButtonGraphicsElementUsage.Text,
+		enabled: exprVal(true),
+		opacity: exprVal(1),
+		text: exprVal(text),
+		fontsize: exprVal('auto'),
+		color: exprVal(0xffffff),
+		outlineColor: exprVal(0x000000),
+		halign: exprVal('center'),
+		valign: exprVal('center'),
+		x: exprVal(0),
+		y: exprVal(0),
+		width: exprVal(72),
+		height: exprVal(72),
+		rotation: exprVal(0),
+	} as unknown as SomeButtonGraphicsElement
+}
+
 function makeButtonPreset(id: string, overrides: Partial<PresetDefinition> = {}): PresetDefinition {
 	return {
 		id,
 		name: `Preset ${id}`,
 		type: 'button',
 		model: makeButtonPresetModel(),
-		previewStyle: undefined,
+		presetExtraFeedbacks: [],
 		keywords: undefined,
 		...overrides,
 	}
@@ -318,16 +334,17 @@ describe('InstanceDefinitions', () => {
 
 		it('stores a structuredClone so mutating input does not affect stored data', () => {
 			const { defs } = createInstanceDefinitions()
-			const preset = makeButtonPreset('p1')
+			const textLayer = makeTextLayer('text-1', 'Original')
+			const preset = makeButtonPreset('p1', { model: makeButtonPresetModel({ style: { layers: [textLayer] } }) })
 
 			defs.setPresetDefinitions('conn1', new Map([[preset.id, preset]]), {})
 
-			// Mutate the original input
-			preset.model.style.text = 'MUTATED'
+			// Mutate the original input's layers
+			preset.model.style.layers.pop()
 
 			const stored = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(stored).not.toBeNull()
-			expect(stored!.style.text).not.toBe('MUTATED')
+			expect(stored!.style.layers).toHaveLength(1)
 		})
 
 		it('stores empty map when given empty map', () => {
@@ -389,7 +406,7 @@ describe('InstanceDefinitions', () => {
 		it('returns null when definition does not exist', () => {
 			const { defs } = createInstanceDefinitions()
 
-			expect(defs.createEntityItem('conn1', EntityModelType.Action, 'nonexistent')).toBeNull()
+			expect(defs.createEntityItem('conn1', EntityModelType.Action, 'nonexistent', null)).toBeNull()
 		})
 
 		it('creates an action with correct structure', () => {
@@ -402,7 +419,7 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setActionDefinitions('conn1', { act1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1', null)
 
 			expect(result).toMatchSnapshot()
 		})
@@ -411,7 +428,7 @@ describe('InstanceDefinitions', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setActionDefinitions('conn1', { act1: makeActionDefinition() })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1', null)
 
 			expect(result).not.toBeNull()
 			expect(result!.upgradeIndex).toBe(5) // from makeConnectionConfig defaults
@@ -421,7 +438,7 @@ describe('InstanceDefinitions', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setActionDefinitions('unknown', { act1: makeActionDefinition() })
 
-			const result = defs.createEntityItem('unknown', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('unknown', EntityModelType.Action, 'act1', null)
 
 			expect(result).not.toBeNull()
 			expect(result!.upgradeIndex).toBeUndefined()
@@ -437,7 +454,7 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setActionDefinitions('conn1', { act1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1', null)
 
 			expect(result).not.toBeNull()
 			expect(result!.options).not.toHaveProperty('info')
@@ -451,7 +468,7 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setActionDefinitions('conn1', { act1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1', null)
 
 			expect(result!.options['myText']).toEqual({ isExpression: false, value: 'hello' })
 		})
@@ -464,12 +481,12 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setFeedbackDefinitions('conn1', { fb1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', null)
 
 			expect(result).toMatchSnapshot()
 		})
 
-		it('applies feedbackStyle for boolean feedbacks', () => {
+		it('boolean feedback has empty styleOverrides when no element ids provided', () => {
 			const { defs } = createInstanceDefinitions()
 			const def = makeFeedbackDefinition({
 				feedbackType: FeedbackEntitySubType.Boolean,
@@ -477,16 +494,16 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setFeedbackDefinitions('conn1', { fb1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', null)
 
 			expect(result).not.toBeNull()
 			expect(result!.type).toBe(EntityModelType.Feedback)
 			if (result!.type === EntityModelType.Feedback) {
-				expect(result.style).toEqual({ color: 0xff0000, bgcolor: 0x00ff00 })
+				expect(result!.styleOverrides).toEqual([])
 			}
 		})
 
-		it('does not apply feedbackStyle for non-boolean feedbacks', () => {
+		it('non-boolean feedback has empty styleOverrides when no element ids provided', () => {
 			const { defs } = createInstanceDefinitions()
 			const def = makeFeedbackDefinition({
 				feedbackType: FeedbackEntitySubType.Advanced,
@@ -494,11 +511,62 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setFeedbackDefinitions('conn1', { fb1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', null)
 
 			expect(result).not.toBeNull()
 			if (result!.type === EntityModelType.Feedback) {
-				expect(result.style).toEqual({})
+				expect(result!.styleOverrides).toEqual([])
+			}
+		})
+
+		it('boolean feedback populates styleOverrides from feedbackStyle when element ids are provided', () => {
+			const { defs } = createInstanceDefinitions()
+			const def = makeFeedbackDefinition({
+				feedbackType: FeedbackEntitySubType.Boolean,
+				feedbackStyle: { bgcolor: 0x00ff00 },
+			})
+			defs.setFeedbackDefinitions('conn1', { fb1: def })
+
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', {
+				[ButtonGraphicsElementUsage.Automatic]: undefined,
+				[ButtonGraphicsElementUsage.Text]: 'text-el',
+				[ButtonGraphicsElementUsage.Color]: 'color-el',
+				[ButtonGraphicsElementUsage.Image]: 'image-el',
+			})
+
+			expect(result).not.toBeNull()
+			expect(result!.type).toBe(EntityModelType.Feedback)
+			if (result!.type === EntityModelType.Feedback) {
+				// bgcolor is applied as a color override on the background (Color) element
+				const bgOverride = result!.styleOverrides!.find((o) => o.elementId === 'color-el')
+				expect(bgOverride).toBeDefined()
+				expect(bgOverride!.elementProperty).toBe('color')
+			}
+		})
+
+		it('advanced feedback builds styleOverrides limited to feedbackAffectedProperties', () => {
+			const { defs } = createInstanceDefinitions()
+			const def = makeFeedbackDefinition({
+				feedbackType: FeedbackEntitySubType.Advanced,
+				feedbackAffectedProperties: ['text'],
+			})
+			defs.setFeedbackDefinitions('conn1', { fb1: def })
+
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', {
+				[ButtonGraphicsElementUsage.Automatic]: undefined,
+				[ButtonGraphicsElementUsage.Text]: 'text-el',
+				[ButtonGraphicsElementUsage.Color]: 'color-el',
+				[ButtonGraphicsElementUsage.Image]: 'image-el',
+			})
+
+			expect(result).not.toBeNull()
+			if (result!.type === EntityModelType.Feedback) {
+				expect(result!.styleOverrides!.length).toBeGreaterThan(0)
+				// Only the 'text' property is affected, so nothing should target the color element
+				expect(result!.styleOverrides!.some((o) => o.elementId === 'text-el' && o.elementProperty === 'text')).toBe(
+					true
+				)
+				expect(result!.styleOverrides!.some((o) => o.elementId === 'color-el')).toBe(false)
 			}
 		})
 
@@ -506,11 +574,11 @@ describe('InstanceDefinitions', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setFeedbackDefinitions('conn1', { fb1: makeFeedbackDefinition() })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', null)
 
 			expect(result).not.toBeNull()
 			if (result!.type === EntityModelType.Feedback) {
-				expect(result.isInverted).toEqual(exprVal(false))
+				expect(result!.isInverted).toEqual(exprVal(false))
 			}
 		})
 
@@ -518,13 +586,13 @@ describe('InstanceDefinitions', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setActionDefinitions('conn1', { act1: makeActionDefinition({ options: [] }) })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1', null)
 
 			expect(result).not.toBeNull()
 			expect(result!.options).toEqual({})
 		})
 
-		it('boolean feedback without feedbackStyle keeps empty style', () => {
+		it('boolean feedback without feedbackStyle has empty styleOverrides', () => {
 			const { defs } = createInstanceDefinitions()
 			const def = makeFeedbackDefinition({
 				feedbackType: FeedbackEntitySubType.Boolean,
@@ -532,11 +600,11 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setFeedbackDefinitions('conn1', { fb1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1', null)
 
 			expect(result).not.toBeNull()
 			if (result!.type === EntityModelType.Feedback) {
-				expect(result.style).toEqual({})
+				expect(result!.styleOverrides).toEqual([])
 			}
 		})
 
@@ -548,33 +616,13 @@ describe('InstanceDefinitions', () => {
 			})
 			defs.setActionDefinitions('conn1', { act1: def })
 
-			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1')
+			const result = defs.createEntityItem('conn1', EntityModelType.Action, 'act1', null)
 
 			// Mutate the original default
 			arrayDefault.push(999)
 
 			expect(result).not.toBeNull()
 			expect(result!.options['items']).toEqual({ isExpression: false, value: [1, 2, 3] })
-		})
-
-		it('structuredClone isolates boolean feedbackStyle from definition', () => {
-			const { defs } = createInstanceDefinitions()
-			const feedbackStyle = { color: 0xff0000, bgcolor: 0x00ff00 }
-			const def = makeFeedbackDefinition({
-				feedbackType: FeedbackEntitySubType.Boolean,
-				feedbackStyle,
-			})
-			defs.setFeedbackDefinitions('conn1', { fb1: def })
-
-			const result = defs.createEntityItem('conn1', EntityModelType.Feedback, 'fb1')
-
-			// Mutate the original feedbackStyle
-			feedbackStyle.color = 0x000000
-
-			expect(result).not.toBeNull()
-			if (result!.type === EntityModelType.Feedback) {
-				expect(result.style).toEqual({ color: 0xff0000, bgcolor: 0x00ff00 })
-			}
 		})
 	})
 
@@ -732,7 +780,7 @@ describe('InstanceDefinitions', () => {
 
 			// The model is stored as a deep clone, so compare structurally
 			expect(result).toBeTruthy()
-			expect(result!.type).toBe('button')
+			expect(result!.type).toBe('button-layered')
 		})
 
 		it('returns null for unknown connectionId', () => {
@@ -751,7 +799,7 @@ describe('InstanceDefinitions', () => {
 			expect(defs.convertPresetToPreviewControlModel('conn1', 'p1')).toBeNull()
 		})
 
-		it('creates preview model without previewStyle', () => {
+		it('creates preview model', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setPresetDefinitions('conn1', presetsToMap([makeButtonPreset('p1')]), {})
 
@@ -766,31 +814,57 @@ describe('InstanceDefinitions', () => {
 			}
 		})
 
-		it('creates preview model with previewStyle override', () => {
+		it('creates preview model with presetExtraFeedbacks', () => {
 			const { defs } = createInstanceDefinitions()
+			const extraFeedback = {
+				type: EntityModelType.Feedback as const,
+				id: 'extra-fb',
+				connectionId: 'internal',
+				definitionId: 'some-extra-fb',
+				options: {},
+				isInverted: exprVal(false),
+				upgradeIndex: undefined,
+			}
 			defs.setPresetDefinitions(
 				'conn1',
-				presetsToMap([
-					makeButtonPreset('p1', {
-						previewStyle: { color: 0xaabbcc, bgcolor: 0x112233 },
-					}),
-				]),
+				presetsToMap([makeButtonPreset('p1', { presetExtraFeedbacks: [extraFeedback] })]),
 				{}
 			)
 
 			const result = defs.convertPresetToPreviewControlModel('conn1', 'p1')
 
-			expect(result).toMatchSnapshot()
+			expect(result).not.toBeNull()
+			expect(result!.feedbacks).toHaveLength(1)
+			expect(result!.feedbacks[0].definitionId).toBe('some-extra-fb')
 		})
 
-		it('appends check_expression feedback when previewStyle is set', () => {
+		it('presetExtraFeedbacks are appended after model feedbacks in preview', () => {
 			const { defs } = createInstanceDefinitions()
+			const modelFeedback = {
+				type: EntityModelType.Feedback as const,
+				id: 'model-fb',
+				connectionId: 'conn1',
+				definitionId: 'some-fb',
+				options: {},
+				isInverted: exprVal(false),
+				upgradeIndex: undefined,
+			}
+			const extraFeedback = {
+				type: EntityModelType.Feedback as const,
+				id: 'extra-fb',
+				connectionId: 'internal',
+				definitionId: 'check_expression',
+				options: {},
+				isInverted: exprVal(false),
+				upgradeIndex: undefined,
+			}
+
 			defs.setPresetDefinitions(
 				'conn1',
 				presetsToMap([
 					makeButtonPreset('p1', {
-						model: makeButtonPresetModel({ feedbacks: [] }),
-						previewStyle: { color: 0xff0000 },
+						model: makeButtonPresetModel({ feedbacks: [modelFeedback] }),
+						presetExtraFeedbacks: [extraFeedback],
 					}),
 				]),
 				{}
@@ -799,13 +873,19 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToPreviewControlModel('conn1', 'p1')
 
 			expect(result).not.toBeNull()
-			const lastFeedback = result!.feedbacks[result!.feedbacks.length - 1]
-			expect(lastFeedback.type).toBe(EntityModelType.Feedback)
-			if (lastFeedback.type === EntityModelType.Feedback) {
-				expect(lastFeedback.connectionId).toBe('internal')
-				expect(lastFeedback.definitionId).toBe('check_expression')
-				expect(lastFeedback.style).toEqual({ color: 0xff0000 })
-			}
+			expect(result!.feedbacks).toHaveLength(2)
+			expect(result!.feedbacks[0].definitionId).toBe('some-fb')
+			expect(result!.feedbacks[1].definitionId).toBe('check_expression')
+		})
+
+		it('feedbacks empty when model feedbacks and presetExtraFeedbacks are empty', () => {
+			const { defs } = createInstanceDefinitions()
+			defs.setPresetDefinitions('conn1', presetsToMap([makeButtonPreset('p1')]), {})
+
+			const result = defs.convertPresetToPreviewControlModel('conn1', 'p1')
+
+			expect(result).not.toBeNull()
+			expect(result!.feedbacks).toHaveLength(0)
 		})
 
 		it('omits actions in steps', () => {
@@ -902,7 +982,7 @@ describe('InstanceDefinitions', () => {
 			expect(result!.steps['stepB'].options.runWhileHeld).toEqual([500])
 		})
 
-		it('preserves existing feedbacks when previewStyle appends check_expression', () => {
+		it('preserves model feedbacks when presetExtraFeedbacks is empty', () => {
 			const { defs } = createInstanceDefinitions()
 			const existingFeedback = {
 				type: EntityModelType.Feedback as const,
@@ -911,7 +991,6 @@ describe('InstanceDefinitions', () => {
 				definitionId: 'some-fb',
 				options: {},
 				isInverted: exprVal(false),
-				style: { color: 0x00ff00 },
 				upgradeIndex: undefined,
 			}
 
@@ -920,7 +999,6 @@ describe('InstanceDefinitions', () => {
 				presetsToMap([
 					makeButtonPreset('p1', {
 						model: makeButtonPresetModel({ feedbacks: [existingFeedback] }),
-						previewStyle: { bgcolor: 0x111111 },
 					}),
 				]),
 				{}
@@ -929,21 +1007,18 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToPreviewControlModel('conn1', 'p1')
 
 			expect(result).not.toBeNull()
-			expect(result!.feedbacks).toHaveLength(2)
-			// First is the original feedback
+			expect(result!.feedbacks).toHaveLength(1)
 			expect(result!.feedbacks[0].definitionId).toBe('some-fb')
-			// Second is the appended check_expression
-			expect(result!.feedbacks[1].definitionId).toBe('check_expression')
 		})
 
-		it('does not append check_expression when previewStyle is undefined', () => {
+		it('feedbacks come only from model when presetExtraFeedbacks is empty', () => {
 			const { defs } = createInstanceDefinitions()
-			defs.setPresetDefinitions('conn1', presetsToMap([makeButtonPreset('p1', { previewStyle: undefined })]), {})
+			defs.setPresetDefinitions('conn1', presetsToMap([makeButtonPreset('p1')]), {})
 
 			const result = defs.convertPresetToPreviewControlModel('conn1', 'p1')
 
 			expect(result).not.toBeNull()
-			// No check_expression feedback appended
+			// No extra feedbacks
 			expect(result!.feedbacks).toHaveLength(0)
 		})
 	})
@@ -974,7 +1049,7 @@ describe('InstanceDefinitions', () => {
 			expect(listener).toHaveBeenCalledWith('conn1')
 		})
 
-		it('replaces variable label references in style text', () => {
+		it('replaces variable label references in style text layer', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setPresetDefinitions(
 				'conn1',
@@ -982,15 +1057,7 @@ describe('InstanceDefinitions', () => {
 					makeButtonPreset('p1', {
 						model: makeButtonPresetModel({
 							style: {
-								text: '$(conn1:status) and $(conn1:volume)',
-								textExpression: false,
-								size: 'auto',
-								alignment: 'center:center',
-								pngalignment: 'center:center',
-								color: 0xffffff,
-								bgcolor: 0x000000,
-								show_topbar: 'default',
-								png64: null,
+								layers: [makeTextLayer('layer1', '$(conn1:status) and $(conn1:volume)')],
 							},
 						}),
 					}),
@@ -1003,10 +1070,11 @@ describe('InstanceDefinitions', () => {
 			const model = defs.convertPresetToControlModel('conn1', 'p1', null)
 
 			expect(model).not.toBeNull()
-			expect(model!.style.text).toBe('$(RenamedConn:status) and $(RenamedConn:volume)')
+			const textLayer = model!.style.layers[0] as any
+			expect(textLayer.text.value).toBe('$(RenamedConn:status) and $(RenamedConn:volume)')
 		})
 
-		it('replaces variable references in feedback style.text within presets', () => {
+		it('replaces variable references in feedback styleOverrides text within presets', () => {
 			const { defs } = createInstanceDefinitions()
 			defs.setPresetDefinitions(
 				'conn1',
@@ -1021,7 +1089,14 @@ describe('InstanceDefinitions', () => {
 									definitionId: 'some-fb',
 									options: {},
 									isInverted: exprVal(false),
-									style: { text: '$(conn1:level)' },
+									styleOverrides: [
+										{
+											overrideId: 'ov1',
+											elementId: 'layer1',
+											elementProperty: 'text',
+											override: exprVal('$(conn1:level)'),
+										},
+									],
 									upgradeIndex: undefined,
 								},
 							],
@@ -1039,7 +1114,7 @@ describe('InstanceDefinitions', () => {
 			const fb = model!.feedbacks[0]
 			expect(fb.type).toBe(EntityModelType.Feedback)
 			if (fb.type === EntityModelType.Feedback) {
-				expect(fb.style!.text).toBe('$(NewLabel:level)')
+				expect(fb.styleOverrides![0].override.value).toBe('$(NewLabel:level)')
 			}
 		})
 
@@ -1050,32 +1125,12 @@ describe('InstanceDefinitions', () => {
 				presetsToMap([
 					makeButtonPreset('p1', {
 						model: makeButtonPresetModel({
-							style: {
-								text: '$(conn1:a)',
-								textExpression: false,
-								size: 'auto',
-								alignment: 'center:center',
-								pngalignment: 'center:center',
-								color: 0xffffff,
-								bgcolor: 0x000000,
-								show_topbar: 'default',
-								png64: null,
-							},
+							style: { layers: [makeTextLayer('l1', '$(conn1:a)')] },
 						}),
 					}),
 					makeButtonPreset('p2', {
 						model: makeButtonPresetModel({
-							style: {
-								text: '$(conn1:b)',
-								textExpression: false,
-								size: 'auto',
-								alignment: 'center:center',
-								pngalignment: 'center:center',
-								color: 0xffffff,
-								bgcolor: 0x000000,
-								show_topbar: 'default',
-								png64: null,
-							},
+							style: { layers: [makeTextLayer('l2', '$(conn1:b)')] },
 						}),
 					}),
 				]),
@@ -1084,8 +1139,8 @@ describe('InstanceDefinitions', () => {
 
 			defs.updateVariablePrefixesForLabel('conn1', 'X')
 
-			expect(defs.convertPresetToControlModel('conn1', 'p1', null)!.style.text).toBe('$(X:a)')
-			expect(defs.convertPresetToControlModel('conn1', 'p2', null)!.style.text).toBe('$(X:b)')
+			expect((defs.convertPresetToControlModel('conn1', 'p1', null)!.style.layers[0] as any).text.value).toBe('$(X:a)')
+			expect((defs.convertPresetToControlModel('conn1', 'p2', null)!.style.layers[0] as any).text.value).toBe('$(X:b)')
 		})
 	})
 
@@ -1093,7 +1148,7 @@ describe('InstanceDefinitions', () => {
 
 	describe('createTrpcRouter', () => {
 		const t = initTRPC.context<TrpcContext>().create()
-		const testCtx: TrpcContext = { clientId: 'test-client', clientIp: '127.0.0.1' }
+		const testCtx: TrpcContext = createMockTrpcContext()
 
 		function createCaller(defs: InstanceDefinitions) {
 			const trpcRouter = defs.createTrpcRouter()
@@ -1302,8 +1357,8 @@ describe('InstanceDefinitions', () => {
 			})
 
 			// Create entities
-			const action = defs.createEntityItem('conn1', EntityModelType.Action, 'doSomething')
-			const feedback = defs.createEntityItem('conn1', EntityModelType.Feedback, 'isOn')
+			const action = defs.createEntityItem('conn1', EntityModelType.Action, 'doSomething', null)
+			const feedback = defs.createEntityItem('conn1', EntityModelType.Feedback, 'isOn', null)
 
 			expect(action).toMatchSnapshot()
 			expect(feedback).toMatchSnapshot()
@@ -1327,18 +1382,9 @@ describe('InstanceDefinitions', () => {
 					makeButtonPreset('my-preset', {
 						model: makeButtonPresetModel({
 							style: {
-								text: 'Status $(conn1:status)',
-								textExpression: false,
-								size: 'auto',
-								alignment: 'center:center',
-								pngalignment: 'center:center',
-								color: 0xffffff,
-								bgcolor: 0x000000,
-								show_topbar: 'default',
-								png64: null,
+								layers: [makeTextLayer('text-1', 'Status $(conn1:status)')],
 							},
 						}),
-						previewStyle: { bgcolor: 0x333333 },
 					}),
 				]),
 				{}
@@ -1357,6 +1403,10 @@ describe('InstanceDefinitions', () => {
 			defs.updateVariablePrefixesForLabel('conn1', 'RenamedConn')
 			expect(updateListener).toHaveBeenCalledTimes(2)
 
+			// Verify variable was replaced in layer
+			const updatedModel = defs.convertPresetToControlModel('conn1', 'my-preset', null)
+			expect((updatedModel!.style.layers[0] as any).text.value).toBe('Status $(RenamedConn:status)')
+
 			// Forget
 			defs.forgetConnection('conn1')
 			expect(updateListener).toHaveBeenCalledTimes(3)
@@ -1368,9 +1418,9 @@ describe('InstanceDefinitions', () => {
 
 	describe('no-op and diff event emission', () => {
 		const t = initTRPC.context<TrpcContext>().create()
-		const testCtx: TrpcContext = { clientId: 'test-client', clientIp: '127.0.0.1' }
+		const testCtx: TrpcContext = createMockTrpcContext()
 
-		it('setActionDefinitions with identical data still yields update-connection (diff has empty patches)', async () => {
+		it('setActionDefinitions with identical data does not emit an update', async () => {
 			const { defs } = createInstanceDefinitions()
 			const actDef = makeActionDefinition({ label: 'Same' })
 			defs.setActionDefinitions('conn1', { act1: actDef })
@@ -1383,19 +1433,20 @@ describe('InstanceDefinitions', () => {
 			// Consume init
 			await iter.next()
 
-			// Re-set with structurally identical data
+			// Re-set with structurally identical data, then make a real change
 			defs.setActionDefinitions('conn1', { act1: makeActionDefinition({ label: 'Same' }) })
+			defs.setActionDefinitions('conn1', { act1: makeActionDefinition({ label: 'Changed' }) })
 
+			// The next event is for the real change, the identical set emitted nothing
 			const second = await iter.next()
-
-			// diffObjects returns a diff even for identical data (with empty json-patch arrays)
 			expect(second.value).toHaveProperty('type', 'update-connection')
 			expect(second.value).toHaveProperty('connectionId', 'conn1')
+			expect(JSON.stringify(second.value)).toContain('Changed')
 
 			await iter.return?.()
 		})
 
-		it('setFeedbackDefinitions with identical data still yields update-connection', async () => {
+		it('setFeedbackDefinitions with identical data does not emit an update', async () => {
 			const { defs } = createInstanceDefinitions()
 			const fbDef = makeFeedbackDefinition({ label: 'Same' })
 			defs.setFeedbackDefinitions('conn1', { fb1: fbDef })
@@ -1408,13 +1459,15 @@ describe('InstanceDefinitions', () => {
 			// Consume init
 			await iter.next()
 
-			// Re-set with structurally identical data
+			// Re-set with structurally identical data, then make a real change
 			defs.setFeedbackDefinitions('conn1', { fb1: makeFeedbackDefinition({ label: 'Same' }) })
+			defs.setFeedbackDefinitions('conn1', { fb1: makeFeedbackDefinition({ label: 'Changed' }) })
 
+			// The next event is for the real change, the identical set emitted nothing
 			const second = await iter.next()
-
 			expect(second.value).toHaveProperty('type', 'update-connection')
 			expect(second.value).toHaveProperty('connectionId', 'conn1')
+			expect(JSON.stringify(second.value)).toContain('Changed')
 
 			await iter.return?.()
 		})
@@ -1473,7 +1526,7 @@ describe('InstanceDefinitions', () => {
 
 	describe('simplifyPresetsForUi (via TRPC)', () => {
 		const t = initTRPC.context<TrpcContext>().create()
-		const testCtx: TrpcContext = { clientId: 'test-client', clientIp: '127.0.0.1' }
+		const testCtx: TrpcContext = createMockTrpcContext()
 
 		it('assigns sequential order values to presets', async () => {
 			const { defs } = createInstanceDefinitions()
@@ -1505,7 +1558,7 @@ describe('InstanceDefinitions', () => {
 
 	describe('forgetConnection events via TRPC', () => {
 		const t = initTRPC.context<TrpcContext>().create()
-		const testCtx: TrpcContext = { clientId: 'test-client', clientIp: '127.0.0.1' }
+		const testCtx: TrpcContext = createMockTrpcContext()
 
 		it('emits forget-connection on feedbacks subscription', async () => {
 			const { defs } = createInstanceDefinitions()
@@ -1610,7 +1663,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.text).toEqual(exprVal('Hello $(conn1:variable)'))
 		})
 
@@ -1644,7 +1697,6 @@ describe('InstanceDefinitions', () => {
 								value: exprVal('Check $(label:status)'),
 							},
 							isInverted: exprVal(false),
-							style: {},
 							upgradeIndex: undefined,
 						},
 					],
@@ -1658,6 +1710,185 @@ describe('InstanceDefinitions', () => {
 
 			const feedback = result!.feedbacks[0]
 			expect(feedback.options.value).toEqual(exprVal('Check $(conn1:status)'))
+		})
+
+		it('does not replace variables in feedback options without useVariables or expression support', () => {
+			const { defs } = createInstanceDefinitions()
+
+			const feedbackDef = makeFeedbackDefinition({
+				label: 'Test Feedback',
+				options: [
+					{
+						id: 'value',
+						type: 'textinput',
+						label: 'Value',
+						default: '',
+						// No useVariables
+					},
+				],
+			})
+			defs.setFeedbackDefinitions('conn1', { fb1: feedbackDef })
+
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					feedbacks: [
+						{
+							type: EntityModelType.Feedback,
+							id: 'feedback1',
+							connectionId: 'conn1',
+							definitionId: 'fb1',
+							options: {
+								value: exprVal('$(label:status) should not change'),
+							},
+							isInverted: exprVal(false),
+							upgradeIndex: undefined,
+						},
+					],
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			const feedback = result!.feedbacks[0]
+			expect(feedback.options.value).toEqual(exprVal('$(label:status) should not change'))
+		})
+
+		it('replaces $(label:var) in feedback expression fields when optionsSupportExpressions is true', () => {
+			const { defs } = createInstanceDefinitions()
+
+			const feedbackDef = makeFeedbackDefinition({
+				label: 'Expression Feedback',
+				optionsSupportExpressions: true,
+				options: [
+					{
+						id: 'expr',
+						type: 'expression',
+						label: 'Expression',
+						default: '',
+					},
+				],
+			})
+			defs.setFeedbackDefinitions('conn1', { fb1: feedbackDef })
+
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					feedbacks: [
+						{
+							type: EntityModelType.Feedback,
+							id: 'feedback1',
+							connectionId: 'conn1',
+							definitionId: 'fb1',
+							options: {
+								expr: exprVal('$(label:count) > 10'),
+							},
+							isInverted: exprVal(false),
+							upgradeIndex: undefined,
+						},
+					],
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			const feedback = result!.feedbacks[0]
+			expect(feedback.options.expr).toEqual(exprVal('$(conn1:count) > 10'))
+		})
+
+		it('fixes up feedback options and styleOverrides together on a single feedback', () => {
+			const { defs } = createInstanceDefinitions()
+
+			const feedbackDef = makeFeedbackDefinition({
+				label: 'Combined Feedback',
+				options: [
+					{
+						id: 'value',
+						type: 'textinput',
+						label: 'Value',
+						default: '',
+						useVariables: CompanionFieldVariablesSupport.InternalParser,
+					},
+				],
+			})
+			defs.setFeedbackDefinitions('conn1', { fb1: feedbackDef })
+
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					feedbacks: [
+						{
+							type: EntityModelType.Feedback,
+							id: 'feedback1',
+							connectionId: 'conn1',
+							definitionId: 'fb1',
+							options: {
+								value: exprVal('Option $(label:status)'),
+							},
+							isInverted: exprVal(false),
+							styleOverrides: [
+								{
+									overrideId: 'ov1',
+									elementId: 'layer1',
+									elementProperty: 'text',
+									override: exprVal('Override $(label:level)'),
+								},
+							],
+							upgradeIndex: undefined,
+						},
+					],
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			const feedback = result!.feedbacks[0]
+			expect(feedback.options.value).toEqual(exprVal('Option $(conn1:status)'))
+			expect(feedback.type).toBe(EntityModelType.Feedback)
+			if (feedback.type === EntityModelType.Feedback) {
+				expect(feedback.styleOverrides![0].override.value).toBe('Override $(conn1:level)')
+			}
+		})
+
+		it('leaves feedback options untouched when the feedback definition is missing', () => {
+			const { defs } = createInstanceDefinitions()
+
+			// No feedback definition registered for 'fb1'
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					feedbacks: [
+						{
+							type: EntityModelType.Feedback,
+							id: 'feedback1',
+							connectionId: 'conn1',
+							definitionId: 'fb1',
+							options: {
+								value: exprVal('Check $(label:status)'),
+							},
+							isInverted: exprVal(false),
+							upgradeIndex: undefined,
+						},
+					],
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			const feedback = result!.feedbacks[0]
+			expect(feedback.options.value).toEqual(exprVal('Check $(label:status)'))
 		})
 
 		it('replaces $(label:var) in expression fields when optionsSupportExpressions is true', () => {
@@ -1709,7 +1940,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.expr).toEqual(exprVal('$(conn1:count) + 10'))
 		})
 
@@ -1763,7 +1994,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.text).toEqual(exprExpr('$(conn1:var1) + " text"'))
 		})
 
@@ -1817,7 +2048,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			// Should NOT replace because isExpression is false (literal dropdown value case)
 			expect(action.options.text).toEqual(exprVal('$(label:var1)'))
 		})
@@ -1872,26 +2103,18 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.text).toEqual(exprVal('$(label:var) should not change'))
 		})
 
-		it('replaces $(label:var) in button style text', () => {
+		it('replaces $(label:var) in button style text layer', () => {
 			const { defs } = createInstanceDefinitions()
 
 			const preset = makeButtonPreset('p1', {
 				model: {
 					...makeButtonPresetModel(),
 					style: {
-						text: 'Status: $(label:state)',
-						textExpression: false,
-						size: 'auto',
-						alignment: 'center:center',
-						pngalignment: 'center:center',
-						color: 0xffffff,
-						bgcolor: 0x000000,
-						show_topbar: 'default',
-						png64: null,
+						layers: [makeTextLayer('text-1', 'Status: $(label:state)')],
 					},
 				},
 			})
@@ -1900,10 +2123,68 @@ describe('InstanceDefinitions', () => {
 
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
-			expect(result!.style.text).toBe('Status: $(conn1:state)')
+			expect((result!.style.layers[0] as any).text.value).toBe('Status: $(conn1:state)')
 		})
 
-		it('replaces $(label:var) in feedback style text', () => {
+		it('preserves the $(this:) and $(local:) prefixes while still rewriting module variables', () => {
+			const { defs } = createInstanceDefinitions()
+
+			const actionDef = makeActionDefinition({
+				label: 'Test Action',
+				options: [
+					{
+						id: 'text',
+						type: 'textinput',
+						label: 'Text',
+						default: '',
+						useVariables: CompanionFieldVariablesSupport.InternalParser,
+					},
+				],
+			})
+			defs.setActionDefinitions('conn1', { act1: actionDef })
+
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					style: { layers: [makeTextLayer('l1', 'Page $(this:page) of $(label:total)')] },
+					steps: {
+						step1: {
+							options: { runWhileHeld: [] },
+							action_sets: {
+								down: [
+									{
+										type: EntityModelType.Action,
+										id: 'action1',
+										connectionId: 'conn1',
+										definitionId: 'act1',
+										options: {
+											text: exprVal('$(this:page) / $(label:count) / $(local:foo)'),
+										},
+										upgradeIndex: undefined,
+									},
+								],
+								up: [],
+								rotate_left: undefined,
+								rotate_right: undefined,
+							},
+						},
+					},
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			// $(this:) and $(local:) are self/button references and must survive untouched;
+			// only the module variable ($(label:...)) is rewritten to the connection label
+			const action = result!.steps.step1.action_sets.down![0]
+			expect(action.options.text).toEqual(exprVal('$(this:page) / $(conn1:count) / $(local:foo)'))
+			expect((result!.style.layers[0] as any).text.value).toBe('Page $(this:page) of $(conn1:total)')
+		})
+
+		it('replaces $(label:var) in feedback styleOverrides text', () => {
 			const { defs } = createInstanceDefinitions()
 
 			const feedbackDef = makeFeedbackDefinition({ label: 'Test Feedback' })
@@ -1920,9 +2201,14 @@ describe('InstanceDefinitions', () => {
 							definitionId: 'fb1',
 							options: {},
 							isInverted: exprVal(false),
-							style: {
-								text: 'Value: $(label:reading)',
-							},
+							styleOverrides: [
+								{
+									overrideId: 'ov1',
+									elementId: 'layer1',
+									elementProperty: 'text',
+									override: exprVal('Value: $(label:reading)'),
+								},
+							],
 							upgradeIndex: undefined,
 						},
 					],
@@ -1936,7 +2222,7 @@ describe('InstanceDefinitions', () => {
 
 			const feedback = result!.feedbacks[0]
 			if (feedback.type === EntityModelType.Feedback) {
-				expect(feedback.style?.text).toBe('Value: $(conn1:reading)')
+				expect(feedback.styleOverrides![0].override.value).toBe('Value: $(conn1:reading)')
 			}
 		})
 
@@ -1990,7 +2276,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.text).toEqual(exprVal('$(conn1:var1) and $(conn1:var2) and $(conn1:var3)'))
 		})
 
@@ -2045,7 +2331,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.text).toEqual({ value: '$(conn1:var)', isExpression: true })
 		})
 
@@ -2086,7 +2372,7 @@ describe('InstanceDefinitions', () => {
 			expect(result).not.toBeNull()
 
 			// Variable replacement should not happen for missing definitions
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.text).toEqual(exprVal('$(label:var)'))
 		})
 
@@ -2106,7 +2392,6 @@ describe('InstanceDefinitions', () => {
 								value: exprVal('$(label:var)'),
 							},
 							isInverted: exprVal(false),
-							style: {},
 							upgradeIndex: undefined,
 						},
 					],
@@ -2121,6 +2406,170 @@ describe('InstanceDefinitions', () => {
 			// Variable replacement should not happen for missing definitions
 			const feedback = result!.feedbacks[0]
 			expect(feedback.options.value).toEqual(exprVal('$(label:var)'))
+		})
+
+		it('replaces $(label:var) in local variable options (resolved via the internal definition)', () => {
+			const { defs } = createInstanceDefinitions()
+
+			// Local variables are internal `user_value` feedbacks, so their definition lives under 'internal'
+			defs.setFeedbackDefinitions('internal', {
+				user_value: makeFeedbackDefinition({
+					label: 'User Value',
+					options: [
+						{
+							id: 'startup_value',
+							type: 'textinput',
+							label: 'Startup',
+							default: '',
+							useVariables: CompanionFieldVariablesSupport.InternalParser,
+						},
+					],
+				}),
+			})
+
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					localVariables: [
+						{
+							type: EntityModelType.Feedback,
+							id: 'lv1',
+							connectionId: 'internal',
+							definitionId: 'user_value',
+							variableName: 'var1',
+							options: {
+								startup_value: exprVal('seed $(label:origin)'),
+							},
+							isInverted: exprVal(false),
+							upgradeIndex: undefined,
+						},
+					],
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			expect(result!.localVariables[0].options.startup_value).toEqual(exprVal('seed $(conn1:origin)'))
+		})
+
+		it('replaces $(label:var) in presetExtraFeedbacks options (resolved via the internal definition)', () => {
+			const { defs } = createInstanceDefinitions()
+
+			defs.setFeedbackDefinitions('internal', {
+				check_expression: makeFeedbackDefinition({
+					label: 'Check Expression',
+					options: [
+						{
+							id: 'expression',
+							type: 'textinput',
+							label: 'Expr',
+							default: '',
+							useVariables: CompanionFieldVariablesSupport.InternalParser,
+						},
+					],
+				}),
+			})
+
+			const preset = makeButtonPreset('p1', {
+				presetExtraFeedbacks: [
+					{
+						type: EntityModelType.Feedback,
+						id: 'extra1',
+						connectionId: 'internal',
+						definitionId: 'check_expression',
+						options: {
+							expression: exprVal('$(label:ready)'),
+						},
+						isInverted: exprVal(false),
+						upgradeIndex: undefined,
+					},
+				],
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			// presetExtraFeedbacks are surfaced through the preview model
+			const preview = defs.convertPresetToPreviewControlModel('conn1', 'p1')
+			expect(preview).not.toBeNull()
+
+			const extra = preview!.feedbacks.find((f) => f.definitionId === 'check_expression')
+			expect(extra).toBeDefined()
+			expect(extra!.options.expression).toEqual(exprVal('$(conn1:ready)'))
+		})
+
+		it('replaces $(label:var) in options of entities nested inside building block children', () => {
+			const { defs } = createInstanceDefinitions()
+
+			// The child is a module action
+			defs.setActionDefinitions('conn1', {
+				act1: makeActionDefinition({
+					options: [
+						{
+							id: 'text',
+							type: 'textinput',
+							label: 'Text',
+							default: '',
+							useVariables: CompanionFieldVariablesSupport.InternalParser,
+						},
+					],
+				}),
+			})
+			// The wrapping building block is an internal action_group
+			defs.setActionDefinitions('internal', {
+				action_group: makeActionDefinition({ label: 'Group', options: [] }),
+			})
+
+			const preset = makeButtonPreset('p1', {
+				model: {
+					...makeButtonPresetModel(),
+					steps: {
+						step1: {
+							options: { runWhileHeld: [] },
+							action_sets: {
+								down: [
+									{
+										type: EntityModelType.Action,
+										id: 'grp1',
+										connectionId: 'internal',
+										definitionId: 'action_group',
+										options: {},
+										children: {
+											default: [
+												{
+													type: EntityModelType.Action,
+													id: 'child1',
+													connectionId: 'conn1',
+													definitionId: 'act1',
+													options: {
+														text: exprVal('Hi $(label:name)'),
+													},
+													upgradeIndex: undefined,
+												},
+											],
+										},
+										upgradeIndex: undefined,
+									},
+								],
+								up: [],
+								rotate_left: undefined,
+								rotate_right: undefined,
+							},
+						},
+					},
+				},
+			})
+
+			defs.setPresetDefinitions('conn1', presetsToMap([preset]), {})
+
+			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
+			expect(result).not.toBeNull()
+
+			const group = result!.steps.step1.action_sets.down![0]
+			const child = group.children!.default![0]
+			expect(child.options.text).toEqual(exprVal('Hi $(conn1:name)'))
 		})
 
 		it('handles non-string values in options correctly', () => {
@@ -2181,7 +2630,7 @@ describe('InstanceDefinitions', () => {
 			const result = defs.convertPresetToControlModel('conn1', 'p1', null)
 			expect(result).not.toBeNull()
 
-			const action = result!.steps.step1.action_sets.down[0]
+			const action = result!.steps.step1.action_sets.down![0]
 			expect(action.options.number).toEqual(exprVal(42))
 			expect(action.options.checkbox).toEqual(exprVal(true))
 		})

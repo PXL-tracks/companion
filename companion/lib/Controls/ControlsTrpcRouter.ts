@@ -1,19 +1,19 @@
-import { publicProcedure } from '../UI/TRPC.js'
-import type { SomeControl } from './IControlFragments.js'
-import z from 'zod'
-import { zodLocation } from '../Preview/Graphics.js'
-import type { InstanceDefinitions } from '../Instance/Definitions.js'
-import type { ControlsController } from './Controller.js'
-import type { IPageStore } from '../Page/Store.js'
-import { CreateBankControlId, formatLocation } from '@companion-app/shared/ControlId.js'
-import { nanoid } from 'nanoid'
-import type { Logger } from '../Log/Controller.js'
-import type { ControlCommonEvents } from './ControlDependencies.js'
 import type EventEmitter from 'node:events'
-import { JsonValueSchema, type ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import { nanoid } from 'nanoid'
+import z from 'zod'
+import { CreateBankControlId, formatLocation } from '@companion-app/shared/ControlId.js'
 import { EntityModelType, type ActionEntityModel, type FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import { JsonValueSchema, type ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
 import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import type { InstanceDefinitions } from '../Instance/Definitions.js'
 import type { InstanceProcessManager } from '../Instance/ProcessManager.js'
+import type { Logger } from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import { zodLocation } from '../Preview/Graphics.js'
+import { publicProcedure } from '../UI/TRPC.js'
+import type { ControlCommonEvents } from './ControlDependencies.js'
+import type { ControlsController } from './Controller.js'
+import type { SomeControl } from './IControlFragments.js'
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function createControlsTrpcRouter(
@@ -44,6 +44,23 @@ export function createControlsTrpcRouter(
 				if (!model) return null
 
 				return controlsController.importControl(input.location, model)
+			}),
+
+		convertControl: publicProcedure
+			.input(
+				z.object({
+					location: zodLocation,
+				})
+			)
+			.mutation(async ({ input }) => {
+				const controlId = pageStore.getControlIdAt(input.location)
+				if (!controlId) return null
+
+				const control = controlsMap.get(controlId)
+				if (!control || !control.supportsConvert) return null
+
+				const newModel = control.convertControl()
+				return controlsController.importControl(input.location, newModel)
 			}),
 
 		resetControl: publicProcedure
@@ -155,7 +172,8 @@ export function createControlsTrpcRouter(
 
 					controlEvents.emit('controlPlacedAt', toLocation, newControlId)
 
-					newControl.triggerRedraw()
+					// Ensure it is redrawn
+					newControl.commitChange(true)
 
 					return true
 				}
@@ -269,24 +287,6 @@ export function createControlsTrpcRouter(
 				if (!controlId) return
 
 				controlsController.abortAllDelayedActions(null)
-			}),
-
-		setStyleFields: publicProcedure
-			.input(
-				z.object({
-					controlId: z.string(),
-					styleFields: z.record(z.string(), z.any()),
-				})
-			)
-			.mutation(async ({ input }) => {
-				const control = controlsMap.get(input.controlId)
-				if (!control) return false
-
-				if (control.supportsStyle) {
-					return control.styleSetFields(input.styleFields)
-				} else {
-					throw new Error(`Control "${input.controlId}" does not support config`)
-				}
 			}),
 
 		setOptionsField: publicProcedure

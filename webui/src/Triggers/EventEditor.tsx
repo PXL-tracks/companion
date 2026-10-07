@@ -1,43 +1,46 @@
-import { CButton, CForm, CButtonGroup, CFormSwitch, CCol } from '@coreui/react'
+import { useDragDropMonitor } from '@dnd-kit/react'
+import { isSortable, useSortable } from '@dnd-kit/react/sortable'
 import {
-	faSort,
-	faTrash,
+	faClone,
 	faCompressArrowsAlt,
 	faExpandArrowsAlt,
-	faClone,
 	faPencil,
+	faSort,
+	faTrash,
 } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import React, { useCallback, useContext, useMemo, useRef, useState, useEffect } from 'react'
 import classNames from 'classnames'
-import { PreventDefaultHandler } from '~/Resources/util.js'
-import { MyErrorBoundary } from '~/Resources/Error.js'
-import { checkDragState, type DragState } from '~/Resources/DragAndDrop.js'
-import { OptionsInputField } from '~/Controls/OptionsInputField.js'
-import { useDrag, useDrop, useDragLayer } from 'react-dnd'
-import { getEmptyImage } from 'react-dnd-html5-backend'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { usePanelCollapseHelperLite, type PanelCollapseHelperLite } from '~/Helpers/CollapseHelper.js'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useMemo, useRef, useState } from 'react'
+import type { JsonValue } from 'type-fest'
 import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
+import { optionsObjectToExpressionOptions, type ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { Form } from '~/Components/Form.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { SwitchInputField } from '~/Components/SwitchInputField.js'
+import { TextInputFieldSimple } from '~/Components/TextInputField.js'
+import type { LocalVariablesStore } from '~/Controls/LocalVariablesStore.js'
+import { OptionsInputField } from '~/Controls/OptionsInputField.js'
+import { usePanelCollapseHelperLite, type PanelCollapseHelperLite } from '~/Helpers/CollapseHelper.js'
 import { useOptionsVisibility } from '~/Hooks/useOptionsAndIsVisible.js'
-import { TextInputField } from '~/Components/TextInputField.js'
-import { AddEventDropdown } from './AddEventDropdown.js'
+import { MyErrorBoundary } from '~/Resources/Error.js'
+import { PreventDefaultHandler } from '~/Resources/util.js'
 import {
-	useControlEventService,
 	useControlEventsEditorService,
+	useControlEventService,
 	type IEventEditorEventService,
 	type IEventEditorService,
 } from '~/Services/Controls/ControlEventsService.js'
-import { observer } from 'mobx-react-lite'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import type { LocalVariablesStore } from '~/Controls/LocalVariablesStore.js'
-import { optionsObjectToExpressionOptions, type ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
-import type { JsonValue } from 'type-fest'
+import { AddEventDropdown } from './AddEventDropdown.js'
 
 interface TriggerEventEditorProps {
 	controlId: string
 	events: EventInstance[]
 	heading: JSX.Element | string
+	subheading?: React.ReactNode
 	localVariablesStore: LocalVariablesStore
 }
 
@@ -45,49 +48,54 @@ export const TriggerEventEditor = observer(function TriggerEventEditor({
 	controlId,
 	events,
 	heading,
+	subheading,
 	localVariablesStore,
 }: TriggerEventEditorProps) {
 	const confirmModal = useRef<GenericConfirmModalRef>(null)
 
 	const eventsService = useControlEventsEditorService(controlId, confirmModal)
 
-	const eventsRef = useRef<EventInstance[]>()
-	eventsRef.current = events
-
 	const eventIds = useMemo(() => events.map((ev) => ev.id), [events])
-	const panelCollapseHelper = usePanelCollapseHelperLite(`events_${controlId}`, eventIds)
+	const panelCollapseHelper = usePanelCollapseHelperLite(`events_${controlId}`, eventIds, false, {
+		kind: 'control',
+		id: controlId,
+	})
+
+	const dragId = `events_${controlId}`
+	useDragDropMonitor({
+		onDragEnd(event) {
+			if (event.canceled) return
+			const { source } = event.operation
+			if (!source || source.type !== dragId || !isSortable(source)) return
+			const { initialIndex, index } = source
+			if (initialIndex === index) return
+			eventsService.moveCard(initialIndex, index)
+		},
+	})
 
 	return (
 		<>
 			<GenericConfirmModal ref={confirmModal} />
 
-			<h4 className="mt-3">
+			<h5 className="mt-2">
 				{heading}
 				{events.length > 1 && (
-					<CButtonGroup className="right">
-						<CButtonGroup>
-							{panelCollapseHelper.canExpandAll() && (
-								<CButton size="sm" onClick={panelCollapseHelper.setAllExpanded} title="Expand all events">
-									<FontAwesomeIcon icon={faExpandArrowsAlt} />
-								</CButton>
-							)}
-							{panelCollapseHelper.canCollapseAll() && (
-								<CButton size="sm" onClick={panelCollapseHelper.setAllCollapsed} title="Collapse all events">
-									<FontAwesomeIcon icon={faCompressArrowsAlt} />
-								</CButton>
-							)}
-						</CButtonGroup>
-					</CButtonGroup>
+					<ButtonGroup className="right">
+						{panelCollapseHelper.canExpandAll() && (
+							<Button size="sm" onClick={panelCollapseHelper.setAllExpanded} title="Expand all events">
+								<FontAwesomeIcon icon={faExpandArrowsAlt} />
+							</Button>
+						)}
+						{panelCollapseHelper.canCollapseAll() && (
+							<Button size="sm" onClick={panelCollapseHelper.setAllCollapsed} title="Collapse all events">
+								<FontAwesomeIcon icon={faCompressArrowsAlt} />
+							</Button>
+						)}
+					</ButtonGroup>
 				)}
-			</h4>
+			</h5>
+			{subheading}
 
-			<EventListDragLayer
-				events={events}
-				dragId={`events_${controlId}`}
-				serviceFactory={eventsService}
-				panelCollapseHelper={panelCollapseHelper}
-				localVariablesStore={localVariablesStore}
-			/>
 			<div className="entity-list">
 				{events.map((a, i) => (
 					<MyErrorBoundary key={a?.id ?? i}>
@@ -95,7 +103,7 @@ export const TriggerEventEditor = observer(function TriggerEventEditor({
 							key={a?.id ?? i}
 							index={i}
 							event={a}
-							dragId={`events_${controlId}`}
+							dragId={dragId}
 							serviceFactory={eventsService}
 							panelCollapseHelper={panelCollapseHelper}
 							localVariablesStore={localVariablesStore}
@@ -111,25 +119,14 @@ export const TriggerEventEditor = observer(function TriggerEventEditor({
 	)
 })
 
-interface EventsTableRowDragObject {
-	eventId: string
-	index: number
-	dragState: DragState | null
-	width?: number
-}
-interface EventsTableRowDragCollection {
-	isDragging: boolean
-}
-
 interface EventEditorRowContentProps {
 	event: EventInstance
 	serviceFactory: IEventEditorService
 	panelCollapseHelper: PanelCollapseHelperLite
 	localVariablesStore: LocalVariablesStore
 
-	isDragging: boolean
-	rowRef: React.LegacyRef<HTMLDivElement> | null
-	dragRef: React.LegacyRef<HTMLDivElement> | null
+	rowRef: (element: Element | null) => void
+	dragRef: (element: Element | null) => void
 }
 
 const EventEditorRowContent = observer(function EventEditorRowContent({
@@ -137,14 +134,18 @@ const EventEditorRowContent = observer(function EventEditorRowContent({
 	serviceFactory,
 	panelCollapseHelper,
 	localVariablesStore,
-	isDragging,
 	rowRef,
 	dragRef,
 }: EventEditorRowContentProps): JSX.Element {
 	const service = useControlEventService(serviceFactory, event)
 
 	return (
-		<div ref={rowRef} className={classNames('entity-row', { 'entitylist-dragging': isDragging })}>
+		<div
+			ref={rowRef}
+			className={classNames('entity-row', {
+				'entity-disabled': !event.enabled,
+			})}
+		>
 			<div ref={dragRef} className="entity-row-reorder">
 				<FontAwesomeIcon icon={faSort} />
 			</div>
@@ -177,65 +178,15 @@ function EventsTableRow({
 	panelCollapseHelper,
 	localVariablesStore,
 }: EventsTableRowProps): JSX.Element | null {
-	const ref = useRef<HTMLDivElement>(null)
-	const [, drop] = useDrop<EventsTableRowDragObject>({
-		accept: dragId,
-		hover(item, monitor) {
-			if (!ref.current) {
-				return
-			}
-
-			// Ensure the hover targets this element, and not a child element
-			if (!monitor.isOver({ shallow: true })) return
-
-			const dragIndex = item.index
-			const hoverIndex = index
-			const hoverId = event.id
-
-			if (!checkDragState(item, monitor, hoverId)) return
-
-			// Don't replace items with themselves
-			if (dragIndex === hoverIndex) {
-				return
-			}
-
-			// Time to actually perform the action
-			serviceFactory.moveCard(dragIndex, hoverIndex)
-
-			// Note: we're mutating the monitor item here!
-			// Generally it's better to avoid mutations,
-			// but it's good here for the sake of performance
-			// to avoid expensive index searches.
-			item.index = hoverIndex
-		},
-		drop(item, _monitor) {
-			item.dragState = null
-		},
-	})
-
-	const [_c, drag, preview] = useDrag<EventsTableRowDragObject, never, EventsTableRowDragCollection>({
+	// transition:null makes swaps instant (no 250ms slide). Direction-lock hysteresis that stops
+	// short-past-tall jitter is handled globally by <SortableHysteresis> in App.tsx.
+	const { ref, handleRef } = useSortable({
+		id: event.id,
+		index,
 		type: dragId,
-		item: () => ({
-			eventId: event.id,
-			index: index,
-			dragState: null,
-			width: ref.current?.offsetWidth,
-		}),
+		accept: dragId,
+		transition: null,
 	})
-
-	// Check if the current item is being dragged
-	const { draggingItem } = useDragLayer((monitor) => ({
-		draggingItem: monitor.getItem<EventsTableRowDragObject>(),
-	}))
-	const isDragging = draggingItem?.eventId === event.id
-
-	// Hide default browser drag preview
-	useEffect(() => {
-		preview(getEmptyImage(), { captureDraggingState: true })
-	}, [preview])
-
-	// Connect drag and drop
-	drop(ref)
 
 	if (!event) {
 		// Invalid event, so skip
@@ -248,70 +199,11 @@ function EventsTableRow({
 			serviceFactory={serviceFactory}
 			panelCollapseHelper={panelCollapseHelper}
 			localVariablesStore={localVariablesStore}
-			isDragging={isDragging}
-			dragRef={drag}
+			dragRef={handleRef}
 			rowRef={ref}
 		/>
 	)
 }
-
-interface EventListDragLayerProps {
-	events: EventInstance[]
-	dragId: string
-	serviceFactory: IEventEditorService
-	panelCollapseHelper: PanelCollapseHelperLite
-	localVariablesStore: LocalVariablesStore
-}
-
-const EventListDragLayer = observer(function EventListDragLayer({
-	events,
-	dragId,
-	serviceFactory,
-	panelCollapseHelper,
-	localVariablesStore,
-}: EventListDragLayerProps): JSX.Element | null {
-	const { isDragging, item, currentOffset } = useDragLayer<{
-		isDragging: boolean
-		item: EventsTableRowDragObject | null
-		currentOffset: { x: number; y: number } | null
-	}>((monitor) => ({
-		isDragging: monitor.isDragging() && monitor.getItemType() === dragId,
-		item: monitor.getItem(),
-		currentOffset: monitor.getSourceClientOffset(),
-	}))
-
-	if (!isDragging || !item || !currentOffset) {
-		return null
-	}
-
-	const event = events.find((e) => e.id === item.eventId)
-	if (!event) return null
-
-	return (
-		<div
-			className="entity-list-drag-layer"
-			style={{
-				position: 'fixed',
-				pointerEvents: 'none',
-				zIndex: 100,
-				left: 0,
-				top: 0,
-				transform: `translate(${currentOffset.x}px, ${currentOffset.y}px)`,
-				width: item.width,
-			}}
-		>
-			<EventEditorRowContent
-				event={event}
-				serviceFactory={serviceFactory}
-				panelCollapseHelper={panelCollapseHelper}
-				localVariablesStore={localVariablesStore}
-				isDragging={true}
-				rowRef={null}
-				dragRef={null}
-			/>
-		</div>
-	)
-})
 
 interface EventEditorProps {
 	event: EventInstance
@@ -329,11 +221,6 @@ const EventEditor = observer(function EventEditor({
 	const { eventDefinitions } = useContext(RootAppStoreContext)
 
 	const eventSpec = eventDefinitions.definitions.get(event.type)
-
-	const innerSetEnabled = useCallback(
-		(e: React.FormEvent<HTMLInputElement>) => service.setEnabled(e.currentTarget.checked),
-		[service]
-	)
 
 	const name = eventSpec ? eventSpec.name : `${event.type} (undefined)`
 
@@ -363,71 +250,74 @@ const EventEditor = observer(function EventEditor({
 
 	return (
 		<>
-			<div className="editor-grid-header editor-grid-events">
+			<div className="editor-grid-header">
 				<div className="cell-name">
 					{!service.setHeadline || !headlineExpanded || isCollapsed ? (
 						headline || name
 					) : (
-						<TextInputField
+						<TextInputFieldSimple
+							id={undefined}
 							value={headline ?? ''}
 							placeholder={'Describe the intent of the event'}
 							setValue={service.setHeadline}
+							aria-label="Event headline"
 						/>
 					)}
 				</div>
 
 				<div className="cell-controls">
-					<CButtonGroup>
+					<ButtonGroup className="me-1">
 						{canSetHeadline && !headlineExpanded && (
-							<CButton size="sm" onClick={doEditHeadline} title="Set headline">
+							<Button size="sm" onClick={doEditHeadline} title="Set headline">
 								<FontAwesomeIcon icon={faPencil} />
-							</CButton>
+							</Button>
 						)}
 						{isCollapsed ? (
-							<CButton size="sm" onClick={doExpand} title="Expand event view">
+							<Button size="sm" onClick={doExpand} title="Expand event view">
 								<FontAwesomeIcon icon={faExpandArrowsAlt} />
-							</CButton>
+							</Button>
 						) : (
-							<CButton size="sm" onClick={doCollapse} title="Collapse event view">
+							<Button size="sm" onClick={doCollapse} title="Collapse event view">
 								<FontAwesomeIcon icon={faCompressArrowsAlt} />
-							</CButton>
+							</Button>
 						)}
-						<CButton size="sm" onClick={service.performDuplicate} title="Duplicate event">
+						<Button size="sm" onClick={service.performDuplicate} title="Duplicate event">
 							<FontAwesomeIcon icon={faClone} />
-						</CButton>
-						<CButton size="sm" onClick={service.performDelete} title="Remove event">
+						</Button>
+						<Button size="sm" onClick={service.performDelete} title="Remove event">
 							<FontAwesomeIcon icon={faTrash} />
-						</CButton>
+						</Button>
 						{!!service.setEnabled && (
 							<>
 								&nbsp;
-								<CFormSwitch
-									color="success"
-									checked={event.enabled}
-									title={event.enabled ? 'Disable event' : 'Enable event'}
-									onChange={innerSetEnabled}
+								<SwitchInputField
+									id={undefined}
+									value={event.enabled}
+									tooltip={event.enabled ? 'Disable event' : 'Enable event'}
+									setValue={service.setEnabled}
+									small
 								/>
 							</>
 						)}
-					</CButtonGroup>
+					</ButtonGroup>
 				</div>
 			</div>
 
 			{!isCollapsed && (
-				<div className="editor-grid editor-grid-events">
-					<CCol sm={12} className="cell-description">
+				<div className="editor-grid">
+					<Grid.Col sm={12} className="cell-description">
 						{headlineExpanded && <p className="name">{name}</p>}
 						{eventSpec?.description || ''}
-					</CCol>
+					</Grid.Col>
 
-					<CForm className="row g-sm-2" onSubmit={PreventDefaultHandler}>
+					<Form className="row g-sm-2" onSubmit={PreventDefaultHandler}>
 						{eventSpec?.options.map((opt, i) => (
 							<MyErrorBoundary key={i}>
 								<OptionsInputField
 									key={i}
 									isLocatedInGrid={false}
 									entityType={null}
-									connectionId={'internal'}
+									allowInternalFields={true}
 									option={opt}
 									value={wrappedOptions[opt.id]}
 									setValue={setWrappedValue}
@@ -437,7 +327,7 @@ const EventEditor = observer(function EventEditor({
 								/>
 							</MyErrorBoundary>
 						))}
-					</CForm>
+					</Form>
 				</div>
 			)}
 		</>

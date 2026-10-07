@@ -1,28 +1,36 @@
-import LogController, { type Logger } from '../../Log/Controller.js'
-import type {
+import debounceFn from 'debounce-fn'
+import type { JsonValue } from 'type-fest'
+import {
 	EntityModelType,
-	EntityOwner,
-	SomeEntityModel,
-	SomeReplaceableEntityModel,
-	SomeSocketEntityLocation,
+	type FeedbackEntityStyleOverride,
+	type SomeReplaceableEntityModel,
+	type SomeSocketEntityLocation,
 } from '@companion-app/shared/Model/EntityModel.js'
-import { isInternalUserValueFeedback, type ControlEntityInstance } from './EntityInstance.js'
-import { ControlEntityList, type ControlEntityListDefinition } from './EntityList.js'
+import type { ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
+import { stringifyVariableValue, type VariableValues } from '@companion-app/shared/Model/Variables.js'
 import type { InstanceProcessManager } from '../../Instance/ProcessManager.js'
 import type { InternalController } from '../../Internal/Controller.js'
-import isEqual from 'fast-deep-equal'
-import type { InstanceDefinitionsForEntity, NewFeedbackValue, NewIsInvertedValue } from './Types.js'
-import type { ButtonStyleProperties } from '@companion-app/shared/Model/StyleModel.js'
-import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
-import debounceFn from 'debounce-fn'
-import type { VariablesValues } from '../../Variables/Values.js'
-import { isLabelValid } from '@companion-app/shared/Label.js'
-import type { ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
-import type { JsonValue } from 'type-fest'
-import { EntityPoolIsInvertedManager } from './EntityIsInvertedManager.js'
-import type { VariablesAndExpressionParser } from '../../Variables/VariablesAndExpressionParser.js'
+import LogController, { type Logger } from '../../Log/Controller.js'
 import type { IPageStore } from '../../Page/Store.js'
+import { GetLegacyStyleProperty, ParseLegacyStyle } from '../../Resources/ConvertLegacyStyleToElements.js'
+import type { VariablesValues } from '../../Variables/Values.js'
+import type { VariablesAndExpressionParser } from '../../Variables/VariablesAndExpressionParser.js'
+import type { ControlEntityInstance } from './EntityInstance.js'
+import { ControlEntityList, type ControlEntityListDefinition } from './EntityList.js'
+import { EntityPoolSpecialExpressionManager } from './EntitySpecialExpressionManager.js'
+import type { NewSpecialExpressionValue } from './SpecialExpressions.js'
+import type { InstanceDefinitionsForEntity, NewFeedbackValue } from './Types.js'
 
+export interface ControlEntityListChangeProps {
+	/** If true, do not save changes to the database/disk */
+	noSave?: boolean
+	/** If true, the control should be redrawn */
+	redraw: boolean
+	/** The id of drawing elements that are affected */
+	changedElementIds?: ReadonlySet<string>
+	/** If true, invalidate all drawing elements */
+	invalidateAllElements?: boolean
+}
 export interface ControlEntityListPoolProps {
 	instanceDefinitions: InstanceDefinitionsForEntity
 	internalModule: InternalController
@@ -30,11 +38,29 @@ export interface ControlEntityListPoolProps {
 	variableValues: VariablesValues
 	pageStore: IPageStore
 	controlId: string
-	commitChange: (redraw?: boolean) => void
-	invalidateControl: () => void
+	reportChange: (options: ControlEntityListChangeProps) => void
 }
 
+/**
+ * The read-only entity pool. It owns the entity lists and all runtime/read behaviour (loading, feedback
+ * evaluation, variable propagation, serialization). It deliberately has NO user-facing structural edit
+ * mutators (entityAdd/Remove/etc) - those are added by the entity-editing mixin (see
+ * {@link ../EntityListPoolEditingMixin.js WithEntityEditing}) and so exist only on editable pools. A
+ * read-only control (e.g. a preset reference) is therefore read-only by construction, with no runtime flag
+ * to check and no guard to forget.
+ *
+ * `entityReplaceForUpgrade` is intentionally here (not in the mixin): it is an upgrade/runtime path used when a
+ * connection upgrades its entities, and must work on every control regardless of editability.
+ */
 export abstract class ControlEntityListPoolBase {
+	/**
+	 * Discriminant for the read-only vs editable pool union. `false` on the read-only base (this class and the
+	 * read-only concrete pools); the editing mixin ({@link ../EntityListPoolEditingMixin.js WithEntityEditing})
+	 * sets it `true`. Code narrows on this (`if (pool.isEditable)`) to reach the structural edit mutators -
+	 * there is no per-control capability flag, the editability lives on the pool itself.
+	 */
+	abstract readonly isEditable: boolean
+
 	/**
 	 * The logger
 	 */
@@ -44,38 +70,39 @@ export abstract class ControlEntityListPoolBase {
 	readonly #internalModule: InternalController
 	readonly #processManager: InstanceProcessManager
 	readonly #variableValues: VariablesValues
-	readonly #isInvertedManager: EntityPoolIsInvertedManager
+	readonly #isLayeredDrawing: boolean
+	readonly #specialExpressionManager: EntityPoolSpecialExpressionManager
 	readonly #pageStore: IPageStore
 
 	protected readonly controlId: string
 
 	/**
-	 * Commit changes to the database and disk
+	 * Report changes to the database and disk
 	 */
-	protected readonly commitChange: (redraw?: boolean) => void
+	protected readonly reportChange: (options: ControlEntityListChangeProps) => void
 
-	/**
-	 * Trigger a redraw/invalidation of the control
-	 */
-	protected readonly invalidateControl: () => void
-
-	protected constructor(props: ControlEntityListPoolProps) {
-		this.logger = LogController.createLogger(`Controls/Fragments/EnittyPool/${props.controlId}`)
+	// Public (not protected) so the editing mixins can extend this base via a generic constructor constraint.
+	// The class is abstract, so it still cannot be instantiated directly.
+	constructor(props: ControlEntityListPoolProps, isLayeredDrawing: boolean) {
+		this.logger = LogController.createLogger(`Controls/Fragments/EntityPool/${props.controlId}`)
 
 		this.controlId = props.controlId
-		this.commitChange = props.commitChange
-		this.invalidateControl = props.invalidateControl
+		this.reportChange = props.reportChange
 
 		this.#instanceDefinitions = props.instanceDefinitions
 		this.#internalModule = props.internalModule
 		this.#processManager = props.processManager
 		this.#variableValues = props.variableValues
+		this.#isLayeredDrawing = isLayeredDrawing
 		this.#pageStore = props.pageStore
 
-		this.#isInvertedManager = new EntityPoolIsInvertedManager(
+		this.#specialExpressionManager = new EntityPoolSpecialExpressionManager(
 			props.controlId,
 			this.createVariablesAndExpressionParser.bind(this),
-			this.updateIsInvertedValues.bind(this)
+			{
+				isInverted: this.updateIsInvertedValues.bind(this),
+				storeResult: this.updateStoreResultValues.bind(this),
+			}
 		)
 	}
 
@@ -84,7 +111,7 @@ export abstract class ControlEntityListPoolBase {
 			this.#instanceDefinitions,
 			this.#internalModule,
 			this.#processManager,
-			this.#isInvertedManager,
+			this.#specialExpressionManager,
 			this.controlId,
 			null,
 			listDefinition
@@ -94,24 +121,47 @@ export abstract class ControlEntityListPoolBase {
 	protected tryTriggerLocalVariablesChanged(...entitiesOrNames: (ControlEntityInstance | string | null)[]): void {
 		if (entitiesOrNames.length === 0) return
 
+		const changedVariableNames = new Set<string>()
 		for (const entityOrName of entitiesOrNames) {
 			if (!entityOrName) continue
 
 			const variableName = typeof entityOrName === 'string' ? entityOrName : entityOrName.localVariableName
-			if (variableName) this.#pendingChangedVariables.add(variableName)
+			if (variableName) changedVariableNames.add(variableName)
 		}
 
-		if (this.#pendingChangedVariables.size === 0) return
+		if (changedVariableNames.size === 0) return
+
+		for (const name of changedVariableNames) {
+			this.#pendingChangedVariables.add(name)
+		}
 
 		/*
-		 * This is debounced to ensure that a loop of references between variables doesn't cause an infinite loop of updates
-		 * Future: This could be improved by using a 'rate limit' style approach, where we allow a bunch of updates to happen immediately,
-		 * but then throttle the updates after that. Perhaps allow 10 within the first 2ms, then limit to 1 every Xms.
+		 * The debounce ensures that rapid bursts of local variable updates (including circular
+		 * computed-variable chains) are rate-limited before notifying the rest of the app.
+		 *
+		 * Additionally, we synchronously call internalModule.onVariablesChanged for this control
+		 * so that condition feedbacks inside logic_while / logic_if have their cached values
+		 * updated immediately, without needing a wait action.
+		 *
+		 * A re-entrance guard on the sync call prevents recursion: if a computed local variable's
+		 * cached value changes as a side effect of the sync update (detected by updateFeedbackValues
+		 * calling tryTriggerLocalVariablesChanged again), that nested call still queues to the
+		 * debounce but does not re-enter the sync path.
 		 */
 		this.#debouncedLocalVariablesChanged()
+
+		if (!this.#isSyncUpdatingInternalFeedbacks) {
+			this.#isSyncUpdatingInternalFeedbacks = true
+			try {
+				this.#internalModule.onVariablesChanged(changedVariableNames, this.controlId)
+			} finally {
+				this.#isSyncUpdatingInternalFeedbacks = false
+			}
+		}
 	}
 
 	#pendingChangedVariables = new Set<string>()
+	#isSyncUpdatingInternalFeedbacks = false
 	#debouncedLocalVariablesChanged = debounceFn(
 		() => {
 			const allChangedVariables = this.#pendingChangedVariables
@@ -133,7 +183,11 @@ export abstract class ControlEntityListPoolBase {
 		for (const list of this.getAllEntityLists()) {
 			if (list.clearCachedValueForConnectionId(connectionId)) changed = true
 		}
-		if (changed) this.invalidateControl()
+		if (changed)
+			this.reportChange({
+				redraw: true,
+				noSave: true,
+			})
 	}
 
 	createVariablesAndExpressionParser(overrideVariableValues: VariableValues | null): VariablesAndExpressionParser {
@@ -152,7 +206,7 @@ export abstract class ControlEntityListPoolBase {
 	 * @access public
 	 */
 	destroy(): void {
-		this.#isInvertedManager.destroy()
+		this.#specialExpressionManager.destroy()
 
 		for (const list of this.getAllEntityLists()) {
 			list.cleanup()
@@ -163,6 +217,15 @@ export abstract class ControlEntityListPoolBase {
 	protected abstract getAllEntityLists(): ControlEntityList[]
 
 	abstract getLocalVariableEntities(): ControlEntityInstance[]
+
+	/**
+	 * Get all the style overrides for the layered drawing elements
+	 * @returns A map of elementId -> elementProperty -> override value
+	 */
+	abstract getFeedbackStyleOverrides(): ReadonlyMap<
+		string,
+		ReadonlyMap<string, ExpressionOrValue<JsonValue | undefined>>
+	>
 
 	getLocalVariableValues(): VariableValues {
 		const entities = this.getLocalVariableEntities()
@@ -227,197 +290,18 @@ export abstract class ControlEntityListPoolBase {
 	}
 
 	/**
-	 * Add an entity to this control
-	 * @param entityModel the item to add
-	 * @param ownerId the ids of parent entity that this entity should be added as a child of
+	 * Replace an entity's stored props with a module-upgraded version.
+	 *
+	 * This is SOLELY the connection/module upgrade path (see {@link ../../Instance/Connection/EntityManager.js}
+	 * and the legacy child handler) - it is invoked when a connection upgrades the definition of one of its
+	 * entities, never as a result of a user edit. That is why it lives on the read-only base (it must work on
+	 * every control, including read-only ones like a preset reference) and is not part of the editable mutator
+	 * surface. Do not call it for user-facing edits.
 	 */
-	entityAdd(
-		listId: SomeSocketEntityLocation,
-		ownerId: EntityOwner | null,
-		...entityModels: SomeEntityModel[]
-	): boolean {
-		if (entityModels.length === 0) return false
-
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		let newEntities: ControlEntityInstance[]
-		if (ownerId) {
-			const parent = entityList.findById(ownerId.parentId)
-			if (!parent) throw new Error(`Failed to find parent entity ${ownerId.parentId} when adding child entity`)
-
-			newEntities = entityModels.map((entity) => parent.addChild(ownerId.childGroup, entity))
-		} else {
-			newEntities = entityModels.map((entity) => entityList.addEntity(entity))
-		}
-
-		// Inform relevant module
-		for (const entity of newEntities) {
-			entity.subscribe(true)
-		}
-
-		this.tryTriggerLocalVariablesChanged(...newEntities)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Duplicate an entity on this control
-	 */
-	entityDuplicate(listId: SomeSocketEntityLocation, id: string): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.duplicateEntity(id)
-		if (!entity) return false
-
-		this.tryTriggerLocalVariablesChanged(entity)
-
-		this.commitChange(false)
-
-		return true
-	}
-
-	/**
-	 * Enable or disable an entity
-	 */
-	entityEnabled(listId: SomeSocketEntityLocation, id: string, enabled: boolean): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		entity.setEnabled(enabled)
-
-		this.tryTriggerLocalVariablesChanged(entity)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Set headline for the entity
-	 */
-	entityHeadline(listId: SomeSocketEntityLocation, id: string, headline: string): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		entity.setHeadline(headline)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Learn the options for an entity, by asking the connection for the current values
-	 */
-	async entityLearn(listId: SomeSocketEntityLocation, id: string): Promise<boolean> {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		const changed = await entity.learnOptions()
-		if (!changed) return false
-
-		// Time has passed due to the `await`
-		// So the entity may not still exist, meaning we should find it again to be sure
-		const entityAfter = entityList.findById(id)
-		if (!entityAfter) return false
-
-		this.tryTriggerLocalVariablesChanged(entityAfter)
-
-		this.commitChange(true)
-		return true
-	}
-
-	/**
-	 * Remove an entity from this control
-	 */
-	entityRemove(listId: SomeSocketEntityLocation, id: string): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const removedEntity = entityList.removeEntity(id)
-		if (removedEntity) {
-			this.commitChange()
-
-			this.tryTriggerLocalVariablesChanged(removedEntity.localVariableName)
-
-			return true
-		} else {
-			return false
-		}
-	}
-
-	/**
-	 * Move an entity within the hierarchy
-	 * @param moveListId the id of the list to move the entity from
-	 * @param moveEntityId the id of the entity to move
-	 * @param newOwnerId the target new owner of the entity
-	 * @param newListId the id of the list to move the entity to
-	 * @param newIndex the target index of the entity
-	 */
-	entityMoveTo(
-		moveListId: SomeSocketEntityLocation,
-		moveEntityId: string,
-		newOwnerId: EntityOwner | null,
-		newListId: SomeSocketEntityLocation,
-		newIndex: number
-	): boolean {
-		if (newOwnerId && moveEntityId === newOwnerId.parentId) return false
-
-		const oldInfo = this.getEntityList(moveListId)?.findParentAndIndex(moveEntityId)
-		if (!oldInfo) return false
-
-		if (
-			isEqual(moveListId, newListId) &&
-			oldInfo.parent.ownerId?.parentId === newOwnerId?.parentId &&
-			oldInfo.parent.ownerId?.childGroup === newOwnerId?.childGroup
-		) {
-			oldInfo.parent.moveEntity(oldInfo.index, newIndex)
-		} else {
-			const newEntityList = this.getEntityList(newListId)
-			if (!newEntityList) return false
-
-			const newParent = newOwnerId ? newEntityList.findById(newOwnerId.parentId) : null
-			if (newOwnerId && !newParent) return false
-
-			// Ensure the new parent is not a child of the entity being moved
-			if (newOwnerId && oldInfo.item.findChildById(newOwnerId.parentId)) return false
-
-			// Check if the new parent can hold the entity being moved
-			if (newParent && !newParent.canAcceptChild(newOwnerId!.childGroup, oldInfo.item)) return false
-			if (!newParent && !newEntityList.canAcceptEntity(oldInfo.item)) return false
-
-			const poppedEntity = oldInfo.parent.popEntity(oldInfo.index)
-			if (!poppedEntity) return false
-
-			if (newParent) {
-				newParent.pushChild(poppedEntity, newOwnerId!.childGroup, newIndex)
-			} else {
-				newEntityList.pushEntity(poppedEntity, newIndex)
-			}
-		}
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Replace an entity with an updated version
-	 */
-	entityReplace(newProps: SomeReplaceableEntityModel, skipNotifyModule = false): ControlEntityInstance | undefined {
+	entityReplaceForUpgrade(
+		newProps: SomeReplaceableEntityModel,
+		skipNotifyModule = false
+	): ControlEntityInstance | undefined {
 		for (const entityList of this.getAllEntityLists()) {
 			const entity = entityList.findById(newProps.id)
 			if (!entity) continue
@@ -425,211 +309,59 @@ export abstract class ControlEntityListPoolBase {
 			// Ignore if the types do not match
 			if (entity.type !== newProps.type) return undefined
 
+			const oldElementIds = entity.styleOverrideAffectedElementIds
+
+			// If this is a layered drawing, translate the style into the overrides format
+			const existingStyleOverrides = entity.styleOverrides
+			if (
+				this.#isLayeredDrawing &&
+				newProps.type === EntityModelType.Feedback &&
+				newProps.style &&
+				existingStyleOverrides
+			) {
+				const newOverrides: FeedbackEntityStyleOverride[] = []
+
+				const parsedStyle = ParseLegacyStyle(newProps.style)
+
+				// Translate the old advanced feedback property lookup into the newly produced value
+				for (const override of existingStyleOverrides) {
+					if (override.override.isExpression) {
+						// Preserve any expression values, we don't want to replace the users hard work by accident
+						newOverrides.push(override)
+					} else {
+						const newValue = GetLegacyStyleProperty(
+							parsedStyle,
+							newProps.style,
+							stringifyVariableValue(override.override.value) ?? '',
+							override.elementProperty
+						)
+
+						// Only preserve ones which exist in the new style, otherwise they should be discarded as they wont have a real value to use
+						if (newValue) {
+							newOverrides.push({
+								...override,
+								override: newValue,
+							})
+						}
+					}
+				}
+
+				newProps = { ...newProps, styleOverrides: newOverrides, style: undefined }
+			}
+
 			entity.replaceProps(newProps, skipNotifyModule)
 
 			this.tryTriggerLocalVariablesChanged(entity)
 
-			this.commitChange(true)
+			this.reportChange({
+				redraw: true,
+				changedElementIds: entity.styleOverrideAffectedElementIds?.union(oldElementIds || new Set<string>()),
+			})
 
 			return entity
 		}
 
 		return undefined
-	}
-
-	/**
-	 * Replace all the entities in a list
-	 * @param listId the list to update
-	 * @param newEntities entities to populate
-	 */
-	entityReplaceAll(listId: SomeSocketEntityLocation, entities: SomeEntityModel[]): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		entityList.loadStorage(entities, false, false)
-
-		this.commitChange(true)
-
-		return true
-	}
-
-	/**
-	 * Update an option for an entity
-	 * @param id the id of the entity
-	 * @param key the key/name of the property
-	 * @param value the new value
-	 */
-	entitySetOption(
-		listId: SomeSocketEntityLocation,
-		id: string,
-		key: string,
-		value: ExpressionOrValue<JsonValue | undefined>
-	): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		entity.setOption(key, value)
-
-		this.tryTriggerLocalVariablesChanged(entity)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Set a new connection instance for an entity
-	 * @param id the id of the entity
-	 * @param connectionId the id of the new connection
-	 */
-	entitySetConnection(listId: SomeSocketEntityLocation, id: string, connectionId: string | number): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		entity.setConnectionId(connectionId)
-
-		this.tryTriggerLocalVariablesChanged(entity)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Set whether a boolean feedback should be inverted
-	 * @param id the id of the entity
-	 * @param isInverted the new value
-	 */
-	entitySetInverted(listId: SomeSocketEntityLocation, id: string, isInverted: ExpressionOrValue<boolean>): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		entity.setInverted(isInverted)
-
-		this.tryTriggerLocalVariablesChanged(entity)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Set the local variable name for an entity
-	 * @param listId The list the entity is in
-	 * @param id The id of the entity
-	 * @param name The new name for the variable
-	 */
-	entitySetVariableName(listId: SomeSocketEntityLocation, id: string, name: string): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		// Make sure the new name is valid
-		if (name !== '' && !isLabelValid(name)) {
-			// throw new Error(`Invalid local variable name "${name}"`)
-			return false
-		}
-
-		const oldLocalVariableName = entity.localVariableName
-
-		entity.setVariableName(name)
-
-		this.tryTriggerLocalVariablesChanged(entity, oldLocalVariableName)
-
-		this.commitChange()
-
-		return true
-	}
-
-	/**
-	 * Set the variable value for an entity, if this is a user local variable
-	 * @param listId The list the entity is in
-	 * @param id The id of the entity
-	 * @param value The new value for the variable
-	 */
-	entitySetVariableValue(listId: SomeSocketEntityLocation, id: string, value: JsonValue | undefined): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		if (!isInternalUserValueFeedback(entity)) return false
-
-		const needsPersistence = entity.setUserValue(value)
-
-		// Persist value if needed
-		if (needsPersistence) {
-			this.commitChange(false)
-		}
-
-		this.tryTriggerLocalVariablesChanged(entity)
-
-		return true
-	}
-
-	/**
-	 * Update the selected style properties for a boolean feedback
-	 * @param id the id of the entity
-	 * @param selected the properties to be selected
-	 */
-	entitySetStyleSelection(
-		listId: SomeSocketEntityLocation,
-		baseStyle: ButtonStyleProperties,
-		id: string,
-		selected: string[]
-	): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		// if (this.#booleanOnly) throw new Error('FragmentFeedbacks not setup to use styles')
-
-		if (entity.setStyleSelection(selected, baseStyle)) {
-			this.commitChange()
-
-			return true
-		}
-
-		return false
-	}
-
-	/**
-	 * Update an style property for a boolean feedback
-	 * @param id the id of the entity
-	 * @param key the key/name of the property
-	 * @param value the new value
-	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	entitySetStyleValue(listId: SomeSocketEntityLocation, id: string, key: string, value: any): boolean {
-		const entityList = this.getEntityList(listId)
-		if (!entityList) return false
-
-		const entity = entityList.findById(id)
-		if (!entity) return false
-
-		// if (this.#booleanOnly) throw new Error('FragmentFeedbacks not setup to use styles')
-
-		if (entity.setStyleValue(key, value)) {
-			this.commitChange()
-
-			return true
-		}
-
-		return false
 	}
 
 	/**
@@ -641,7 +373,12 @@ export abstract class ControlEntityListPoolBase {
 			if (list.forgetForConnection(connectionId)) changed = true
 		}
 
-		if (changed) this.commitChange(true)
+		if (changed) {
+			this.reportChange({
+				redraw: true,
+				invalidateAllElements: true,
+			})
+		}
 	}
 
 	/**
@@ -656,7 +393,10 @@ export abstract class ControlEntityListPoolBase {
 		}
 
 		if (changed) {
-			this.commitChange(true)
+			this.reportChange({
+				redraw: true,
+				invalidateAllElements: true,
+			})
 		}
 	}
 
@@ -671,7 +411,18 @@ export abstract class ControlEntityListPoolBase {
 	 * Update the isInverted values on the control with new calculated isInverted values
 	 * @param newValues The new isInverted values
 	 */
-	protected abstract updateIsInvertedValues(newValues: ReadonlyMap<string, NewIsInvertedValue>): void
+	protected abstract updateIsInvertedValues(
+		newValues: ReadonlyMap<string, NewSpecialExpressionValue<'isInverted'>>
+	): void
+
+	/**
+	 * Update the storeResult values on the control with new calculated
+	 * storeResult values
+	 * @param newValues The new storeResult values
+	 */
+	protected abstract updateStoreResultValues(
+		newValues: ReadonlyMap<string, NewSpecialExpressionValue<'storeResult'>>
+	): void
 
 	/**
 	 * Get all the connectionIds for entities which are active
@@ -691,6 +442,6 @@ export abstract class ControlEntityListPoolBase {
 	 * @param changedVariables - variables with changes
 	 */
 	onVariablesChanged(changedVariables: ReadonlySet<string>): void {
-		this.#isInvertedManager.onVariablesChanged(changedVariables)
+		this.#specialExpressionManager.onVariablesChanged(changedVariables)
 	}
 }

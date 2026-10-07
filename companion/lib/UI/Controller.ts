@@ -1,9 +1,9 @@
+import type express from 'express'
 import type { AppInfo } from '../Registry.js'
 import { UIExpress } from './Express.js'
 import { UIHandler } from './Handler.js'
 import { UIServer } from './Server.js'
 import { UIUpdate } from './Update.js'
-import type express from 'express'
 
 export class UIController {
 	readonly express: UIExpress
@@ -12,7 +12,7 @@ export class UIController {
 	readonly update: UIUpdate
 
 	constructor(appInfo: AppInfo, internalApiRouter: express.Router) {
-		this.express = new UIExpress(internalApiRouter)
+		this.express = new UIExpress(internalApiRouter, appInfo.options.trustedProxies)
 		this.server = new UIServer(this.express.app)
 		this.io = new UIHandler(appInfo, this.server)
 		this.update = new UIUpdate(appInfo)

@@ -1,17 +1,17 @@
-import React, { useCallback, useContext, useRef } from 'react'
-import { CButton, CButtonGroup } from '@coreui/react'
+import { faCircleUp, faFolderOpen, faPowerOff, faSearch, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCircleUp, faCopy, faFolderOpen, faPowerOff, faSearch, faTrash } from '@fortawesome/free-solid-svg-icons'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import classNames from 'classnames'
-import type { ClientDevicesListItem, ClientSurfaceItem } from '@companion-app/shared/Model/Surfaces.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useRef } from 'react'
+import type { ClientDevicesListItem, ClientSurfaceItem } from '@companion-app/shared/Model/Surfaces.js'
+import { Button, ButtonGroup, LinkButtonExternal } from '~/Components/Button'
+import { CopyButton } from '~/Components/CopyButton'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import { NonIdealState } from '~/Components/NonIdealState.js'
 import { WindowLinkOpen } from '~/Helpers/Window.js'
-import CopyToClipboard from 'react-copy-to-clipboard'
-import { makeAbsolutePath } from '~/Resources/util'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { makeAbsolutePath } from '~/Resources/util'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 interface KnownSurfacesTableProps {
 	selectedItemId: string | null
@@ -94,8 +94,8 @@ export const KnownSurfacesTable = observer(function KnownSurfacesTable({
 			<GenericConfirmModal ref={confirmRef} />
 
 			<div className="scrollable-content surfaces-grid-container">
-				<div className="grid-header-cell">NO</div>
-				<div className="grid-header-cell">Info</div>
+				<div className="grid-header-cell">Nr.</div>
+				<div className="grid-header-cell">Configured Surfaces and Groups</div>
 				<div className="grid-header-cell"></div>
 				{surfacesList.map((group) => {
 					if (group.isAutoGroup && (group.surfaces || []).length === 1) {
@@ -156,14 +156,12 @@ const ManualGroupRow = observer(function ManualGroupRow({
 	selectedItemId,
 	selectItem,
 }: ManualGroupRowProps) {
-	const { notifier } = useContext(RootAppStoreContext)
-
 	const deleteGroup2 = useCallback(() => deleteGroup(group.id), [deleteGroup, group.id])
 
 	const handleGroupClick = useCallback(
 		(e: React.MouseEvent) => {
 			// Don't trigger row click if clicking on input field or buttons
-			if ((e.target as HTMLElement).closest('input, button')) {
+			if ((e.target as HTMLElement).closest('input, button, a, [role="button"]')) {
 				return
 			}
 			selectItem(group.id)
@@ -171,29 +169,30 @@ const ManualGroupRow = observer(function ManualGroupRow({
 		[selectItem, group.id]
 	)
 
+	const groupName = group.displayName || 'Surface Group'
 	return (
 		<>
-			<div className={classNames('grid-row', { 'grid-row-selected': isGroupSelected })} onClick={handleGroupClick}>
+			<div
+				className={classNames('grid-row', { 'grid-row-selected': isGroupSelected })}
+				onClick={handleGroupClick}
+				title={`${groupName}${/group/i.test(groupName) ? '' : ' group'}: click to edit settings.`}
+			>
 				<div className="grid-cell">#{group.index}</div>
 				<div className="grid-cell">
-					<b>{group.displayName || 'Surface Group'}</b>
+					<b>{groupName}</b>
 					<div className="surface-id-row">
 						<span className="surface-id" title={group.id}>
 							{group.id}
 						</span>
-						<CopyToClipboard text={group.id} onCopy={() => notifier.show(`Copied`, 'Copied to clipboard', 5000)}>
-							<CButton size="sm" title="Copy group id" className="p-0 px-1">
-								<FontAwesomeIcon icon={faCopy} color="#000" />
-							</CButton>
-						</CopyToClipboard>
+						<CopyButton size="sm" title="Copy group id" text={group.id} />
 					</div>
 				</div>
 				<div className="grid-cell">
-					<CButtonGroup>
-						<CButton onClick={deleteGroup2} title="Delete group">
+					<ButtonGroup>
+						<Button onClick={deleteGroup2} title="Delete group">
 							<FontAwesomeIcon icon={faTrash} />
-						</CButton>
-					</CButtonGroup>
+						</Button>
+					</ButtonGroup>
 				</div>
 			</div>
 			{(group.surfaces || []).map((surface, i, arr) => (
@@ -234,8 +233,6 @@ const SurfaceRow = observer(function SurfaceRow({
 	isSelected,
 	selectItem,
 }: SurfaceRowProps) {
-	const { notifier } = useContext(RootAppStoreContext)
-
 	const deleteEmulator2 = useCallback(() => deleteEmulator(surface.id), [deleteEmulator, surface.id])
 	const forgetSurface2 = useCallback(() => forgetSurface(surface.id), [forgetSurface, surface.id])
 
@@ -265,11 +262,16 @@ const SurfaceRow = observer(function SurfaceRow({
 				'surface-disabled': surfaceDisabled,
 			})}
 			onClick={handleSurfaceClick}
+			title={`${surface.id}: click to edit surface settings.`}
 		>
 			<div className="grid-cell">
 				{index !== null ? `#${index}` : ''}
 				{/* Show disabled icon for surfaces that respect the enabled setting and are disabled */}
-				{surfaceDisabled && <FontAwesomeIcon icon={faPowerOff} color="gray" title="Disabled" />}
+				{surfaceDisabled && (
+					<span title="Disabled">
+						<FontAwesomeIcon icon={faPowerOff} color="gray" aria-label="Disabled" />
+					</span>
+				)}
 			</div>
 			<div className={classNames('grid-cell', { 'ps-4': isInGroup })}>
 				<div>
@@ -284,14 +286,8 @@ const SurfaceRow = observer(function SurfaceRow({
 					)}
 				</div>
 				<div className="surface-id-row">
-					<span className="surface-id" title={surface.id}>
-						{surface.id}
-					</span>
-					<CopyToClipboard text={surface.id} onCopy={() => notifier.show(`Copied`, 'Copied to clipboard', 5000)}>
-						<CButton size="sm" title="Copy surface id" className="p-0 px-1">
-							<FontAwesomeIcon icon={faCopy} color="#000" />
-						</CButton>
-					</CopyToClipboard>
+					<span className="surface-id">{surface.id}</span>
+					<CopyButton size="sm" title="Copy surface id" text={surface.id} />
 					<span className={classNames('surface-status', { 'surface-disabled': surfaceDisabled })}>
 						{surfaceDisabled ? 'Disabled' : surface.isConnected ? surface.location || 'Local' : 'Offline'}
 					</span>
@@ -299,26 +295,25 @@ const SurfaceRow = observer(function SurfaceRow({
 			</div>
 			<div className="grid-cell">
 				{surface.isConnected ? (
-					<CButtonGroup className="no-break">
+					<ButtonGroup className="no-break">
 						{surface.integrationType === 'emulator' && (
 							<>
-								<CButton
+								<LinkButtonExternal
 									href={makeAbsolutePath(`/emulator/${surface.id.substring(9)}`)}
-									target="_blank"
 									title="Open Emulator"
 								>
 									<FontAwesomeIcon icon={faFolderOpen} />
-								</CButton>
-								<CButton onClick={deleteEmulator2} title="Delete Emulator">
+								</LinkButtonExternal>
+								<Button onClick={deleteEmulator2} title="Delete Emulator">
 									<FontAwesomeIcon icon={faTrash} />
-								</CButton>
+								</Button>
 							</>
 						)}
-					</CButtonGroup>
+					</ButtonGroup>
 				) : (
-					<CButton onClick={forgetSurface2} title="Forget">
+					<Button onClick={forgetSurface2} title="Forget">
 						<FontAwesomeIcon icon={faTrash} />
-					</CButton>
+					</Button>
 				)}
 			</div>
 		</div>

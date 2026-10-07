@@ -1,5 +1,8 @@
+import type { RemoteInfo } from 'node:dgram'
 import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { IpcWrapper } from '../Common/IpcWrapper.js'
+import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
+import type { PresetDefinition, UIPresetSection } from '@companion-app/shared/Model/Presets.js'
+import type { VariableDefinition } from '@companion-app/shared/Model/Variables.js'
 import type {
 	CompanionHTTPRequest,
 	CompanionHTTPResponse,
@@ -8,18 +11,17 @@ import type {
 	InstanceStatus,
 	LogLevel,
 } from '@companion-module/base'
-import type { VariableDefinition } from '@companion-app/shared/Model/Variables.js'
-import type { VariableValueEntry } from '../../Variables/Values.js'
-import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
-import type { RemoteInfo } from 'dgram'
 import type {
 	ActionInstance,
 	FeedbackInstance,
 	HostFeedbackValue,
+	JsonValue,
 	UpgradeActionInstance,
 	UpgradeFeedbackInstance,
 } from '@companion-module/host'
-import type { PresetDefinition, UIPresetSection } from '@companion-app/shared/Model/Presets.js'
+import type { VariableValueEntry } from '../../Variables/Values.js'
+import type { IpcWrapper } from '../Common/IpcWrapper.js'
+import type { CompositeElementDefinition } from '../Definitions.js'
 
 export type ModuleIpcWrapper = IpcWrapper<HostToModuleEventsNew, ModuleToHostEventsNew>
 export type ModuleChildIpcWrapper = IpcWrapper<ModuleToHostEventsNew, HostToModuleEventsNew>
@@ -39,6 +41,8 @@ export interface ModuleToHostEventsNew {
 	setVariableDefinitions: (msg: SetVariableDefinitionsMessage) => never
 	/** The presets provided by the connection have changed */
 	setPresetDefinitions: (msg: SetPresetDefinitionsMessage) => never
+	/* The composite element definitions provided by the connection have changed */
+	setCompositeElementDefinitions: (msg: SetCompositeElementDefinitionsMessage) => never
 	/** The connection has some new values for variables */
 	setVariableValues: (msg: SetVariableValuesMessage) => never
 	/** The connection has some new values for feedbacks it is running */
@@ -87,7 +91,7 @@ export interface HostToModuleEventsNew {
 	 */
 	upgradeFeedbacks: (msg: UpgradeFeedbacksMessage) => UpgradeFeedbacksResponse
 	/** Execute an action */
-	executeAction: (msg: ExecuteActionMessage) => ExecuteActionResponseMessage | undefined // This is only returned since 1.14.0
+	executeAction: (msg: ExecuteActionMessage) => ExecuteActionResponseMessage
 	/** Get the config fields for this connection */
 	getConfigFields: (msg: GetConfigFieldsMessage) => GetConfigFieldsResponseMessage
 	/** Handle an incoming HTTP request */
@@ -119,6 +123,7 @@ export interface RegisterMessage {
 }
 export interface RegisterResponseMessage {
 	connectionId: string
+	moduleApiVersion: string
 }
 
 export interface InitMessage {
@@ -174,6 +179,10 @@ export interface SetPresetDefinitionsMessage {
 	uiPresets: Record<string, UIPresetSection>
 }
 
+export interface SetCompositeElementDefinitionsMessage {
+	definitions: CompositeElementDefinition[]
+}
+
 export interface SetVariableValuesMessage {
 	newValues: VariableValueEntry[]
 }
@@ -185,11 +194,25 @@ export interface ExecuteActionMessage {
 	surfaceId: string | undefined
 }
 
-export interface ExecuteActionResponseMessage {
-	success: boolean
-	/** If success=false, a reason for the failure */
+export interface ExecuteActionSuccessMessage {
+	success: true
+
+	/**
+	 * The result returned by the action callback, or `undefined` if the action
+	 * callback doesn't return a result (including actions from connections that
+	 * predate actions being able to return results).
+	 */
+	result: JsonValue | undefined
+}
+
+export interface ExecuteActionFailureMessage {
+	success: false
+
+	/** A reason for the failure. */
 	errorMessage: string | undefined
 }
+
+export type ExecuteActionResponseMessage = ExecuteActionSuccessMessage | ExecuteActionFailureMessage
 
 export interface UpdateFeedbackValuesMessage {
 	values: HostFeedbackValue[]

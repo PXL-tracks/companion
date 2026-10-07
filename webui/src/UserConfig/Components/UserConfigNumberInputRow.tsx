@@ -1,8 +1,7 @@
-import React from 'react'
-import { ResetButton, type UserConfigProps } from './Common.js'
+import { observer } from 'mobx-react-lite'
 import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
 import { NumberInputField } from '~/Components/NumberInputField.js'
-import { observer } from 'mobx-react-lite'
+import { ResetButton, type UserConfigProps } from './Common.js'
 
 interface UserConfigNumberInputRowProps {
 	userConfig: UserConfigProps
@@ -25,6 +24,7 @@ export const UserConfigNumberInputRow = observer(function UserConfigNumberInputR
 			<td>{label}</td>
 			<td>
 				<NumberInputField
+					id={undefined} // Future: set this for better accessibility
 					value={Number(userConfig.config[field])}
 					min={min}
 					max={max}

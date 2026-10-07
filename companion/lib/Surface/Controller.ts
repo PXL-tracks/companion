@@ -10,18 +10,18 @@
  *
  */
 
-import HID from 'node-hid'
-import jsonPatch from 'fast-json-patch'
-import pDebounce from 'p-debounce'
+import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import debounceFn from 'debounce-fn'
+import jsonPatch from 'fast-json-patch'
+import HID from 'node-hid'
+import pDebounce from 'p-debounce'
+import type { JsonValue } from 'type-fest'
 import { usb } from 'usb'
-import { SurfaceHandler, getSurfaceName } from './Handler.js'
-import { SurfaceIPElgatoEmulator, EmulatorRoom } from './IP/ElgatoEmulator.js'
-import { SurfaceIPElgatoPlugin } from './IP/ElgatoPlugin.js'
-import { SurfaceIPSatellite, type SatelliteDeviceInfo } from './IP/Satellite.js'
-import { SurfaceGroup, validateGroupConfigValue } from './Group.js'
-import { SurfaceOutboundController } from './Outbound.js'
-import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import z from 'zod'
+import type { ExecuteExpressionResult } from '@companion-app/shared/ExpressionResult.js'
+import type { EmulatorListItem, EmulatorPageConfig } from '@companion-app/shared/Model/Emulator.js'
+import { JsonValueSchema } from '@companion-app/shared/Model/Options.js'
 import type {
 	ClientDevicesListItem,
 	ClientSurfaceItem,
@@ -31,32 +31,30 @@ import type {
 	SurfacePanelConfig,
 	SurfacesUpdate,
 } from '@companion-app/shared/Model/Surfaces.js'
-import type { ServiceElgatoPluginSocket } from '../Service/ElgatoPlugin.js'
 import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
-import type { SurfaceHandlerDependencies, SurfacePanel, UpdateEvents } from './Types.js'
-import { createOrSanitizeSurfaceHandlerConfig, PanelDefaults } from './Config.js'
-import { EventEmitter } from 'events'
-import LogController from '../Log/Controller.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import type { Complete } from '@companion-module/base'
+import type { HIDDevice } from '@companion-surface/host'
 import type { DataDatabase } from '../Data/Database.js'
 import type { DataStoreTableView } from '../Data/StoreBase.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
-import type { EmulatorListItem, EmulatorPageConfig } from '@companion-app/shared/Model/Emulator.js'
-import type { SurfacePluginPanel } from './PluginPanel.js'
-import type { ExecuteExpressionResult } from '@companion-app/shared/Expression/ExpressionResult.js'
 import type { SurfaceChildFeatures } from '../Instance/Surface/ChildHandler.js'
-import type { HIDDevice } from '@companion-surface/host'
-import type { Complete } from '@companion-module/base'
 import {
 	DiscoveredSurfaceRegistry,
 	type DiscoveredSurfaceInfo,
 	type SurfaceOpener,
 } from '../Instance/Surface/DiscoveredSurfaceRegistry.js'
-import { createHash } from 'node:crypto'
 import type { CheckDeviceInfo } from '../Instance/Surface/IpcTypes.js'
-import { stringifyError } from '@companion-app/shared/Stringify.js'
-import type { JsonValue } from 'type-fest'
-import { JsonValueSchema } from '@companion-app/shared/Model/Options.js'
+import LogController from '../Log/Controller.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import { createOrSanitizeSurfaceHandlerConfig, PanelDefaults } from './Config.js'
+import { SurfaceGroup, validateGroupConfigValue } from './Group.js'
+import { getSurfaceName, SurfaceHandler } from './Handler.js'
+import { EmulatorRoom, SurfaceIPElgatoEmulator } from './IP/ElgatoEmulator.js'
+import { SurfaceIPSatellite, type SatelliteDeviceInfo } from './IP/Satellite.js'
+import { SurfaceOutboundController } from './Outbound.js'
+import type { SurfacePluginPanel } from './PluginPanel.js'
+import type { SurfaceHandlerDependencies, SurfacePanel, UpdateEvents } from './Types.js'
 
 /**
  * Interface for a handler that can process HID device scans.
@@ -222,7 +220,7 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 		const runHotplug = this.#handlerDependencies.userconfig.getKey('usb_hotplug')
 		if (runHotplug) {
 			try {
-				usb.on('attach', this.triggerRefreshDevicesEvent)
+				usb.addEventListener('connect', this.triggerRefreshDevicesEvent)
 			} catch (e) {
 				this.#logger.error(`Failed to enable usb hotplug: ${e}`)
 			}
@@ -249,11 +247,11 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 			try {
 				if (!value && this.#runningUsbHotplug) {
 					// Stop watching
-					usb.off('attach', this.triggerRefreshDevicesEvent)
+					usb.removeEventListener('connect', this.triggerRefreshDevicesEvent)
 					this.#runningUsbHotplug = false
 				} else if (value && !this.#runningUsbHotplug) {
 					// Start watching
-					usb.on('attach', this.triggerRefreshDevicesEvent)
+					usb.addEventListener('connect', this.triggerRefreshDevicesEvent)
 					this.#runningUsbHotplug = true
 				}
 			} catch (e) {
@@ -548,8 +546,7 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 				)
 				.mutation(async ({ input }) => {
 					if (input.id.startsWith('emulator:') && this.#surfaceHandlers.has(input.id)) {
-						this.removeDevice(input.id, true)
-
+						this.removeDevice(input.id, { purge: true })
 						// Emit an update to the config
 						this.#updateEvents.emit('emulatorConfig', input.id.slice('emulator:'.length), null)
 
@@ -618,7 +615,7 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 
 				const changes = toIterable(self.#updateEvents, 'emulatorImages', signal)
 
-				yield { images: surface.panel.latestImages(), clearCache: true }
+				yield { images: await surface.panel.latestImages(), clearCache: true }
 
 				for await (const [changeId, changeData, clearCache] of changes) {
 					if (changeId === input.id) yield { images: changeData, clearCache }
@@ -861,13 +858,6 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 								[input.key]: input.value,
 							})
 
-							// Ensure the surface has the correct locked state
-							const groupId = surface.getGroupId()
-							const group = groupId ? this.#surfaceGroups.get(groupId) : null
-							if (group) {
-								group.syncLocked()
-							}
-
 							this.triggerUpdateDevicesList()
 						}
 					}
@@ -1038,6 +1028,7 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 
 				size: config.gridSize || null,
 				rotation: config?.config?.rotation,
+				brightness: config?.config?.brightness,
 				offset: { columns: config?.config?.xOffset ?? 0, rows: config?.config?.yOffset ?? 0 },
 			}
 
@@ -1383,11 +1374,23 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 	 * Add a satellite device
 	 */
 	addSatelliteDevice(deviceInfo: SatelliteDeviceInfo): SurfaceIPSatellite {
-		this.removeDevice(deviceInfo.deviceId)
+		const discoveredSurface: DiscoveredSurfaceInfo = {
+			surfaceId: deviceInfo.serial,
+			surfaceIdIsNotUnique: !deviceInfo.serialIsUnique,
+			description: deviceInfo.productName,
+		}
+		const prefixedDevicePath = `satellite:${deviceInfo.connectionId}:${deviceInfo.deviceId}` as const
+		const resolvedSurfaceId = this.#discoveredSurfaceRegistry.trackSurface(
+			discoveredSurface,
+			prefixedDevicePath,
+			undefined
+		)
 
-		const device = new SurfaceIPSatellite(deviceInfo, this.surfaceExecuteExpression.bind(this))
+		this.removeDevice(resolvedSurfaceId)
 
-		this.#createSurfaceHandler(deviceInfo.deviceId, 'satellite', device)
+		const device = new SurfaceIPSatellite(deviceInfo, resolvedSurfaceId, this.surfaceExecuteExpression.bind(this))
+
+		this.#createSurfaceHandler(device.info.surfaceId, 'satellite', device)
 
 		this.triggerUpdateDevicesList()
 
@@ -1405,35 +1408,12 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 		this.triggerUpdateDevicesList()
 	}
 
-	/**
-	 * Add the elgato plugin connection
-	 */
-	addElgatoPluginDevice(surfaceId: string, socket: ServiceElgatoPluginSocket): SurfaceIPElgatoPlugin {
-		this.removeDevice(surfaceId)
-
-		const device = new SurfaceIPElgatoPlugin(
-			this.#handlerDependencies.controls,
-			this.#handlerDependencies.pageStore,
-			surfaceId,
-			socket
+	surfaceExecuteExpression(str: string, surfaceId: string): ExecuteExpressionResult {
+		const parser = this.#handlerDependencies.variables.values.createVariablesAndExpressionParser(
+			null,
+			null,
+			this.#getInjectedVariablesForSurfaceId(surfaceId)
 		)
-
-		this.#createSurfaceHandler(surfaceId, 'elgato-plugin', device)
-
-		this.triggerUpdateDevicesList()
-
-		return device
-	}
-
-	surfaceExecuteExpression(
-		str: string,
-		surfaceId: string,
-		injectedVariableValues: VariableValues | undefined
-	): ExecuteExpressionResult {
-		const parser = this.#handlerDependencies.variables.values.createVariablesAndExpressionParser(null, null, {
-			...injectedVariableValues,
-			...this.#getInjectedVariablesForSurfaceId(surfaceId),
-		})
 
 		return parser.executeExpression(str, undefined)
 	}
@@ -1445,11 +1425,13 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 		const pageNumber = this.devicePageGet(surfaceId)
 
 		return {
-			'$(this:surface_id)': surfaceId,
+			'this:surface_id': surfaceId,
+
 			// Reactivity is triggered manually
-			'$(this:page)': pageNumber,
+			'this:page': pageNumber,
+
 			// Reactivity happens for these because of references to the inner variables
-			'$(this:page_name)': pageNumber ? `$(internal:page_number_${pageNumber}_name)` : VARIABLE_UNKNOWN_VALUE,
+			'this:page_name': pageNumber ? `$(internal:page_number_${pageNumber}_name)` : VARIABLE_UNKNOWN_VALUE,
 		}
 	}
 
@@ -1696,16 +1678,18 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 		}
 	}
 
-	/**
-	 * Remove a surface
-	 */
-	removeDevice(surfaceId: string, purge = false): void {
+	removeDevice(surfaceId: string, { purge, physicallyGone }: { purge?: boolean; physicallyGone?: boolean } = {}): void {
 		const surfaceHandler = this.#surfaceHandlers.get(surfaceId)
 		if (surfaceHandler) {
-			this.#logger.silly('remove device ' + surfaceId)
+			this.#logger.debug('remove device ' + surfaceId)
 
-			// Release the id from the discovered registry, so that it can be reattached
-			this.#discoveredSurfaceRegistry.forgetSurfaceById(surfaceId)
+			const surfacePath = this.#discoveredSurfaceRegistry.getSurfacePath(surfaceId)
+			if (surfacePath !== undefined) {
+				const isModuleDetected = this.#discoveredSurfaces.has(surfacePath)
+				if (isModuleDetected || physicallyGone) {
+					this.#discoveredSurfaceRegistry.forgetSurface(surfacePath)
+				}
+			}
 
 			// Detach surface from any group
 			this.#detachSurfaceFromGroup(surfaceHandler)
@@ -1810,6 +1794,14 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 	}
 
 	/**
+	 * Get the configured startup page id of a surface, ignoring use_last_page
+	 */
+	devicePageGetConfiguredStartup(surfaceOrGroupId: string, looseIdMatching = false): string | undefined {
+		const surfaceGroup = this.#getGroupForId(surfaceOrGroupId, looseIdMatching)
+		return surfaceGroup?.groupConfig.startup_page_id
+	}
+
+	/**
 	 * Get the groupId for a surfaceId (or groupId)
 	 */
 	getGroupIdFromDeviceId(surfaceOrGroupId: string, looseIdMatching = false): string | undefined {
@@ -1834,7 +1826,7 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 
 			try {
 				if (id.startsWith('emulator:')) {
-					this.removeDevice(id, true)
+					this.removeDevice(id, { purge: true })
 				} else {
 					surface.resetConfig()
 
@@ -1931,16 +1923,39 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 	}
 
 	/**
-	 * Set the brightness of a surface
-	 * @param surfaceId
+	 * Set the brightness of a surface or every surface in a group
+	 * @param surfaceOrGroupId
 	 * @param brightness 0-100
 	 * @param looseIdMatching
 	 */
-	setDeviceBrightness(surfaceId: string, brightness: number, looseIdMatching = false): void {
-		const device = this.#getSurfaceHandlerForId(surfaceId, looseIdMatching)
-		if (device) {
+	setDeviceBrightness(surfaceOrGroupId: string, brightness: number, looseIdMatching = false): void {
+		for (const device of this.#getSurfaceHandlersForBrightness(surfaceOrGroupId, looseIdMatching)) {
 			device.setBrightness(brightness)
 		}
+	}
+
+	/**
+	 * Adjust the brightness of a surface, or every surface in a group, by a relative amount
+	 * @param surfaceOrGroupId
+	 * @param adjustment -100 to 100
+	 * @param looseIdMatching
+	 */
+	adjustDeviceBrightness(surfaceOrGroupId: string, adjustment: number, looseIdMatching = false): void {
+		for (const device of this.#getSurfaceHandlersForBrightness(surfaceOrGroupId, looseIdMatching)) {
+			device.adjustBrightness(adjustment)
+		}
+	}
+
+	/**
+	 * Resolve the surfaces that a brightness action should target. A group id targets every surface
+	 * in that group, while a surface id targets only that surface.
+	 */
+	#getSurfaceHandlersForBrightness(surfaceOrGroupId: string, looseIdMatching: boolean): SurfaceHandler[] {
+		const surfaceGroup = this.#surfaceGroups.get(surfaceOrGroupId)
+		if (surfaceGroup) return surfaceGroup.surfaceHandlers
+
+		const device = this.#getSurfaceHandlerForId(surfaceOrGroupId, looseIdMatching)
+		return device ? [device] : []
 	}
 
 	/**

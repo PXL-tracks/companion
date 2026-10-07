@@ -1,13 +1,14 @@
-import type { DropdownChoice, DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
-import React, { useContext } from 'react'
-import { DropdownInputField } from '~/Components/DropdownInputField.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { useComputed } from '~/Resources/util.js'
 import { observer } from 'mobx-react-lite'
-import { CCol, CFormLabel } from '@coreui/react'
-import type { DropdownChoicesOrGroups } from '~/Components'
-import { groupItemsByCollection } from '~/Helpers/CollectionGrouping'
+import { useContext, useId } from 'react'
+import type { DropdownChoice, DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
 import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
+import type { DropdownChoicesOrGroups } from '~/Components/DropdownChoices.js'
+import { DropdownInputField } from '~/Components/DropdownInputField.js'
+import { FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { groupItemsByCollection } from '~/Helpers/CollectionGrouping'
+import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 interface EntityCellLeftMainProps {
 	entityConnectionId: string
@@ -46,21 +47,23 @@ export const EntityChangeConnection = observer(function EntityCellLeftMain({
 		return groupsOrItems
 	}, [connections, entityConnectionId])
 
+	const connectionFieldId = useId()
+
 	if (!connectionChoices) return null
 
 	return (
 		<>
-			<CFormLabel htmlFor="colFormConnection" className="col-sm-4 col-form-label col-form-label-sm">
+			<FormLabel htmlFor={connectionFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 				Connection
-			</CFormLabel>
-			<CCol sm={8}>
+			</FormLabel>
+			<Grid.Col sm={8}>
 				<DropdownInputField
-					htmlName="colFormConnection"
+					htmlName={connectionFieldId}
 					choices={connectionChoices}
 					value={entityConnectionId}
 					setValue={setConnectionId as (value: DropdownChoiceId) => void}
 				/>
-			</CCol>
+			</Grid.Col>
 		</>
 	)
 })

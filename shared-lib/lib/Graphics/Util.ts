@@ -1,0 +1,165 @@
+import { colord } from 'colord'
+import type { CompanionAlignment } from '@companion-module/base'
+import type { SomeButtonGraphicsDrawElement } from '../Model/StyleLayersModel.js'
+import {
+	ButtonGraphicsDecorationType,
+	ButtonGraphicsShowStatusIcons,
+	type ResolvedButtonGraphicsDecoration,
+} from '../Model/StyleModel.js'
+import type { UserConfigModel } from '../Model/UserConfigModel.js'
+
+export type HorizontalAlignment = 'left' | 'right' | 'center'
+export type VerticalAlignment = 'top' | 'bottom' | 'center'
+
+export type LineOrientation = 'inside' | 'center' | 'outside'
+
+/**
+ * Drawing bounds, in pixels for a drawing operation.
+ */
+export class DrawBounds {
+	readonly x: number
+	readonly y: number
+
+	readonly width: number
+	readonly height: number
+
+	readonly maxX: number
+	readonly maxY: number
+
+	constructor(x: number, y: number, width: number, height: number) {
+		this.x = x
+		this.y = y
+		this.width = width
+		this.height = height
+
+		this.maxX = x + width
+		this.maxY = y + height
+	}
+
+	isValid(): boolean {
+		return this.width > 0 && this.height > 0
+	}
+
+	compose(x: number, y: number, width: number, height: number): DrawBounds {
+		return new DrawBounds(this.x + x * this.width, this.y + y * this.height, width * this.width, height * this.height)
+	}
+}
+
+/**
+ * Parse an alignment value
+ * @param alignment
+ * @param validate Throw if value is invalid
+ */
+export function ParseAlignment(
+	alignment: string,
+	validate?: boolean
+): [horizontal: HorizontalAlignment, vertical: VerticalAlignment, full: CompanionAlignment] {
+	const [halignRaw, valignRaw] = alignment.toLowerCase().split(':', 2)
+
+	let halign: 'left' | 'right' | 'center'
+	if (halignRaw !== 'left' && halignRaw !== 'right' && halignRaw !== 'center') {
+		if (validate) throw new Error(`Invalid horizontal component: "${halignRaw}"`)
+
+		halign = 'center'
+	} else {
+		halign = halignRaw
+	}
+
+	let valign: 'top' | 'bottom' | 'center'
+	if (valignRaw !== 'top' && valignRaw !== 'bottom' && valignRaw !== 'center') {
+		if (validate) throw new Error(`Invalid vertical component: "${valignRaw}"`)
+
+		valign = 'center'
+	} else {
+		valign = valignRaw
+	}
+
+	return [halign, valign, `${halign}:${valign}`]
+}
+
+/**
+ * Convert a 24bit/32bit number into rgb components
+ */
+export const rgbRev = (dec: number, alwaysIncludesAlpha = false): { a: number; r: number; g: number; b: number } => {
+	dec = Math.floor(dec)
+	return {
+		a: dec > 0xffffff || alwaysIncludesAlpha ? (255 - ((dec & 0xff000000) >>> 24)) / 255 : 1,
+		r: (dec & 0xff0000) >>> 16,
+		g: (dec & 0x00ff00) >>> 8,
+		b: dec & 0x0000ff,
+	}
+}
+
+/**
+ * parse a Companion color number or a css color string and return a css color string
+ * @param color
+ * @param skipValidation defaults to false
+ * @returns a css color string
+ */
+export const parseColor = (color: number | string, skipValidation = false): string => {
+	if (typeof color === 'number' || (typeof color === 'string' && !isNaN(Number(color)))) {
+		const col = rgbRev(Number(color))
+		return `rgba(${col.r}, ${col.g}, ${col.b}, ${col.a})`
+	}
+	if (typeof color === 'string') {
+		if (skipValidation) return color
+		if (colord(color).isValid()) {
+			return color
+		} else {
+			return 'rgba(0, 0, 0, 0)'
+		}
+	}
+	return 'rgba(0, 0, 0, 0)'
+}
+
+/**
+ * Get the alpha (0-1) of a Companion color number or css color string. Safe for both numbers and css strings.
+ */
+export const parseColorAlpha = (color: number | string): number => colord(parseColor(color)).alpha()
+
+/**
+ * Parse a Companion color number or a css color string and return a Companion color number.
+ * Alpha is packed into the top 8 bits (inverted), matching the encoding used elsewhere. Invalid input returns 0.
+ * (Numeric strings such as '123' are treated as a color number, matching parseColor.)
+ */
+export const colorToNumber = (color: number | string): number => {
+	if (typeof color === 'number') return Number.isFinite(color) ? color : 0
+	const asNumber = Number(color)
+	if (color.trim() !== '' && Number.isFinite(asNumber)) return asNumber
+	if (!colord(color).isValid()) return 0
+
+	const { r, g, b, a } = colord(color).toRgb()
+	const alphaByte = Math.round(255 * (1 - a))
+	return ((r << 16) | (g << 8) | b) + (alphaByte > 0 ? alphaByte * 0x1000000 : 0)
+}
+
+export type ResolveButtonStylePropertiesConfig = Pick<UserConfigModel, 'buttons_decoration' | 'buttons_status_icons'>
+
+export function resolveButtonStyleProperties(
+	drawConfig: ResolveButtonStylePropertiesConfig,
+	elements: SomeButtonGraphicsDrawElement[]
+): {
+	decoration: ResolvedButtonGraphicsDecoration
+	show_status_icons: boolean
+} {
+	const canvasElement = elements.find((el) => el.type === 'canvas')
+
+	// The global default supports the full topbar/border/none range; the canvas element may override it per-button.
+	const globalDecoration = drawConfig.buttons_decoration
+	const globalShowStatusIcons = drawConfig.buttons_status_icons === 'show'
+
+	const decoration: ResolvedButtonGraphicsDecoration =
+		!canvasElement || canvasElement.decoration === ButtonGraphicsDecorationType.FollowDefault
+			? globalDecoration
+			: canvasElement.decoration
+
+	const show_status_icons =
+		!canvasElement || canvasElement.showStatusIcons === ButtonGraphicsShowStatusIcons.FollowDefault
+			? globalShowStatusIcons
+			: canvasElement.showStatusIcons === ButtonGraphicsShowStatusIcons.ShowAll
+
+	return {
+		decoration,
+		show_status_icons,
+	}
+}

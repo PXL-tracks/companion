@@ -1,15 +1,13 @@
 #!/usr/bin/env zx
-
-import { generateMiniVersionString, generateVersionString } from '../lib.mts'
-import yazl from 'yazl'
-import { $, fs, usePowerShell, argv } from 'zx'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import yaml from 'yaml'
-import { determinePlatformInfo } from './util.mts'
-// @ts-expect-error Untyped webpack config
-import webpackConfig from '../../companion/webpack.config.js'
 import type { PackageJson } from 'type-fest'
+import yaml from 'yaml'
+import yazl from 'yazl'
+import { $, argv, fs, usePowerShell } from 'zx'
+import { companionNativeExternals } from '../companion-externals.mts'
+import { generateMiniVersionString, generateVersionString } from '../lib.mts'
+import { determinePlatformInfo } from './util.mts'
 
 $.verbose = true
 
@@ -74,15 +72,10 @@ const buildString = await generateMiniVersionString()
 const require = createRequire(import.meta.url)
 const dependencies: PackageJson.Dependency = {}
 
-const neededDependencies = Object.keys(webpackConfig.externals)
+const neededDependencies = companionNativeExternals
 for (const name of neededDependencies) {
 	const pkgJson = require(`${name}/package.json`)
 	dependencies[name] = pkgJson.version
-}
-
-if (platformInfo.runtimePlatform === 'linux' && platformInfo.runtimeArch !== 'x64') {
-	// These have no prebuilds available
-	delete dependencies['bufferutil']
 }
 
 const packageResolutions: PackageJson.Dependency = {
@@ -135,19 +128,12 @@ const copyPrebuildsFromDependencies = [
 	'node-hid',
 	'@julusian/image-rs',
 	'@julusian/segfault-raub',
-	//
+	'bufferutil', // Technically @julusian/bufferutil
 ]
 for (const name of copyPrebuildsFromDependencies) {
 	await fs.mkdirp('dist/prebuilds')
 	await fs.copy(path.join('node_modules', name, 'prebuilds'), 'dist/prebuilds')
 }
-
-// Make sure the sqlite3 prebuild for the target is installed, then copy it to the output
-// (Note: w/o --platform, the wrong binary is loaded when building win32 on WSL)
-await $`yarn --cwd node_modules/better-sqlite3 prebuild-install --arch=${platformInfo.nodeArch} --platform=${platformInfo.nodePlatform}`
-await fs.copy('node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'dist/prebuilds/better_sqlite3.node')
-// now restore the correct one or `yarn dev` will be broken after a cross-platform build!
-await $`yarn --cwd node_modules/better-sqlite3 prebuild-install`
 
 // Copy fonts
 await fs.mkdirp('dist/assets/Fonts')
@@ -156,6 +142,9 @@ await fs.copy(path.join('assets', 'Fonts'), 'dist/assets/Fonts')
 // Do this last so webpack can find resources (esp. package.json)
 // (note currently this isn't needed since we've disabled URL processing, but in the future this may help...)
 // Build application
+// Tell the esbuild step which platform we are targeting, so the linux-only headless
+// config-tool is only bundled for linux builds.
+process.env.COMPANION_BUILD_PLATFORM = platformInfo.nodePlatform
 await $`yarn workspace @companion-app/shared build:ts`
 await $`yarn workspace companion build`
 

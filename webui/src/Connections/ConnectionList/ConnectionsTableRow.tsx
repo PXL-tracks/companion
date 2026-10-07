@@ -1,14 +1,13 @@
-import { CButton } from '@coreui/react'
 import { faDollarSign } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import React, { useContext, useCallback } from 'react'
-import { Tuck } from '~/Components/Tuck.js'
+import { useCallback, useContext } from 'react'
+import { Popover } from '~/Components/Popover.js'
+import { InstancesListTableRow } from '~/Instances/List/InstancesListTableRow.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import type { ClientConnectionConfigWithId } from './ConnectionList.js'
 import { useConnectionListContext } from './ConnectionListContext.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import { InstancesListTableRow } from '~/Instances/List/InstancesListTableRow.js'
 
 interface ConnectionsTableRowProps {
 	connection: ClientConnectionConfigWithId
@@ -63,18 +62,14 @@ export const ConnectionsTableRow = observer(function ConnectionsTableRow({
 			instance={connection}
 			instanceStatus={connection.status}
 			extraMenuItems={
-				<CButton
-					onMouseDown={doShowVariables}
+				<Popover.Item
+					onClick={doShowVariables}
 					title="Variables"
-					color="secondary"
 					disabled={!isEnabled || !(connectionVariables && connectionVariables.size > 0)}
-					style={{ textAlign: 'left' }}
 				>
-					<Tuck>
-						<FontAwesomeIcon icon={faDollarSign} />
-					</Tuck>
+					<FontAwesomeIcon icon={faDollarSign} className="me-2" />
 					Variables
-				</CButton>
+				</Popover.Item>
 			}
 			labelStr="connection"
 			doDelete={doDelete}

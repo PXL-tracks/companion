@@ -1,6 +1,6 @@
-import type { DataStoreBase } from '../StoreBase.js'
-import type { Logger } from '../../Log/Controller.js'
-import { cloneDeep } from 'lodash-es'
+import { nanoid } from 'nanoid'
+import type { JsonValue } from 'type-fest'
+import { CreateTriggerControlId, oldBankIndexToXY } from '@companion-app/shared/ControlId.js'
 import type {
 	ExportFullv6,
 	ExportPageModelv6,
@@ -8,11 +8,10 @@ import type {
 	SomeExportv6,
 } from '@companion-app/shared/Model/ExportModel.js'
 import { isExpressionOrValue, type ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
-import type { CompanionOptionValues } from '@companion-module/host'
-import type { JsonValue } from 'type-fest'
 import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
-import { CreateTriggerControlId, oldBankIndexToXY } from '@companion-app/shared/ControlId.js'
-import { nanoid } from 'nanoid'
+import type { CompanionOptionValues } from '@companion-module/host'
+import type { Logger } from '../../Log/Controller.js'
+import type { DataStoreBase } from '../StoreBase.js'
 
 /**
  * These Entity types are a snapshot of the v10 definitions, to preserve how they were then
@@ -59,23 +58,23 @@ function convertDatabaseToV11(db: DataStoreBase<any>, _logger: Logger): void {
 
 	const controls = db.getTableView('controls')
 	for (const [id, control] of Object.entries(controls.all())) {
-		const changed = fixupEntitiesOnControl(control)
+		const changed = fixupEntitiesOnControl(control, id.startsWith('trigger:'))
 
 		if (changed) controls.set(id, control)
 	}
 }
 
-function fixupEntitiesOnControl(control: any): boolean {
+function fixupEntitiesOnControl(control: any, isTrigger: boolean): boolean {
 	let changed = false
 
-	changed = fixupEntities(control.condition) || changed
-	changed = fixupEntities(control.actions) || changed
-	changed = fixupEntities(control.localVariables) || changed
-	changed = fixupEntities(control.feedbacks) || changed
+	changed = fixupEntities(control.condition, isTrigger) || changed
+	changed = fixupEntities(control.actions, isTrigger) || changed
+	changed = fixupEntities(control.localVariables, isTrigger) || changed
+	changed = fixupEntities(control.feedbacks, isTrigger) || changed
 
 	// Expression variable root
 	if (control.entity) {
-		const updatedEntity = fixupEntity(control.entity)
+		const updatedEntity = fixupEntity(control.entity, isTrigger)
 		if (updatedEntity) {
 			control.entity = updatedEntity
 			changed = true
@@ -85,7 +84,7 @@ function fixupEntitiesOnControl(control: any): boolean {
 	// Button actions
 	for (const stepObj of Object.values<any>(control.steps ?? {})) {
 		for (const actionSet of Object.values<any>(stepObj.action_sets || {})) {
-			changed = fixupEntities(actionSet) || changed
+			changed = fixupEntities(actionSet, isTrigger) || changed
 		}
 	}
 
@@ -100,7 +99,7 @@ function fixupEntitiesOnControl(control: any): boolean {
 	return changed
 }
 
-function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
+function fixupEntity(entity: SomeEntityModelV10, isTrigger: boolean): SomeEntityModelV10 | null {
 	let changed = false
 
 	if (entity.connectionId === 'internal') {
@@ -228,8 +227,8 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 				}
 
 				// Ensure the new children are also upgraded
-				fixupEntity(newChildAction)
-				fixupEntity(newExpressionFeedback)
+				fixupEntity(newChildAction, isTrigger)
+				fixupEntity(newExpressionFeedback, isTrigger)
 
 				return {
 					type: 'action',
@@ -278,8 +277,8 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 				}
 
 				// Ensure the new children are also upgraded
-				fixupEntity(newChildAction)
-				fixupEntity(newExpressionFeedback)
+				fixupEntity(newChildAction, isTrigger)
+				fixupEntity(newExpressionFeedback, isTrigger)
 
 				return {
 					type: 'action',
@@ -316,18 +315,18 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 				entity.definitionId === 'button_rotate_right' ||
 				entity.definitionId === 'panic_bank'
 			) {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 			} else if (entity.definitionId === 'button_text') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'label') || changed
 			} else if (entity.definitionId === 'bgcolor' || entity.definitionId === 'textcolor') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'color') || changed
 			} else if (entity.definitionId === 'bank_current_step_delta') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'amount') || changed
 			} else if (entity.definitionId === 'bank_current_step') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 
 				if (!isExpressionOrValue(entity.options.step)) {
 					convertOldSplitOptionToExpression(
@@ -597,11 +596,11 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 			}
 
 			if (entity.definitionId === 'local_variable_set_value') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'name') || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'value') || changed
 			} else if (entity.definitionId === 'local_variable_set_expression') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'name') || changed
 
 				// Rename to the combined action
@@ -617,7 +616,7 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 				entity.definitionId === 'local_variable_reset_to_default' ||
 				entity.definitionId === 'local_variable_sync_to_default'
 			) {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'name') || changed
 			}
 		} else if (entity.type === 'feedback') {
@@ -663,9 +662,9 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 			}
 
 			if (entity.definitionId === 'bank_style' || entity.definitionId === 'bank_pushed') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 			} else if (entity.definitionId === 'bank_current_step') {
-				changed = convertOldLocationToExpressionOrValue(entity.options) || changed
+				changed = convertOldLocationToExpressionOrValue(entity.options, isTrigger) || changed
 				changed = convertSimplePropertyToExpressionValue(entity.options, 'step') || changed
 			}
 
@@ -677,8 +676,13 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 
 		// Ensure children are also upgraded
 		for (const children of Object.values(entity.children || {})) {
-			changed = fixupEntities(children) || changed
+			changed = fixupEntities(children, isTrigger) || changed
 		}
+	}
+
+	if (!entity.options) {
+		entity.options = {}
+		changed = true
 	}
 
 	// ensure everything, for all modules is now an expression
@@ -700,7 +704,7 @@ function fixupEntity(entity: SomeEntityModelV10): SomeEntityModelV10 | null {
 	return changed ? entity : null
 }
 
-function convertOldLocationToExpressionOrValue(options: CompanionOptionValues): boolean {
+function convertOldLocationToExpressionOrValue(options: CompanionOptionValues, isTrigger: boolean): boolean {
 	if (options.location) return false
 
 	if (options.location_target === 'this:only-this-run') {
@@ -716,7 +720,7 @@ function convertOldLocationToExpressionOrValue(options: CompanionOptionValues): 
 	} else if (options.location_target === 'this') {
 		options.location = {
 			isExpression: false,
-			value: '$(this:location)',
+			value: isTrigger ? 'this' : '$(this:location)',
 		} satisfies ExpressionOrValue<string>
 	} else if (options.location_target === 'expression') {
 		options.location = {
@@ -762,7 +766,7 @@ function convertOldSplitOptionToExpression(
 	} else {
 		options[keys.result] = {
 			isExpression: false,
-			value: options[keys.simple] || '',
+			value: options[keys.simple] ?? '',
 		} satisfies ExpressionOrValue<JsonValue>
 	}
 
@@ -790,13 +794,13 @@ function convertSimplePropertyToExpressionValue(
 	}
 }
 
-function fixupEntities(entities: SomeEntityModelV10[] | undefined): boolean {
+function fixupEntities(entities: SomeEntityModelV10[] | undefined, isTrigger: boolean): boolean {
 	if (!entities || !Array.isArray(entities)) return false
 
 	let changed = false
 
 	for (let i = 0; i < entities.length; i++) {
-		const updatedEntity = fixupEntity(entities[i])
+		const updatedEntity = fixupEntity(entities[i], isTrigger)
 		if (updatedEntity) {
 			entities[i] = updatedEntity
 			changed = true
@@ -809,47 +813,47 @@ function fixupEntities(entities: SomeEntityModelV10[] | undefined): boolean {
 function convertImportToV11(obj: SomeExportv6): SomeExportv6 {
 	if (obj.type == 'full') {
 		const newObj: ExportFullv6 = {
-			...cloneDeep(obj),
+			...structuredClone(obj),
 			version: 11,
 		}
 
 		for (const page of Object.values(newObj.pages ?? {})) {
 			for (const row of Object.values(page?.controls ?? {})) {
 				for (const control of Object.values(row ?? {})) {
-					fixupEntitiesOnControl(control)
+					fixupEntitiesOnControl(control, false)
 				}
 			}
 		}
 
 		for (const trigger of Object.values(newObj.triggers ?? {})) {
-			fixupEntitiesOnControl(trigger)
+			fixupEntitiesOnControl(trigger, true)
 		}
 		for (const expressionVar of Object.values(newObj.expressionVariables ?? {})) {
-			fixupEntitiesOnControl(expressionVar)
+			fixupEntitiesOnControl(expressionVar, false)
 		}
 
 		return newObj
 	} else if (obj.type == 'page') {
 		const newObj: ExportPageModelv6 = {
-			...cloneDeep(obj),
+			...structuredClone(obj),
 			version: 11,
 		}
 
 		for (const row of Object.values(newObj.page?.controls ?? {})) {
 			for (const control of Object.values(row ?? {})) {
-				fixupEntitiesOnControl(control)
+				fixupEntitiesOnControl(control, false)
 			}
 		}
 
 		return newObj
 	} else if (obj.type == 'trigger_list') {
 		const newObj: ExportTriggersListv6 = {
-			...cloneDeep(obj),
+			...structuredClone(obj),
 			version: 11,
 		}
 
 		for (const trigger of Object.values(newObj.triggers ?? {})) {
-			fixupEntitiesOnControl(trigger)
+			fixupEntitiesOnControl(trigger, true)
 		}
 
 		return newObj

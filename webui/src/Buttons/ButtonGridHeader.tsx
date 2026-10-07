@@ -1,11 +1,17 @@
-import { CButton, CInputGroup } from '@coreui/react'
-import React, { useCallback, useContext, useMemo } from 'react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { Combobox } from '@base-ui/react/combobox'
 import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons'
-import Select from 'react-select'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { prepare as fuzzyPrepare } from 'fuzzysort'
+import { ChevronDownIcon } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useState } from 'react'
+import type { DropdownChoice } from '@companion-app/shared/Model/Common.js'
+import { Button } from '~/Components/Button'
+import { DropdownInputPopup } from '~/Components/DropdownInputField/Popup.js'
+import { InputGroup } from '~/Components/Form'
 import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { fuzzyFilterSort } from '~/util/fuzzy'
 
 interface ButtonGridHeaderProps {
 	pageNumber: number
@@ -64,54 +70,71 @@ export const PageNumberPicker = observer(function ButtonGridHeader({
 	children,
 }: React.PropsWithChildren<PageNumberPickerProps>) {
 	const inputChange = useCallback(
-		(val: PageNumberOption | null) => {
-			const val2 = val?.value
-			if (val2 !== undefined && setPage && !isNaN(val2)) {
-				setPage(val2)
+		(val: number | null) => {
+			if (val !== null && setPage && !isNaN(val)) {
+				setPage(val)
 			}
 		},
 		[setPage]
 	)
 
-	const nextPage = useCallback(() => {
-		changePage?.(1)
-	}, [changePage])
-	const prevPage = useCallback(() => {
-		changePage?.(-1)
-	}, [changePage])
+	const nextPage = useCallback(() => changePage?.(1), [changePage])
+	const prevPage = useCallback(() => changePage?.(-1), [changePage])
 
-	const currentValue: PageNumberOption | undefined = useMemo(() => {
-		return (
-			pageOptions.find((o) => o.value == pageNumber) ?? {
-				value: pageNumber,
-				label: pageNumber + '',
-			}
-		)
+	const choiceOptions = useComputed<Array<DropdownChoice & { fuzzy: ReturnType<typeof fuzzyPrepare> }>>(() => {
+		const options = pageOptions.map((o) => ({ id: o.value, label: o.label, fuzzy: fuzzyPrepare(o.label) }))
+		if (!options.some((o) => o.id === pageNumber)) {
+			const label = String(pageNumber)
+			options.push({ id: pageNumber, label, fuzzy: fuzzyPrepare(label) })
+		}
+		return options
 	}, [pageOptions, pageNumber])
+
+	const [inputValue, setInputValue] = useState('')
+
+	const filteredItems = useComputed<DropdownChoice[]>(() => {
+		if (!inputValue) return choiceOptions
+		return fuzzyFilterSort(choiceOptions, inputValue)
+	}, [choiceOptions, inputValue])
 
 	return (
 		<div className="button-grid-header">
-			<CInputGroup>
-				<CButton color="dark" hidden={!changePage} onClick={prevPage}>
+			<InputGroup>
+				<Button color="dark" hidden={!changePage} onClick={prevPage}>
 					<FontAwesomeIcon icon={faChevronLeft} />
-				</CButton>
-				<Select<PageNumberOption>
-					className="button-page-input"
-					isDisabled={!setPage}
-					placeholder={pageNumber}
-					classNamePrefix={'select-control'}
-					isClearable={false}
-					isSearchable={true}
-					isMulti={false}
-					options={pageOptions}
-					value={currentValue}
-					onChange={inputChange}
-				/>
-				<CButton color="dark" hidden={!changePage} onClick={nextPage}>
+				</Button>
+				<div className="dropdown-field button-page-input">
+					<Combobox.Root<number | null>
+						autoHighlight
+						value={pageNumber}
+						items={choiceOptions}
+						filteredItems={filteredItems}
+						disabled={!setPage}
+						isItemEqualToValue={isItemEqualToValue}
+						onValueChange={inputChange}
+						onInputValueChange={setInputValue}
+						itemToStringLabel={() => ''}
+					>
+						<Combobox.InputGroup className="dropdown-field-input-group rounded-start-0 rounded-end-0">
+							<Combobox.Input
+								className="dropdown-field-input"
+								placeholder={choiceOptions.find((o) => o.id === pageNumber)?.label ?? String(pageNumber ?? '')}
+							/>
+							<Combobox.Trigger className="dropdown-field-trigger">
+								<ChevronDownIcon className="dropdown-field-icon" />
+							</Combobox.Trigger>
+						</Combobox.InputGroup>
+						<DropdownInputPopup />
+					</Combobox.Root>
+				</div>
+				<Button color="dark" hidden={!changePage} onClick={nextPage}>
 					<FontAwesomeIcon icon={faChevronRight} />
-				</CButton>
-			</CInputGroup>
+				</Button>
+			</InputGroup>
 			<div className="right-buttons">{children}</div>
 		</div>
 	)
 })
+
+const isItemEqualToValue = (itemValue: DropdownChoice | number | null, value: number | null) =>
+	(itemValue !== null && typeof itemValue === 'object' ? itemValue.id : itemValue) === value

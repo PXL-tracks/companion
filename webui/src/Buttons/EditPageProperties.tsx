@@ -1,18 +1,11 @@
-import {
-	CButton,
-	CCol,
-	CForm,
-	CFormInput,
-	CFormLabel,
-	CModalBody,
-	CModalFooter,
-	CModalHeader,
-	CRow,
-} from '@coreui/react'
-import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react'
-import type { PagesStoreModel } from '~/Stores/PagesStore.js'
-import { CModalExt } from '~/Components/CModalExt.js'
+import { forwardRef, useCallback, useId, useImperativeHandle, useState } from 'react'
+import { Button } from '~/Components/Button'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { Modal } from '~/Components/Modal'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import type { PagesStoreModel } from '~/Stores/PagesStore.js'
 
 export interface EditPagePropertiesModalRef {
 	show(pageNumber: number, pageInfo: PagesStoreModel | undefined): void
@@ -28,21 +21,12 @@ export const EditPagePropertiesModal = forwardRef<EditPagePropertiesModalRef, Ed
 
 		const [pageName, setName] = useState<string | null>(null)
 
-		const inputRef = useRef<HTMLInputElement>(null)
-
-		const inputFocus = () => {
-			if (inputRef.current) {
-				inputRef.current.focus()
-			}
-		}
-
 		const setNameMutation = useMutationExt(trpc.pages.setName.mutationOptions())
 
-		const doClose = useCallback(() => setShow(false), [])
-		const onClosed = useCallback(() => setPageNumber(null), [])
 		const doAction = useCallback(
 			(e: React.FormEvent) => {
-				if (e) e.preventDefault()
+				e.preventDefault()
+				e.stopPropagation()
 
 				setShow(false)
 
@@ -67,53 +51,59 @@ export const EditPagePropertiesModal = forwardRef<EditPagePropertiesModalRef, Ed
 					setName(pageInfo?.name ?? null)
 					setPageNumber(pageNumber)
 					setShow(true)
-
-					// Focus the text area
-					setTimeout(inputFocus, 50)
 				},
 			}),
 			[]
 		)
 
-		const onNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-			setName(e.target.value)
+		const onOpenChangeComplete = useCallback((open: boolean) => {
+			if (!open) {
+				setPageNumber(null)
+				setName(null)
+			}
 		}, [])
 
+		const nameFieldId = useId()
+
 		return (
-			<CModalExt visible={show} onClose={doClose} onClosed={onClosed} onOpened={inputFocus}>
-				<CModalHeader closeButton>
-					<h5>Configure Page {pageNumber}</h5>
-				</CModalHeader>
-				<CModalBody>
-					<CForm onSubmit={doAction}>
-						{includeName && (
-							<CRow className="mb-3">
-								<CFormLabel htmlFor="colFormName" className="col-sm-3 col-form-label col-form-label-sm">
-									Name
-								</CFormLabel>
-								<CCol sm={9}>
-									<CFormInput
-										ref={inputRef}
-										name="colFormName"
-										type="text"
-										value={pageName || ''}
-										onChange={onNameChange}
-									/>
-								</CCol>
-							</CRow>
-						)}
-						{/* TODO: more fields should be added here */}
-					</CForm>
-				</CModalBody>
-				<CModalFooter>
-					<CButton color="secondary" onClick={doClose}>
-						Cancel
-					</CButton>
-					<CButton color="primary" onClick={doAction}>
-						Save
-					</CButton>
-				</CModalFooter>
-			</CModalExt>
+			<Modal.Root open={show} onOpenChange={setShow} onOpenChangeComplete={onOpenChangeComplete}>
+				<Modal.Portal>
+					<Modal.Backdrop />
+					<Modal.Viewport>
+						<Modal.Popup>
+							<Modal.Header closeButton>
+								<Modal.Title>Configure Page {pageNumber}</Modal.Title>
+							</Modal.Header>
+							<Modal.Body>
+								<Form onSubmit={doAction}>
+									{includeName && (
+										<Grid.Row className="mb-3">
+											<FormLabel htmlFor={nameFieldId} className="col-sm-3 col-form-label col-form-label-sm">
+												Name
+											</FormLabel>
+											<Grid.Col sm={9}>
+												<TextInputFieldSimple
+													id={nameFieldId}
+													value={pageName || ''}
+													setValue={setName}
+													immediateValue
+												/>
+											</Grid.Col>
+										</Grid.Row>
+									)}
+									{/* TODO: more fields should be added here */}
+								</Form>
+							</Modal.Body>
+							<Modal.Footer>
+								<Modal.Close>Cancel</Modal.Close>
+								<Button color="primary" onClick={doAction}>
+									Save
+								</Button>
+							</Modal.Footer>
+						</Modal.Popup>
+					</Modal.Viewport>
+				</Modal.Portal>
+			</Modal.Root>
 		)
 	}
 )

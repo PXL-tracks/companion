@@ -1,12 +1,14 @@
-import { observer } from 'mobx-react-lite'
-import React, { useCallback, useContext } from 'react'
-import { useRemoteSurfacesListContext } from './RemoteSurfacesListContext.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import type { OutboundSurfaceInfo } from '@companion-app/shared/Model/Surfaces.js'
-import { CButton, CFormSwitch } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTrash } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import classNames from 'classnames'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext } from 'react'
+import type { OutboundSurfaceInfo } from '@companion-app/shared/Model/Surfaces.js'
+import { Button } from '~/Components/Button.js'
+import { SwitchInputField } from '~/Components/SwitchInputField.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { useRemoteSurfacesListContext } from './RemoteSurfacesListContext.js'
 
 interface RemoteSurfaceTableRowProps {
 	remoteConnection: OutboundSurfaceInfo
@@ -43,11 +45,14 @@ export const RemoteSurfaceTableRow = observer(function RemoteSurfaceTableRow({
 	}, [deleteMutation, deleteModalRef, id, remoteConnection, configureRemoteConnection])
 
 	const isEnabled = remoteConnection.enabled === undefined || remoteConnection.enabled
-	const doToggleEnabled = useCallback(() => {
-		setEnabledMutation.mutateAsync({ id, enabled: !isEnabled }).catch((e) => {
-			console.error('Set enabled failed', e)
-		})
-	}, [setEnabledMutation, id, isEnabled])
+	const doToggleEnabled = useCallback(
+		(val: boolean) => {
+			setEnabledMutation.mutateAsync({ id, enabled: !!val }).catch((e) => {
+				console.error('Set enabled failed', e)
+			})
+		},
+		[setEnabledMutation, id]
+	)
 
 	const editClickId = isSelected ? null : id // If this row is selected, don't allow editing on click, as it will close the selection
 	const doEdit = useCallback(() => configureRemoteConnection(editClickId), [configureRemoteConnection, editClickId])
@@ -63,27 +68,29 @@ export const RemoteSurfaceTableRow = observer(function RemoteSurfaceTableRow({
 
 	return (
 		<div className="flex flex-row align-items-center gap-2 hand">
-			<div onClick={doEdit} className="flex flex-column grow" style={{ minWidth: 0 }}>
+			<div
+				onClick={doEdit}
+				className={classNames('flex flex-column grow', { disabled: !isEnabled })}
+				style={{ minWidth: 0 }}
+			>
 				<b>{remoteConnection.displayName}</b>
 				<span className="auto-ellipsis" title={surfaceInstanceDisplayName}>
 					{surfaceInstanceDisplayName}
 				</span>
 			</div>
 
-			<div className="flex align-items-center">
-				<CFormSwitch
-					className="ms-2"
+			<div className="flex align-items-center ps-2">
+				<SwitchInputField
+					id={undefined}
 					// disabled={!moduleInfo || !moduleVersion}
-					color="success"
-					checked={isEnabled}
-					onChange={doToggleEnabled}
-					size="xl"
-					title={isEnabled ? `Disable surface connection` : `Enable surface connection`}
+					value={isEnabled}
+					setValue={doToggleEnabled}
+					tooltip={isEnabled ? `Disable surface connection` : `Enable surface connection`}
 				/>
 
-				<CButton onClick={doDelete} title="Delete" className="p-1">
+				<Button onClick={doDelete} title="Delete" className="p-1">
 					<FontAwesomeIcon icon={faTrash} />
-				</CButton>
+				</Button>
 			</div>
 		</div>
 	)

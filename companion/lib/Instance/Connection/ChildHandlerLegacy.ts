@@ -1,78 +1,18 @@
-import LogController, { type Logger } from '../../Log/Controller.js'
-import {
-	IpcWrapper as IpcWrapperEJSON,
-	type IpcEventHandlers,
-	// eslint-disable-next-line n/no-missing-import
-} from '@companion-module/base-old/dist/host-api/ipc-wrapper.js'
-import semver from 'semver'
 import type express from 'express'
-import type {
-	ActionInstance as ModuleActionInstance,
-	FeedbackInstance as ModuleFeedbackInstance,
-	HostToModuleEventsV0,
-	ModuleToHostEventsV0,
-	LogMessageMessage,
-	SetStatusMessage,
-	SetActionDefinitionsMessage,
-	SetFeedbackDefinitionsMessage,
-	UpdateFeedbackValuesMessage,
-	SetVariableValuesMessage,
-	SetVariableDefinitionsMessage,
-	SetPresetDefinitionsMessage,
-	SaveConfigMessage,
-	SendOscMessage,
-	ParseVariablesInStringMessage,
-	ParseVariablesInStringResponseMessage,
-	RecordActionMessage,
-	SetCustomVariableMessage,
-	UpgradedDataResponseMessage,
-	SharedUdpSocketMessageJoin,
-	SharedUdpSocketMessageLeave,
-	SharedUdpSocketMessageSend,
-	UpdateActionInstancesMessage,
-	UpdateFeedbackInstancesMessage,
-	// eslint-disable-next-line n/no-missing-import
-} from '@companion-module/base-old/dist/host-api/api.js'
-import type {
-	ModuleRegisterMessage,
-	ModuleToHostEventsInit,
-	// eslint-disable-next-line n/no-missing-import
-} from '@companion-module/base-old/dist/host-api/versions.js'
-import type { InstanceConfig } from '@companion-app/shared/Model/Instance.js'
-import type {
-	OptionsObject,
-	CompanionHTTPRequest,
-	CompanionInputFieldBase,
-	CompanionOptionValues,
-	LogLevel,
-} from '@companion-module/base-old'
+import semver from 'semver'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
+import { ButtonDecorationRenderer } from '@companion-app/shared/Graphics/ButtonDecorationRenderer.js'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import {
 	EntityModelType,
 	isValidFeedbackEntitySubType,
-	type ReplaceableActionEntityModel,
-	type ReplaceableFeedbackEntityModel,
 	type ActionEntityModel,
 	type FeedbackEntityModel,
+	type ReplaceableActionEntityModel,
+	type ReplaceableFeedbackEntityModel,
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { Complete } from '@companion-module/base'
-import type { RespawnMonitor } from '@companion-app/shared/Respawn.js'
-import {
-	doesModuleExpectLabelUpdates,
-	doesModuleUseSeparateUpgradeMethod,
-	doesModuleUseNewConfigLayout,
-} from './ApiVersions.js'
-import {
-	ConnectionEntityManager,
-	type EntityManagerActionEntity,
-	type EntityManagerAdapter,
-	type EntityManagerFeedbackEntity,
-} from './EntityManager.js'
-import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
-import { translateConnectionConfigFields, translateEntityInputFields } from './ConfigFieldsLegacy.js'
-import type { ChildProcessHandlerBase } from '../ProcessManager.js'
-import type { VariableDefinition } from '@companion-app/shared/Model/Variables.js'
+import type { InstanceConfig } from '@companion-app/shared/Model/Instance.js'
 import {
 	convertExpressionOptionsWithoutParsing,
 	exprVal,
@@ -80,15 +20,75 @@ import {
 	type ExpressionableOptionsObject,
 	type SomeCompanionInputField,
 } from '@companion-app/shared/Model/Options.js'
+import type { VariableDefinition } from '@companion-app/shared/Model/Variables.js'
+import type { RespawnMonitor } from '@companion-app/shared/Respawn.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
+import type { Complete } from '@companion-module/base'
+import type { CompanionHTTPRequest, CompanionInputFieldBase, LogLevel, OptionsObject } from '@companion-module/base-old'
+import type {
+	HostToModuleEventsV0,
+	LogMessageMessage,
+	ActionInstance as ModuleActionInstance,
+	FeedbackInstance as ModuleFeedbackInstance,
+	ModuleToHostEventsV0,
+	ParseVariablesInStringMessage,
+	ParseVariablesInStringResponseMessage,
+	RecordActionMessage,
+	SaveConfigMessage,
+	SendOscMessage,
+	SetActionDefinitionsMessage,
+	SetCustomVariableMessage,
+	SetFeedbackDefinitionsMessage,
+	SetPresetDefinitionsMessage,
+	SetStatusMessage,
+	SetVariableDefinitionsMessage,
+	SetVariableValuesMessage,
+	SharedUdpSocketMessageJoin,
+	SharedUdpSocketMessageLeave,
+	SharedUdpSocketMessageSend,
+	UpdateActionInstancesMessage,
+	UpdateFeedbackInstancesMessage,
+	UpdateFeedbackValuesMessage,
+	UpgradedDataResponseMessage,
+	// eslint-disable-next-line n/no-missing-import
+} from '@companion-module/base-old/dist/host-api/api.js'
+import {
+	IpcWrapper as IpcWrapperEJSON,
+	type IpcEventHandlers,
+	// eslint-disable-next-line n/no-missing-import
+} from '@companion-module/base-old/dist/host-api/ipc-wrapper.js'
+import type {
+	ModuleRegisterMessage,
+	ModuleToHostEventsInit,
+	// eslint-disable-next-line n/no-missing-import
+} from '@companion-module/base-old/dist/host-api/versions.js'
+import type { CompanionOptionValues as CompanionOptionValuesNew } from '@companion-module/host'
+import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
+import type { IControlStore } from '../../Controls/IControlStore.js'
+import LogController, { type Logger } from '../../Log/Controller.js'
+import type { ChildProcessHandlerBase } from '../ProcessManager.js'
+import {
+	doesModuleExpectLabelUpdates,
+	doesModuleUseNewConfigLayout,
+	doesModuleUseSeparateUpgradeMethod,
+} from './ApiVersions.js'
 import type {
 	ConnectionChildHandlerApi,
 	ConnectionChildHandlerDependencies,
 	RunActionExtras,
 } from './ChildHandlerApi.js'
+import { translateConnectionConfigFields, translateEntityInputFields } from './ConfigFieldsLegacy.js'
+import {
+	ConnectionEntityManager,
+	type EntityManagerActionEntity,
+	type EntityManagerAdapter,
+	type EntityManagerFeedbackEntity,
+} from './EntityManager.js'
 import { ConvertPresetDefinitions } from './PresetsLegacy.js'
-import { assertNever } from '@companion-app/shared/Util.js'
-import { stringifyError } from '@companion-app/shared/Stringify.js'
-import type { CompanionOptionValues as CompanionOptionValuesNew } from '@companion-module/host'
+import { VariableValueBatcher } from './VariableValueBatcher.js'
+
+const moduleFeedbackSize = { width: 72, height: 72 - ButtonDecorationRenderer.DEFAULT_HEIGHT } // Backwards compatibility for modules that expect feedback size
 
 export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, ConnectionChildHandlerApi {
 	logger: Logger
@@ -96,6 +96,15 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 	readonly #ipcWrapper: IpcWrapperEJSON<HostToModuleEventsV0, ModuleToHostEventsV0>
 
 	readonly #deps: ConnectionChildHandlerDependencies
+
+	/**
+	 * Coalesce variable value updates from the module, to avoid flooding the render pipeline when a module
+	 * pushes values very frequently (e.g. a stopwatch). Legacy modules run in a child process using an
+	 * external base library, so unlike the new module system this throttles after the IPC hop rather than before.
+	 */
+	readonly #variableValuesBatcher = new VariableValueBatcher<SetVariableValuesMessage['newValues'][number]>((values) =>
+		this.#deps.variables.values.setVariableValues(this.#label, values)
+	)
 
 	readonly connectionId: string
 
@@ -178,7 +187,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 
 		this.#entityManager = doesModuleUseSeparateUpgradeMethod(apiVersion)
 			? new ConnectionEntityManager(
-					new ConnectionLegacyEntityManagerAdapter(this.#ipcWrapper),
+					new ConnectionLegacyEntityManagerAdapter(this.#ipcWrapper, this.#deps.controls),
 					this.#deps.controls,
 					this.connectionId
 				)
@@ -295,7 +304,6 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 			const controlEntities = control.entities.getAllEntities()
 			if (!controlEntities || controlEntities.length === 0) continue
 
-			const imageSize = control.getBitmapSize()
 			for (const entity of controlEntities) {
 				if (entity.connectionId !== this.connectionId) continue
 				if (entity.type !== EntityModelType.Feedback) continue
@@ -312,7 +320,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 					upgradeIndex: entityModel.upgradeIndex ?? null,
 					disabled: !!entityModel.disabled,
 
-					image: imageSize ?? undefined,
+					image: control.supportsLayeredStyle ? moduleFeedbackSize : undefined,
 				}
 			}
 		}
@@ -391,7 +399,6 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 	async entityUpdate(entity: ControlEntityInstance, controlId: string): Promise<void> {
 		if (this.#entityManager) {
 			if (entity.connectionId !== this.connectionId) throw new Error(`Feedback is for a different connection`)
-			if (entity.disabled) return
 
 			this.#entityManager.trackEntity(entity, controlId)
 			return
@@ -425,7 +432,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 
 					isInverted: typeof feedback.isInverted?.value === 'boolean' ? feedback.isInverted.value : false, // This is fine, there should be no expressions here
 
-					image: control?.getBitmapSize() ?? undefined,
+					image: control?.supportsLayeredStyle ? moduleFeedbackSize : undefined,
 
 					upgradeIndex: feedback.upgradeIndex ?? null,
 					disabled: !!feedback.disabled,
@@ -487,7 +494,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 
 								isInverted: !!entity.isInverted?.value, // This is fine, there should be no expressions here
 
-								image: control?.getBitmapSize() ?? undefined,
+								image: control?.supportsLayeredStyle ? moduleFeedbackSize : undefined,
 
 								upgradeIndex: null,
 								disabled: !!entity.disabled,
@@ -569,7 +576,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 	/**
 	 * Tell the child instance class to execute an action
 	 */
-	async actionRun(action: ActionEntityModel, extras: RunActionExtras): Promise<void> {
+	async actionRun(action: ActionEntityModel, extras: RunActionExtras): Promise<undefined> {
 		if (action.connectionId !== this.connectionId) throw new Error(`Action is for a different connection`)
 
 		try {
@@ -621,6 +628,9 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 
 			throw e
 		}
+
+		// Legacy actions can't return results.
+		return undefined
 	}
 
 	/**
@@ -647,6 +657,8 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 	 * Perform any cleanup
 	 */
 	cleanup(): void {
+		this.#variableValuesBatcher.destroy()
+
 		this.#deps.actionRecorder.connectionAvailabilityChange(this.connectionId, false)
 		this.#deps.sharedUdpManager.leaveAllFromOwner(this.connectionId)
 
@@ -752,6 +764,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 		this.#sendToModuleLog('debug', `Updating action definitions (${(msg.actions || []).length} actions)`)
 
 		for (const rawAction of msg.actions || []) {
+			if (BANNED_PROPS.has(rawAction.id)) continue
 			const optionsToIgnoreForSubscribeSet = new Set<string>(rawAction.optionsToIgnoreForSubscribe || [])
 			const options = translateEntityInputFields(rawAction.options || [], EntityModelType.Action, !!this.#entityManager)
 
@@ -768,12 +781,16 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 				hasLearn: !!rawAction.hasLearn,
 				learnTimeout: rawAction.learnTimeout,
 
+				actionHasResult: false,
+
 				showInvert: false,
 				showButtonPreview: false,
 				supportsChildGroups: [],
 
 				feedbackType: null,
 				feedbackStyle: undefined,
+				feedbackAffectedProperties: undefined,
+				feedbackDisableStyleOverrides: false,
 				optionsSupportExpressions: false, // Expressions not supported from 1.x modules
 			} satisfies Complete<ClientEntityDefinition>
 		}
@@ -794,6 +811,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 		this.#sendToModuleLog('debug', `Updating feedback definitions (${(msg.feedbacks || []).length} feedbacks)`)
 
 		for (const rawFeedback of msg.feedbacks || []) {
+			if (BANNED_PROPS.has(rawFeedback.id)) continue
 			if (!isValidFeedbackEntitySubType(rawFeedback.type)) continue
 
 			feedbacks[rawFeedback.id] = {
@@ -810,6 +828,10 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 				learnTimeout: rawFeedback.learnTimeout,
 				showInvert: rawFeedback.showInvert ?? shouldShowInvertForFeedback(rawFeedback.options || []),
 
+				actionHasResult: undefined,
+
+				feedbackAffectedProperties: undefined,
+				feedbackDisableStyleOverrides: false,
 				showButtonPreview: false,
 				supportsChildGroups: [],
 				optionsSupportExpressions: false, // Expressions not supported from 1.x modules
@@ -843,7 +865,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 	async #handleSetVariableValues(msg: SetVariableValuesMessage): Promise<void> {
 		if (!this.#label) throw new Error(`Got call to handleSetVariableValues before init was called`)
 
-		this.#deps.variables.values.setVariableValues(this.#label, msg.newValues)
+		this.#variableValuesBatcher.add(msg.newValues)
 	}
 
 	/**
@@ -860,7 +882,7 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 			// Ensure it is correctly formed
 			if (variable && typeof variable.name === 'string' && typeof variable.id === 'string') {
 				// Ensure the ids are valid
-				if (variable.id.match(idCheckRegex)) {
+				if (!BANNED_PROPS.has(variable.id) && variable.id.match(idCheckRegex)) {
 					newVariables.push({
 						description: variable.name,
 						name: variable.id,
@@ -994,12 +1016,12 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 					const control = this.#deps.controls.getControl(feedback.controlId)
 					const found =
 						control?.supportsEntities &&
-						control.entities.entityReplace(
+						control.entities.entityReplaceForUpgrade(
 							{
 								type: EntityModelType.Feedback,
 								id: feedback.id,
 								definitionId: feedback.feedbackId,
-								options: optionsObjectToExpressionOptions(feedback.options as CompanionOptionValues, false), // This will replace any user expressions, if they were able to define any
+								options: optionsObjectToExpressionOptions(feedback.options, false), // This will replace any user expressions, if they were able to define any
 								style: feedback.style,
 								isInverted: exprVal(feedback.isInverted),
 								upgradeIndex: feedback.upgradeIndex ?? this.#currentUpgradeIndex ?? undefined,
@@ -1017,12 +1039,12 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 					const control = this.#deps.controls.getControl(action.controlId)
 					const found =
 						control?.supportsEntities &&
-						control.entities.entityReplace(
+						control.entities.entityReplaceForUpgrade(
 							{
 								type: EntityModelType.Action,
 								id: action.id,
 								definitionId: action.actionId,
-								options: optionsObjectToExpressionOptions(action.options as CompanionOptionValues, false), // This will replace any user expressions, if they were able to define any
+								options: optionsObjectToExpressionOptions(action.options, false), // This will replace any user expressions, if they were able to define any
 								upgradeIndex: action.upgradeIndex ?? this.#currentUpgradeIndex ?? undefined,
 							},
 							true
@@ -1090,9 +1112,11 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 
 class ConnectionLegacyEntityManagerAdapter implements EntityManagerAdapter {
 	readonly #ipcWrapper: IpcWrapperEJSON<HostToModuleEventsV0, ModuleToHostEventsV0>
+	readonly #controlsStore: IControlStore
 
-	constructor(ipcWrapper: IpcWrapperEJSON<HostToModuleEventsV0, ModuleToHostEventsV0>) {
+	constructor(ipcWrapper: IpcWrapperEJSON<HostToModuleEventsV0, ModuleToHostEventsV0>, controlsStore: IControlStore) {
 		this.#ipcWrapper = ipcWrapper
+		this.#controlsStore = controlsStore
 	}
 
 	async updateActions(actions: Map<string, EntityManagerActionEntity | null>) {
@@ -1122,13 +1146,15 @@ class ConnectionLegacyEntityManagerAdapter implements EntityManagerAdapter {
 
 		for (const [id, value] of feedbacks) {
 			if (value) {
+				const control = this.#controlsStore.getControl(value.controlId)
+
 				updateMessage.feedbacks[id] = {
 					id: value.entity.id,
 					controlId: value.controlId,
 					feedbackId: value.entity.definitionId,
 					options: value.parsedOptions as OptionsObject,
 
-					image: value.imageSize,
+					image: control?.supportsLayeredStyle ? moduleFeedbackSize : undefined,
 
 					isInverted: typeof value.entity.isInverted?.value === 'boolean' ? value.entity.isInverted.value : false, // This is fine, there should be no expressions here
 
@@ -1165,7 +1191,7 @@ class ConnectionLegacyEntityManagerAdapter implements EntityManagerAdapter {
 							id: action.id,
 							type: EntityModelType.Action,
 							definitionId: action.actionId,
-							options: optionsObjectToExpressionOptions(action.options as CompanionOptionValues, false), // This will replace any user expressions, if they were able to define any
+							options: optionsObjectToExpressionOptions(action.options, false), // This will replace any user expressions, if they were able to define any
 							upgradeIndex: currentUpgradeIndex,
 						}) satisfies ReplaceableActionEntityModel
 				)
@@ -1196,7 +1222,7 @@ class ConnectionLegacyEntityManagerAdapter implements EntityManagerAdapter {
 							id: feedback.id,
 							type: EntityModelType.Feedback,
 							definitionId: feedback.feedbackId,
-							options: optionsObjectToExpressionOptions(feedback.options as CompanionOptionValues, false), // This will replace any user expressions, if they were able to define any
+							options: optionsObjectToExpressionOptions(feedback.options, false), // This will replace any user expressions, if they were able to define any
 							style: feedback.style,
 							isInverted: exprVal(feedback.isInverted),
 							upgradeIndex: currentUpgradeIndex,

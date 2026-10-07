@@ -1,25 +1,32 @@
-import LogController from '../Log/Controller.js'
-import path from 'path'
-import fs from 'fs-extra'
-import type { InstanceModules } from './Modules.js'
-import zlib from 'node:zlib'
-import * as ts from 'tar-stream'
-import { Readable } from 'node:stream'
-import * as tarfs from 'tar-fs'
-import type { ModuleStoreService } from './ModuleStore.js'
-import type { AppInfo } from '../Registry.js'
-import { promisify } from 'util'
-import type { ModuleStoreModuleInfoVersion } from '@companion-app/shared/Model/ModulesStore.js'
-import { MultipartUploader } from '../Resources/MultipartUploader.js'
-import type { InstanceConfigStore } from './ConfigStore.js'
 import crypto from 'node:crypto'
+import path from 'node:path'
+import { Readable } from 'node:stream'
+import { promisify } from 'node:util'
+import zlib from 'node:zlib'
+import fs from 'fs-extra'
 import semver from 'semver'
-import { publicProcedure, router } from '../UI/TRPC.js'
+import * as tarfs from 'tar-fs'
+import * as ts from 'tar-stream'
 import z from 'zod'
 import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import type { SomeModuleManifest } from '@companion-app/shared/Model/ModuleManifest.js'
+import type { ModuleStoreModuleInfoVersion } from '@companion-app/shared/Model/ModulesStore.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 import { assertNever } from '@companion-app/shared/Util.js'
-import { MAX_MODULE_BUNDLE_TAR_SIZE, MAX_MODULE_TAR_SIZE } from './Constants.js'
+import LogController from '../Log/Controller.js'
+import type { AppInfo } from '../Registry.js'
+import { MultipartUploader } from '../Resources/MultipartUploader.js'
+import { describeHowToEnableDangerousFeature } from '../Resources/Util.js'
+import { publicProcedure, router, type TrpcContext } from '../UI/TRPC.js'
+import type { InstanceConfigStore } from './ConfigStore.js'
+import {
+	MAX_DECOMPRESSED_MODULE_BUNDLE_TAR_SIZE,
+	MAX_DECOMPRESSED_MODULE_TAR_SIZE,
+	MAX_MODULE_BUNDLE_TAR_SIZE,
+	MAX_MODULE_TAR_SIZE,
+} from './Constants.js'
+import type { InstanceModules } from './Modules.js'
+import type { ModuleStoreService } from './ModuleStore.js'
 
 const gunzipP = promisify(zlib.gunzip)
 
@@ -50,8 +57,16 @@ export class InstanceInstalledModulesManager {
 	readonly #multipartUploader = new MultipartUploader(
 		'Instance/UserModulesManager',
 		MAX_MODULE_BUNDLE_TAR_SIZE,
-		async (_name, data, updateProgress) => {
-			const decompressedData = await gunzipP(data)
+		async (_name, data, _userData, updateProgress, ctx) => {
+			if (!this.#isCustomModuleImportAllowed(ctx)) {
+				this.#logger.warn(`Rejected module bundle import from remote client ${ctx.clientIp ?? 'unknown'}`)
+				throw new Error(
+					'Importing custom modules is only allowed from the local machine. ' +
+						describeHowToEnableDangerousFeature('--enable-restricted-modules', 'COMPANION_ENABLE_RESTRICTED_MODULES')
+				)
+			}
+
+			const decompressedData = await gunzipP(data, { maxOutputLength: MAX_DECOMPRESSED_MODULE_BUNDLE_TAR_SIZE })
 			if (!decompressedData) {
 				this.#logger.error(`Failed to decompress module data`)
 				throw new Error('Failed to decompress data')
@@ -91,7 +106,8 @@ export class InstanceInstalledModulesManager {
 			}
 
 			return true
-		}
+		},
+		z.null()
 	)
 
 	constructor(
@@ -104,6 +120,18 @@ export class InstanceInstalledModulesManager {
 		this.#modulesManager = modulesManager
 		this.#modulesStore = modulesStore
 		this.#configStore = configStore
+	}
+
+	/**
+	 * Whether the given client is allowed to import a custom module.
+	 * Local (loopback) clients are always allowed; remote clients are only allowed when the
+	 * "restricted modules" dangerous feature is enabled.
+	 *
+	 * Note: store module installs are intentionally NOT gated here - they are checksum-verified
+	 * published code and assumed to be safe
+	 */
+	#isCustomModuleImportAllowed(ctx: TrpcContext): boolean {
+		return this.#appInfo.options.enableRestrictedModules || ctx.isLocalClient()
 	}
 
 	/**
@@ -221,14 +249,22 @@ export class InstanceInstalledModulesManager {
 						tarBuffer: z.string(),
 					})
 				)
-				.mutation(async ({ input }) => {
+				.mutation(async ({ input, ctx }) => {
 					// this.#logger.debug('modules:install-module-tar', data)
+
+					if (!this.#isCustomModuleImportAllowed(ctx)) {
+						this.#logger.warn(`Rejected custom module import from remote client ${ctx.clientIp ?? 'unknown'}`)
+						return (
+							'Importing custom modules is only allowed from the local machine. ' +
+							describeHowToEnableDangerousFeature('--enable-restricted-modules', 'COMPANION_ENABLE_RESTRICTED_MODULES')
+						)
+					}
 
 					const tarBuffer = Buffer.from(input.tarBuffer, 'base64')
 
 					// TODO - error handling for this whole function
 
-					const decompressedData = await gunzipP(tarBuffer)
+					const decompressedData = await gunzipP(tarBuffer, { maxOutputLength: MAX_DECOMPRESSED_MODULE_TAR_SIZE })
 					if (!decompressedData) {
 						this.#logger.warn(`Failed to decompress module data`)
 						return 'Failed to decompress data'
@@ -364,7 +400,7 @@ export class InstanceInstalledModulesManager {
 			return 'Download did not match checksum'
 		}
 
-		const decompressedData = await gunzipP(fullTarBuffer)
+		const decompressedData = await gunzipP(fullTarBuffer, { maxOutputLength: MAX_DECOMPRESSED_MODULE_TAR_SIZE })
 		if (!decompressedData) {
 			this.#logger.error(`Failed to decompress module data`)
 			return 'Failed to decompress data'
@@ -383,7 +419,7 @@ export class InstanceInstalledModulesManager {
 			this.#logger.warn(msg)
 			return msg
 		}
-		if (manifestJson.type !== moduleType) {
+		if ((manifestJson.type as ModuleInstanceType) !== moduleType) {
 			const msg = `Module type does not match requested module type. Got ${manifestJson.type}, expected ${moduleType}`
 			this.#logger.warn(msg)
 			return msg
@@ -507,11 +543,11 @@ async function extractManifestFromTar(tarData: Buffer): Promise<SomeModuleManife
 
 					try {
 						const parsedManifest = JSON.parse(manifestStr) as SomeModuleManifest
-						if (!parsedManifest.type) parsedManifest.type = 'connection' // Backwards compatibility
+						if (!parsedManifest.type) (parsedManifest as Partial<SomeModuleManifest>).type = 'connection' // Backwards compatibility
 
 						resolve(parsedManifest)
 					} catch (e) {
-						reject(e as Error)
+						reject(e instanceof Error ? e : new Error(stringifyError(e)))
 					}
 
 					extract.destroy()
@@ -584,7 +620,7 @@ async function listModuleDirsInTar(tarData: Buffer): Promise<ListModuleDirsInfo[
 
 						try {
 							const parsedManifest = JSON.parse(manifestStr) as SomeModuleManifest
-							if (!parsedManifest.type) parsedManifest.type = 'connection' // Backwards compatibility
+							if (!parsedManifest.type) (parsedManifest as Partial<SomeModuleManifest>).type = 'connection' // Backwards compatibility
 
 							moduleInfos.push({
 								subDir: moduleDirName,

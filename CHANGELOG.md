@@ -1,76 +1,265 @@
 # Bitfocus Companion
 
-## Companion v4.2.5 - Release Notes
-
-- support stream deck + xl
-- improve import resiliency/performance for large configs
-- ux issues in the expression editor
-- better respect collections when ordering connections
-- incorrect urls into module docs
-- suppress some unnecessary errors
-- allow connection configs to use multiline input fields
-
-## Companion v4.2.4 - Release Notes
+## Companion v5.0.7 - Release Notes
 
 ### 🐞 BUG FIXES
 
-- support corsair galleon k100 sd
-- add SENTRY_DISABLE env var to disable sentry integration
-- fix: unable to clear local variable name
-- fix: reduce monaco suggest-details line-spacing (#3948)
-- fix: improve presentation of missing values in dropdowns
-- fix: surface table stretching
-- fix: 'internal: User Value' feedback field order refinement
-- fix: added TMPDIR to preserved env vars list (#3929)
-- fix: attempt to suppress mirabox stream dock error flood
-- fix: disable sentry http session tracking
+- only add imageBuffers layer to simple presets when a feedback declares imageBuffer #4490
+- limit preset advanced-feedback style overrides to affectedProperties #4410 #4490
+- some surface open race conditions
+- update elgato-stream-deck surface module
+- layered presets lose all feedbacks when style overrides use plain values (#4477)
+- late closeSurface closing a reopened plugin surface
+- abort signal not being propagated into module action callback
+- move expression stream re-evaluation log to silly level #4489
 
-## Companion v4.2.3 - Release Notes
+## Companion v5.0.6 - Release Notes
 
 ### 🐞 BUG FIXES
 
-- local variables not invalidating module entities #3896
-- expression arrayLastIndexOf not working if no offset provided #3873
-- drag and drop previews showing more than the dragged element #3883
-- avoid invalid values being sent to a surface when referencing old jog/tbar variables (#3872)
-- improve scrolling behaviour of surfaces page
-- variables dropdown showing behind heading in settings
-- make connected network docks stick below the active surfaces in the list
-- respect DISABLE_IPV6 env var to disable admin interface binding to ipv6
-- respect collections when sorting connections for add entity dropdowns and variables page #3899
-- only report usage stats for published modules
+- surface module compatibility check using wrong versions #4472
+- improve UX of `internal: Local Variable: Set value` name field, clarifying what is valid input #4467
+- unable to change version of surface module
+- better logging in internal actions when not finding local variable to update #4466
+- Page dropdown not scrolling to the current page #4456
+- respect explicit show_topbar when scaling legacy font sizes
+- suppress logging for rosstalk noop commands #4463
+- sanitise custom-variable option values
+- update canvas library to fix png containing svg issue #4438
 
-## Companion v4.2.2 - Release Notes
-
-### 🐞 BUG FIXES
-
-- add keepalive interval for client websocket
-- improve emulator behaviour when websocket closes
-- revert: limit environment variables exposed to internal actions
-- only search labels in dropdown fields
-- unable to edit color inputs as hex
-- bluetooth support for blackmagic controllers
-- open help links in a new windows
-- isVisibleExpression clone error
-- loupedeck ct bad key map
-- sidebar dom issues
-- better suppress some common/excessive errors
-
-## Companion v4.2.1 - Release Notes
+## Companion v5.0.5 - Release Notes
 
 ### 🐞 BUG FIXES
 
-- crash at launch on linux arm64 #3826
-- docs search urls incorrect #3824
-- expression variables not updating in ui #3825
-- emulator not showing pincode entry #3827
-- toggling never lock for surface not applying
-- support ajaz akp153 #3840
-- preserve additional environment variables for modules
-- limit environment variables exposed to internal actions
-- preserve sqlite wal when upgrading config #3835
+- variables not being updated in feedbacks or localvariables in presets
+- hidden elements not being invalidated when variables/dependencies change #4380
+- catch variable changes that happen during async getDrawStyle #4380
+- ensure ui font metrics are cleared after fonts are loaded
+- feedbacks not updating while editing button in ui
+- limit number of in flight updates/upgrades to each connection
+- yield during import to ensure connections dont timeout
+- loosen variable name rule
+- preserve add entity modal expanded collections #4433
+- UI Crash in TextInputField when label is not a string #4435
+- exclude copyleft packages from offline bundle
 
-## Companion v4.2.0 - Release Notes
+## Companion v5.0.4 - Release Notes
+
+### 🐞 BUG FIXES
+
+- load modules through a symlinked config dir #4418 #3971
+- enforce variable id format
+- parsing some expressions could throw an error and stall the resolver loop #4427
+- allow loading modules from symlink dirs #3971 #4418
+- allow feedback local variables in simple presets #4416
+- only show colour decorators inside expression strings
+- Set Brightness of Surface Group has no effect #4408
+- only validate option fields which are visible.
+- gauge stop colours not parsing css color strings (#4400)
+- ping permissions in docker #4365
+- disable macos LSBackgroundOnly #4419
+
+## Companion v5.0.3 - Release Notes
+
+### 🐞 BUG FIXES
+
+- add gauge 'auto' origin to default to grow from minimum on negative ranges
+- form-labels with missing formatting
+- push drawing bounds lines outside the bounds #4359
+- image library size adjustment #4360
+- various image library fixes #4360
+- attempt to be more tolerant of mangled base64 images
+- various image library fixes #4360
+- adjust gauge track movement to avoid marker spilling over #4359
+- correct straight alpha handling when stripping alpha #4359
+- missing blockquote css #4351
+- missing close button for remote surface edit panel
+- Topbar text can draw outside of preview area #4359
+- short help modals close automatically #4367
+- 0 width line still visible
+- line position value fixup #4359
+- line position not implemented #4359
+- remember open graphics properties sections #4359
+- insert elements above the currently selected #4359
+- clip preview drawing to the content bounds #4359
+- group compositions can be clipped unexpectedly #4359
+- group and reference elements using wrong center point for rotation #4359
+- preview marker lines not following rotation #4359
+- allow picking translucent text color #4359
+- rename 'layer' property group to 'drawing' #4359
+- make color spelling consistent #4359
+- match field alpha requirement when parsing elements
+- accept css color strings for colors from modules
+- enable more polyfills for older browsers
+- useLocalStorage unexpectedly propagating to other tabs
+
+## Companion v5.0.2 - Release Notes
+
+### 🐞 BUG FIXES
+
+- make element type clearer in list #4320
+- make element editor remember which element was last selected (by type and instance number) #4324
+- button element editor DND behaving weirdly
+- canvas element not showing as selected
+- bad default values for layered preset definitions
+- emulator long presses not possible #4322
+- Event On Sunrise/Sunset wrong time after DST switch #3737 #3754
+- allow double CC prefix for rosstalk commands #4323
+- enable tcp no-delay for satellite and tcp clients
+- local variable name copy button alignment
+
+## Companion v5.0.1 - Release Notes
+
+### 🐞 BUG FIXES
+
+- macos mdns collision messages
+- ensure control elements are cloned when imported/loaded #4306
+- launch gui button broken if all interfaces ipv4+ipv6 selected #4308
+- preserve first line of text when font is too tall to fit the bounding box
+- allow negative rotation values for graphics elements #4313
+- topbar border not very visible
+- surface config not allowing static-text fields
+- ensure connection thread is ready before init is executed
+- suppress udev rules sync messages when running in docker #4318
+- reduce default intensity of gauge tracks
+
+## Companion v5.0.0 - Release Notes
+
+### IMPORTANT CHANGES
+
+- This version of Companion requires macOS 13.5 or later
+- Shell command execution and installing modules over the network from another machine are now disabled by default, and must be explicitly enabled. Installing modules from the store, or from the local machine, is unaffected. (#4252)
+- The dedicated Elgato plugin server has been removed (#4123)
+
+### 📣 CORE FEATURES AND IMPROVEMENTS
+
+- Graphics overhaul (#4098)
+  - Button drawing is built up of a fully customisable stack of elements
+  - Support non-square drawing on various streamdeck models
+  - Split text element fontsize into two properties
+  - Image library for easier image reuse (#4111)
+  - Font selection #1533 (#4152)
+  - Lazy render buttons to reduce cpu cost of inactive pages (#4191)
+  - Remove remaining legacy button rotation support
+- Advanced expressions (#4274)
+  - more expression math utils (#4260)
+  - loops, ifs and control statements
+  - more array methods
+- Variables
+  - Access local variable from another button #3723 (#4234)
+  - Support feedback based local variables from presets #3893
+  - Allow actions that return a result, to permit storing that result in a local or custom variable #4065
+  - Fuzzy search in variables table
+- Surfaces
+  - Action to adjust surface brightness (#4273)
+  - Variable for surface brightness (#4266)
+  - Add action and feedback to enable/monitor active remote surfaces #4194 (#4206)
+  - Page number button takes surfaces to their startup page
+  - mdns announce satellite ports (#4288)
+  - add support for sending compressed images over satellite
+  - rework confusing 'never lock' property (#4290)
+- Editor and UI improvements
+  - Better indicator of regex invalid/valid (#4271)
+  - Add notes to control editors #760 (#4202)
+  - Context menu for grid buttons (#4203)
+  - One click convert page buttons to be editable (#4208)
+  - Indicate disabled actions/feedbacks/events/triggers etc better #4030
+  - Option to hide the status icons #3805 (#4143)
+  - Improved drag and drop support for touchscreen
+- Platform and system
+  - Configurable timezone (#4285)
+  - Show path to configuration folder on log screen #4236
+  - Include date and source in connection debug log csv
+  - Windows arm64 build #2933 (#4270)
+  - Package linux install script
+  - Linux desktop udev sync (#4248)
+  - Companion PI config tool (#4256)
+  - Support headless config file format in docker images
+
+### 🐞 BUG FIXES
+
+- add receive buffer cap for satellite and tcp listener
+- add gunzip limits
+- protect against dns-rebind
+- stricter origin validation
+- sanitise rosstalk messages
+- auto-add windows firewall rules
+- add resume/online watchdog to recover dead ws connections
+- don't permanently close ws client when entering Safari bfcache
+- add connect timeout to webui WebSocket to unwedge Safari reconnects
+- make local variables editor handle non-string values #3166
+- avoid duplicate value preview in expression variable editor
+- rate limit triggers when responding to rapid variable changes #3312
+- remember active button edit tab
+- tab scrollbar not always showing in safari #4103
+- allow data images in markdown #3408
+- add deprecation marker to old 'Button: set X' actions
+- clarify deprecation of 'use another buttons style'
+- show better failure when encountering invalid image
+- implement custom monaco drag handle for safari #4265
+- rate limit variables updates from modules to be at most 50hz #3859
+- running packaged module from dev modules folder #3930
+- page numbers not invalidating on page move
+
+## Companion v4.3.4 - Release Notes
+
+### 🐞 BUG FIXES
+
+- excessive sorting of entities in add modal
+- References to local variables in module actions/feedbacks not being invalidated when control is moved #4192
+- use module manifest name field from newer modules #4121
+- respect isVisibleExpression for remote surface config fields #4188
+- grid size grow prompt for surfaces not dismissing
+- importing pagenum buttons show broken page number
+- update elgato-stream-deck surface module
+- run `yarn build` for dev modules in docker #4177
+
+## Companion v4.3.3 - Release Notes
+
+### 🐞 BUG FIXES
+
+- disable --use-system-ca if encountering openssl launch errors
+- improve DropdownInputField performance
+
+## Companion v4.3.2 - Release Notes
+
+### 🐞 BUG FIXES
+
+- surface locked rotation #4105
+- button status icons not showing when topbar hidden #4134
+- reword abort action special options #4140
+- Limit scope of sidebar context menu (#4151)
+- expand sidebar when clicking on toggler (#4136)
+- importing config not fixing up some ids #4156
+- local-variables in presets should enable persist-value
+- warn about upcoming minimum macos
+- rework 'loose' dropdown option matching
+- upgrading 'set_page' action page number lost 'this page' value
+- reword abort action special options
+- inconsistent height of settings cards
+- inconsistent surface module naming in add list
+
+## Companion v4.3.1 - Release Notes
+
+### 🐞 BUG FIXES
+
+- update release notes to include section on the sidebar
+- canvas crashing on empty png buffers #4107
+- ensure processes exit when parent terminates
+- unable to change module version when current is invalid
+- missing pageNumber for surface plugins #4057
+- update elgato-stream-deck
+- low contrast in browse-entities table (#4106)
+- rotate buttons on locked surfaces #4105
+- show description for surface option fields
+- restore legacy rotation for stream decks #4105
+- field with `allowInvalidValues: true` should not show error on value preview
+- multidropdown should indicate when no more elements can be removed
+- handle variable replacement for nested variables in presets
+- include rotation in satellite LOCKED-STATE message
+- dont repeat manufacturer for modules with many products #4121
+
+## Companion v4.3.0 - Release Notes
 
 ### IMPORTANT CHANGES
 
@@ -79,27 +268,76 @@
 ### 📣 CORE FEATURES AND IMPROVEMENTS
 
 - Surfaces are now implemented through a module system, similar to connections.
-- add internal variable for bind_port
-- add URI encode/decode expression functions #3771
-- improve drag and drop previews
-- add help icon header bar
-- preview local variable value next to editor
-- Ability to execute trigger at random intervals
 - Option to enable/disable individual surfaces
   - This allows Companion to run alongside other software with each using just some of the connected stream decks
 - Support expressions in any action/feedback field
   - This requires modules to opt into supporting it for now
-- Various styling refinement
-- Add `blink()` function to expressions. This can be used in feedbacks to provide customisable blinking behaviour
-- Extended time formatting options
-- Update app icon on macos
-- Add support for `SENTRY_DISABLE` environment variable, to disable sentry reporting
+- Get custom-variable via tcp #3999
+- preview local variable value next to editor
+- Ability to execute trigger at random intervals
+- Improving expressions
+  - add URI encode/decode functions #3771
+  - Add `blink()` function to expressions. This can be used in feedbacks to provide customisable blinking behaviour
+  - Extended time formatting options
+  - Date expression functions (#4021)
 - Rework various panels/lists to group connections by collections instead of as a flat list
+- Improve performance of some button drawing #3902 #3891
+- Add a context menu for managing the sidebar
+  - Free up space by removing the now-redundant sidebar help section
+  - Reduce the number of items in the Variables sidebar group
+  - Manage expand/collapse of sidebar groups (Auto-close aka. Accordion Mode)
+  - Add a new "Always-Narrow" sidebar mode
+- Various styling refinement
+  - Rework button grid presentation
+  - Add help icon to header bar
+  - improve drag and drop previews
+  - Update app icon on macos
+  - add collapse/expand all buttons for collection items (#4063)
+  - add or update help and close icons in panel headers (#4053)
+- Add support for `SENTRY_DISABLE` environment variable, to disable sentry reporting
+- Option to suppress header notifications (#4004)
+- Add docker COMPANION_ADMIN_PORT environment variable for admin port configuration (#4042)
+- Expand satellite api to cover full module and elgato plugin functionality
+- Add HTTP API endpoints for connection management (#4048)
 
 ### 🐞 BUG FIXES
 
 - Improve presentation of missing values in dropdowns
-- improve text drawing performance (#3902)
+- navigation to anchor link in /user-guide (#4036)
+- Local variable updates do not immediately apply #3953
+- show modules which only have prerelease version in the add list
+- upgrade scripts isInverted failing
+- certain triggers not being disabled with the collection (#3981)
+- respect multiline for connection config fields #3986
+- connection collections being lost during full import
+- udp service not listening when ipv6 enabled
+- preserve type of expressions when writing to custom/local variables #3954
+- child entities not being upgraded #3924
+- improve confusing trigger terminology "depress" (#3922)
+- ensure module manifest doesn't load root file from outside of package
+- Launch main companion process with the `--use-system-ca` flag (#4060)
+- Improve relevance of search results (#3976)
+
+## Companion v4.2.6 - Release Notes
+
+### 🐞 BUG FIXES
+
+- stream deck + xl not working on windows
+- unable to export some pages
+- run upgrade scripts for disabled actions/feedbacks
+- prevent prototype pollution in expressions
+
+## Companion v4.2.5 - Release Notes
+
+### 🐞 BUG FIXES
+
+- support stream deck + xl
+- improve import resiliency/performance for large configs
+- ux issues in the expression editor
+- better respect collections when ordering connections
+- incorrect urls into module docs
+- suppress some unnecessary errors
+- allow connection configs to use multiline input fields
 
 ## Companion v4.2.4 - Release Notes
 

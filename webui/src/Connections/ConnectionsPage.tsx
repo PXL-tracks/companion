@@ -1,9 +1,8 @@
-import { CCol, CRow } from '@coreui/react'
-import React from 'react'
+import { Outlet, useMatchRoute } from '@tanstack/react-router'
+import { observer } from 'mobx-react-lite'
+import { Grid } from '~/Components/Grid'
 import { MyErrorBoundary } from '~/Resources/Error.js'
 import { ConnectionsList } from './ConnectionList/ConnectionList.js'
-import { observer } from 'mobx-react-lite'
-import { Outlet, useMatchRoute } from '@tanstack/react-router'
 
 export const ConnectionsPage = observer(function ConnectionsPage(): React.JSX.Element {
 	const matchRoute = useMatchRoute()
@@ -16,12 +15,15 @@ export const ConnectionsPage = observer(function ConnectionsPage(): React.JSX.El
 	const showSecondaryPanel = !!routeMatch || !!addConnectionsMatch
 
 	return (
-		<CRow className="connections-page split-panels">
-			<CCol xl={6} className={`connections-panel primary-panel ${showPrimaryPanel ? 'd-block' : 'd-xl-block d-none'}`}>
+		<Grid.Row className="connections-page split-panels">
+			<Grid.Col
+				xl={6}
+				className={`connections-panel primary-panel ${showPrimaryPanel ? 'd-block' : 'd-xl-block d-none'}`}
+			>
 				<ConnectionsList selectedConnectionId={selectedConnectionId} />
-			</CCol>
+			</Grid.Col>
 
-			<CCol
+			<Grid.Col
 				xl={6}
 				className={`connections-panel secondary-panel ${showSecondaryPanel ? 'd-block' : 'd-xl-block d-none'}`}
 			>
@@ -30,7 +32,7 @@ export const ConnectionsPage = observer(function ConnectionsPage(): React.JSX.El
 						<Outlet />
 					</MyErrorBoundary>
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })

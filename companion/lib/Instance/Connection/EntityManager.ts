@@ -1,21 +1,27 @@
 import debounceFn from 'debounce-fn'
-import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
-import { assertNever } from '@companion-app/shared/Util.js'
+import { nanoid } from 'nanoid'
 import {
 	EntityModelType,
-	type ReplaceableActionEntityModel,
-	type ReplaceableFeedbackEntityModel,
 	type ActionEntityModel,
 	type FeedbackEntityModel,
+	type ReplaceableActionEntityModel,
+	type ReplaceableFeedbackEntityModel,
 	type SomeReplaceableEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import { nanoid } from 'nanoid'
-import type { IControlStore } from '../../Controls/IControlStore.js'
-import type { CompanionOptionValues } from '@companion-module/base'
-import LogController, { type Logger } from '../../Log/Controller.js'
 import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
+import type { CompanionOptionValues } from '@companion-module/base'
+import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
+import type { IControlStore } from '../../Controls/IControlStore.js'
+import LogController, { type Logger } from '../../Log/Controller.js'
 
 const MAX_UPDATE_PER_BATCH = 50 // Arbitrary limit to avoid sending too much data in one go
+
+// The maximum number of update/upgrade IPC batches to have in flight to the module at once.
+// Each IPC call has its own timeout that starts ticking when it is sent, so firing every batch at
+// once (as a large import does) makes the later batches time out while they wait their turn. Limiting
+// the concurrency spreads those timers out and keeps the module from being flooded.
+const MAX_INFLIGHT_BATCHES = 5
 
 enum EntityState {
 	UNLOADED = 'UNLOADED',
@@ -35,11 +41,6 @@ interface EntityWrapper {
 	lastReferencedVariableIds?: ReadonlySet<string>
 }
 
-export interface EntityManagerImageSize {
-	width: number
-	height: number
-}
-
 export interface EntityManagerActionEntity {
 	controlId: string
 	entity: ActionEntityModel
@@ -49,8 +50,6 @@ export interface EntityManagerFeedbackEntity {
 	controlId: string
 	entity: FeedbackEntityModel
 	parsedOptions: CompanionOptionValues
-
-	imageSize: EntityManagerImageSize | undefined
 }
 
 export interface EntityManagerAdapter {
@@ -84,6 +83,11 @@ export class ConnectionEntityManager {
 	// Before the connection is ready, we need to not send any updates
 	#ready = false
 	#currentUpgradeIndex = 0
+
+	// Queue of update/upgrade batches waiting to be sent, and the number currently in flight.
+	// This bounds how many IPC calls are outstanding at once, see MAX_INFLIGHT_BATCHES.
+	readonly #batchQueue: Array<() => Promise<void>> = []
+	#inflightBatches = 0
 
 	constructor(adapter: EntityManagerAdapter, controlsStore: IControlStore, connectionId: string) {
 		this.#logger = LogController.createLogger(`Instance/Connection/EntityManager/${connectionId}`)
@@ -122,7 +126,6 @@ export class ConnectionEntityManager {
 						upgradeFeedbacks.push({
 							controlId: wrapper.controlId,
 							entity: entityModel,
-							imageSize: undefined, // Unused
 						})
 						break
 					default:
@@ -150,8 +153,6 @@ export class ConnectionEntityManager {
 				}
 			}
 
-			const controlImageSizeCache = new Map<string, EntityManagerImageSize | undefined>()
-
 			// First, look over all the entiites and figure out what needs to be done to each
 			for (const [entityId, wrapper] of this.#entities) {
 				switch (wrapper.state) {
@@ -166,6 +167,11 @@ export class ConnectionEntityManager {
 						// The entity is unloaded, it either needs to be upgraded or loaded
 						if (entity.upgradeIndex === undefined || entity.upgradeIndex === this.#currentUpgradeIndex) {
 							wrapper.state = EntityState.READY
+
+							if (entity.disabled) {
+								// Disabled entities should not be subscribed to the module
+								continue
+							}
 
 							const entityDefinition = entity.getEntityDefinition()
 							if (!entityDefinition || !entityDefinition.hasLifecycleFunctions) {
@@ -208,15 +214,6 @@ export class ConnectionEntityManager {
 									)
 									break
 								case EntityModelType.Feedback: {
-									let imageSize: EntityManagerImageSize | undefined
-									if (controlImageSizeCache.has(wrapper.controlId)) {
-										imageSize = controlImageSizeCache.get(wrapper.controlId)
-									} else {
-										const control = this.controlsStore.getControl(wrapper.controlId)
-										imageSize = control?.getBitmapSize() ?? undefined
-										controlImageSizeCache.set(wrapper.controlId, imageSize)
-									}
-
 									updateFeedbacksPayload.set(
 										entityId,
 										updateOptions
@@ -224,7 +221,6 @@ export class ConnectionEntityManager {
 													controlId: wrapper.controlId,
 													entity: entityModel,
 													parsedOptions: updateOptions,
-													imageSize,
 												}
 											: null
 									)
@@ -277,17 +273,13 @@ export class ConnectionEntityManager {
 				// We do this to avoid sending too much data in one go, which can cause issues with IPC
 				// The exact limits here are somewhat arbitrary, but should be sufficient for most use cases
 				if (updateActionsPayload.size > MAX_UPDATE_PER_BATCH) {
-					this.#adapter.updateActions(updateActionsPayload).catch((e) => {
-						this.#logger.error('Error sending updateActions', e)
-					})
+					this.#queueUpdateActionsBatch(updateActionsPayload)
 
 					// Start a new batch
 					updateActionsPayload = new Map()
 				}
 				if (updateFeedbacksPayload.size > MAX_UPDATE_PER_BATCH) {
-					this.#adapter.updateFeedbacks(updateFeedbacksPayload).catch((e) => {
-						this.#logger.error('Error sending updateFeedbacks', e)
-					})
+					this.#queueUpdateFeedbacksBatch(updateFeedbacksPayload)
 
 					// Start a new batch
 					updateFeedbacksPayload = new Map()
@@ -296,14 +288,10 @@ export class ConnectionEntityManager {
 
 			// Start by sending the simple payloads
 			if (updateActionsPayload.size > 0) {
-				this.#adapter.updateActions(updateActionsPayload).catch((e) => {
-					this.#logger.error('Error sending updateActions', e)
-				})
+				this.#queueUpdateActionsBatch(updateActionsPayload)
 			}
 			if (updateFeedbacksPayload.size > 0) {
-				this.#adapter.updateFeedbacks(updateFeedbacksPayload).catch((e) => {
-					this.#logger.error('Error sending updateFeedbacks', e)
-				})
+				this.#queueUpdateFeedbacksBatch(updateFeedbacksPayload)
 			}
 
 			// Now we need to send the upgrades
@@ -322,35 +310,74 @@ export class ConnectionEntityManager {
 		}
 	)
 
+	/**
+	 * Add a batch to the send queue, and start it if there is capacity.
+	 * This bounds the number of IPC calls in flight at once, so that the per-call timeouts don't all
+	 * start ticking simultaneously when a large number of entities is processed in one go.
+	 */
+	#queueBatch(fn: () => Promise<void>): void {
+		this.#batchQueue.push(fn)
+		this.#pumpBatchQueue()
+	}
+	#pumpBatchQueue(): void {
+		while (this.#inflightBatches < MAX_INFLIGHT_BATCHES && this.#batchQueue.length > 0) {
+			const fn = this.#batchQueue.shift()!
+			this.#inflightBatches++
+			void fn().finally(() => {
+				this.#inflightBatches--
+				this.#pumpBatchQueue()
+			})
+		}
+	}
+
+	#queueUpdateActionsBatch(updateActionsPayload: Map<string, EntityManagerActionEntity | null>): void {
+		this.#queueBatch(async () =>
+			this.#adapter.updateActions(updateActionsPayload).catch((e) => {
+				this.#logger.error('Error sending updateActions', e)
+			})
+		)
+	}
+	#queueUpdateFeedbacksBatch(updateFeedbacksPayload: Map<string, EntityManagerFeedbackEntity | null>): void {
+		this.#queueBatch(async () =>
+			this.#adapter.updateFeedbacks(updateFeedbacksPayload).catch((e) => {
+				this.#logger.error('Error sending updateFeedbacks', e)
+			})
+		)
+	}
+
 	#sendUpgradeActionsBatch(
 		entityIdsInThisBatch: ReadonlyMap<string, string>,
 		upgradeActions: Omit<EntityManagerActionEntity, 'parsedOptions'>[]
 	): void {
-		this.#adapter
-			.upgradeActions(upgradeActions, this.#currentUpgradeIndex)
-			.then((upgradedEntities) => {
-				this.#upgradeBatchResolve(entityIdsInThisBatch, upgradedEntities)
-			})
-			.catch((e) => {
-				this.#logger.error('Error sending upgradeActions', e)
+		this.#queueBatch(async () =>
+			this.#adapter
+				.upgradeActions(upgradeActions, this.#currentUpgradeIndex)
+				.then((upgradedEntities) => {
+					this.#upgradeBatchResolve(entityIdsInThisBatch, upgradedEntities)
+				})
+				.catch((e) => {
+					this.#logger.error('Error sending upgradeActions', e)
 
-				this.#upgradeBatchRetry(entityIdsInThisBatch)
-			})
+					this.#upgradeBatchRetry(entityIdsInThisBatch)
+				})
+		)
 	}
 	#sendUpgradeFeedbacksBatch(
 		entityIdsInThisBatch: ReadonlyMap<string, string>,
 		upgradeFeedbacks: Omit<EntityManagerFeedbackEntity, 'parsedOptions'>[]
 	): void {
-		this.#adapter
-			.upgradeFeedbacks(upgradeFeedbacks, this.#currentUpgradeIndex)
-			.then((upgradedEntities) => {
-				this.#upgradeBatchResolve(entityIdsInThisBatch, upgradedEntities)
-			})
-			.catch((e) => {
-				this.#logger.error('Error sending upgradeFeedbacks', e)
+		this.#queueBatch(async () =>
+			this.#adapter
+				.upgradeFeedbacks(upgradeFeedbacks, this.#currentUpgradeIndex)
+				.then((upgradedEntities) => {
+					this.#upgradeBatchResolve(entityIdsInThisBatch, upgradedEntities)
+				})
+				.catch((e) => {
+					this.#logger.error('Error sending upgradeFeedbacks', e)
 
-				this.#upgradeBatchRetry(entityIdsInThisBatch)
-			})
+					this.#upgradeBatchRetry(entityIdsInThisBatch)
+				})
+		)
 	}
 
 	#upgradeBatchResolve(
@@ -401,7 +428,7 @@ export class ConnectionEntityManager {
 					}
 
 					try {
-						control.entities.entityReplace(upgradedEntity)
+						control.entities.entityReplaceForUpgrade(upgradedEntity)
 					} catch (e) {
 						// If we fail to replace the entity, we can just ignore it
 						this.#logger.error(`Error replacing entity ${entity.id} in control ${wrapper.controlId}`, e)
@@ -461,6 +488,7 @@ export class ConnectionEntityManager {
 	 */
 	destroy(): void {
 		this.#debounceProcessPending.cancel()
+		this.#batchQueue.length = 0
 		this.#entities.clear()
 		this.#ready = false
 	}

@@ -9,9 +9,10 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
+import EventEmitter from 'node:events'
+import z from 'zod'
 import { isCustomVariableValid } from '@companion-app/shared/CustomVariable.js'
-import type { VariablesValues, VariableValueEntry } from './Values.js'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type {
 	CustomVariableCollection,
 	CustomVariableDefinition,
@@ -19,14 +20,14 @@ import type {
 	CustomVariableUpdate,
 	CustomVariableUpdateRemoveOp,
 } from '@companion-app/shared/Model/CustomVariableModel.js'
-import type { DataDatabase } from '../Data/Database.js'
-import { stringifyVariableValue, type VariableValue } from '@companion-app/shared/Model/Variables.js'
-import type { DataStoreTableView } from '../Data/StoreBase.js'
-import { CustomVariableCollections } from './CustomVariableCollections.js'
-import EventEmitter from 'events'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
 import { JsonValueSchema } from '@companion-app/shared/Model/Options.js'
+import { stringifyVariableValue, type VariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { DataDatabase } from '../Data/Database.js'
+import type { DataStoreTableView } from '../Data/StoreBase.js'
+import LogController from '../Log/Controller.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import { CustomVariableCollections } from './CustomVariableCollections.js'
+import type { VariablesValues, VariableValueEntry } from './Values.js'
 
 const CUSTOM_LABEL = 'custom'
 
@@ -56,7 +57,8 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 			this.#cleanUnknownCollectionIds(validCollectionIds)
 		)
 
-		this.#custom_variables = this.#dbTable.all()
+		// Use a null prototype object, so that names like '__proto__' cannot pollute or be leaked from the prototype
+		this.#custom_variables = Object.assign(Object.create(null), this.#dbTable.all())
 
 		this.#events.setMaxListeners(0)
 	}
@@ -208,6 +210,10 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 			return `Variable "${name}" already exists`
 		}
 
+		if (BANNED_PROPS.has(name)) {
+			return `Variable name "${name}" is reserved`
+		}
+
 		if (!isCustomVariableValid(name)) {
 			return `Variable name "${name}" is not valid`
 		}
@@ -224,6 +230,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 		this.#dbTable.set(name, this.#custom_variables[name])
 
 		this.#emitUpdateOneVariable(name)
+		this.#emitVariableDefinitionChange(name, this.#custom_variables[name])
 
 		this.#setValueInner(name, defaultVal)
 
@@ -242,6 +249,8 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 		if (this.#events.listenerCount('update') > 0) {
 			this.#events.emit('update', [{ type: 'remove', itemId: name }])
 		}
+
+		this.#emitVariableDefinitionChange(name, null)
 
 		this.#setValueInner(name, undefined)
 	}
@@ -293,7 +302,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 
 		const namesBefore = Object.keys(this.#custom_variables)
 
-		this.#custom_variables = custom_variables || {}
+		this.#custom_variables = Object.assign(Object.create(null), custom_variables)
 
 		const changes: CustomVariableUpdate[] = []
 
@@ -333,7 +342,7 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 	reset(): void {
 		const namesBefore = Object.keys(this.#custom_variables)
 
-		this.#custom_variables = {}
+		this.#custom_variables = Object.create(null)
 		this.#dbTable.clear()
 
 		if (this.#events.listenerCount('update') > 0 && namesBefore.length > 0) {
@@ -509,6 +518,8 @@ export class VariablesCustomVariable extends EventEmitter<VariablesCustomVariabl
 			const value = this.#variableValues.getVariableValue(CUSTOM_LABEL, name)
 			this.#logger.silly(`Set default value "${name}":${stringifyVariableValue(value)}`)
 			this.#custom_variables[name].defaultValue = value
+
+			this.#dbTable.set(name, this.#custom_variables[name])
 
 			this.#emitUpdateOneVariable(name)
 		}

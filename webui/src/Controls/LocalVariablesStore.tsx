@@ -1,10 +1,12 @@
+import { useQuery } from '@tanstack/react-query'
+import { action, makeObservable, observable } from 'mobx'
+import { computedFn } from 'mobx-utils'
+import { useEffect, useMemo } from 'react'
+import type { Equal, Expect } from 'type-testing'
+import type { ThisLocationVariable } from '@companion-app/shared/ControlLocation.js'
 import { EntityModelType, type SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 import type { VariableValue, VariableValues } from '@companion-app/shared/Model/Variables.js'
-import { action, makeObservable, observable } from 'mobx'
-import { useEffect, useMemo } from 'react'
 import type { DropdownChoiceInt } from '~/Components/DropdownChoices.js'
-import { computedFn } from 'mobx-utils'
-import { useQuery } from '@tanstack/react-query'
 import { trpc } from '~/Resources/TRPC.js'
 
 export class LocalVariablesStore {
@@ -22,7 +24,7 @@ export class LocalVariablesStore {
 	}
 
 	setEntities(localVariables: SomeEntityModel[]): void {
-		this.#variables.replace(localVariables.map((v) => [v.id, v]))
+		this.#variables.replace(localVariables.map((v): [string, SomeEntityModel] => [v.id, v]))
 	}
 
 	setValues(values: VariableValues): void {
@@ -90,7 +92,7 @@ export function useLocalVariablesStore(
 	return store
 }
 
-export const ControlLocalVariables: DropdownChoiceInt[] = [
+export const ControlLocalVariables = [
 	{
 		value: 'this:page',
 		label: 'This page',
@@ -107,10 +109,10 @@ export const ControlLocalVariables: DropdownChoiceInt[] = [
 		value: 'this:location',
 		label: 'This location (eg 1/2/3)',
 	},
-	// {
-	// 	value: 'this:pushed',
-	// 	label: 'Whether the button is in the pushed state',
-	// },
+	{
+		value: 'this:active',
+		label: 'Whether the button is in the pushed state',
+	},
 	{
 		value: 'this:step',
 		label: 'The current step of this button',
@@ -119,19 +121,24 @@ export const ControlLocalVariables: DropdownChoiceInt[] = [
 		value: 'this:step_count',
 		label: 'The number of step of this button',
 	},
-	// {
-	// 	value: 'this:button_status',
-	// 	label: 'The status of this button',
-	// },
-	// {
-	// 	value: 'this:actions_running',
-	// 	label: 'Whether actions are running from this button',
-	// },
+	{
+		value: 'this:button_status',
+		label: 'The status of this button',
+	},
+	{
+		value: 'this:actions_running',
+		label: 'Whether actions are running from this button',
+	},
 	{
 		value: 'this:page_name',
 		label: 'This page name',
 	},
-]
+] as const satisfies DropdownChoiceInt[]
+
+// @ts-expect-error Type used only to assert a type condition
+type _VerifyControlVariablesDropdownIsComplete = Expect<
+	Equal<(typeof ControlLocalVariables)[number]['value'], ThisLocationVariable>
+>
 
 export const ControlWithInternalLocalVariables: DropdownChoiceInt[] = [
 	...ControlLocalVariables,
@@ -139,4 +146,9 @@ export const ControlWithInternalLocalVariables: DropdownChoiceInt[] = [
 		value: 'this:surface_id',
 		label: 'The id of the surface triggering this action',
 	},
+]
+
+/** Variable picker entry injected for fields that use deferred parsing (e.g. set-value actions). */
+export const DeferredParsingContextVariables: DropdownChoiceInt[] = [
+	{ value: 'this:current', label: 'Current value of this variable' },
 ]

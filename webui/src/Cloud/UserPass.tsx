@@ -1,7 +1,12 @@
-import React, { memo, useState } from 'react'
-import { CAlert, CButton, CCol, CForm, CFormInput, CFormLabel, CRow } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faInfoCircle } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { memo, useId, useState } from 'react'
+import { StaticAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { SecretTextInputField } from '~/Components/SecretTextInputField'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
 
 interface CloudUserPassProps {
@@ -20,8 +25,11 @@ export const CloudUserPass = memo(function CloudUserPass({
 
 	const loginMutation = useMutationExt(trpc.cloud.login.mutationOptions())
 
+	const emailFieldId = useId()
+	const passwordFieldId = useId()
+
 	return (
-		<CForm
+		<Form
 			className="cloud-auth-form"
 			onSubmit={(e) => {
 				e.preventDefault()
@@ -36,35 +44,35 @@ export const CloudUserPass = memo(function CloudUserPass({
 				loginMutation.mutate({ email, password })
 			}}
 		>
-			<CRow>
-				<CCol sm={6}>
-					<CFormLabel>Email address</CFormLabel>
-					<CFormInput type="text" value={email} onChange={(e) => setEmail(e.currentTarget.value)} />
-				</CCol>
-				<CCol sm={6}></CCol>
+			<Grid.Row>
+				<Grid.Col sm={6}>
+					<FormLabel htmlFor={emailFieldId}>Email address</FormLabel>
+					<TextInputFieldSimple id={emailFieldId} value={email} setValue={setEmail} immediateValue />
+				</Grid.Col>
+				<Grid.Col sm={6}></Grid.Col>
 
-				<CCol sm={6}>
-					<CFormLabel>Password</CFormLabel>
-					<CFormInput type="password" value={password} onChange={(e) => setPassword(e.currentTarget.value)} />
-				</CCol>
-				<CCol sm={6}></CCol>
+				<Grid.Col sm={6}>
+					<FormLabel htmlFor={passwordFieldId}>Password</FormLabel>
+					<SecretTextInputField id={passwordFieldId} value={password} setValue={setPassword} immediateValue />
+				</Grid.Col>
+				<Grid.Col sm={6}></Grid.Col>
 
-				<CCol sm={6}>
-					<CButton color="success" type="submit" disabled={working || !email || !password}>
+				<Grid.Col sm={6}>
+					<Button color="success" type="submit" disabled={working || !email || !password}>
 						Log in
-					</CButton>
-				</CCol>
+					</Button>
+				</Grid.Col>
 
-				<CCol sm={12}>
-					<CAlert color="info">
+				<Grid.Col sm={12}>
+					<StaticAlert color="info">
 						<FontAwesomeIcon icon={faInfoCircle} /> &nbsp;Companion Cloud is a premium service. Learn more and sign up{' '}
 						<a target="_blank" href="https://bfoc.us/ezzaf9tfeg">
 							here
 						</a>
 						.
-					</CAlert>
-				</CCol>
-			</CRow>
-		</CForm>
+					</StaticAlert>
+				</Grid.Col>
+			</Grid.Row>
+		</Form>
 	)
 })

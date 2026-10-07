@@ -1,7 +1,12 @@
-import type { InstanceProcessManager } from '../../Instance/ProcessManager.js'
+import type {
+	FeedbackValue,
+	RawStoreResultCustomVariable,
+	RawStoreResultLocalVariable,
+} from '@companion-app/shared/Model/EntityModel.js'
+import type { ExpressionValueType } from '@companion-app/shared/Model/Options.js'
 import type { InstanceDefinitions } from '../../Instance/Definitions.js'
+import type { InstanceProcessManager } from '../../Instance/ProcessManager.js'
 import type { InternalController } from '../../Internal/Controller.js'
-import type { FeedbackValue } from '@companion-app/shared/Model/EntityModel.js'
 
 export type InstanceDefinitionsForEntity = Pick<InstanceDefinitions, 'getEntityDefinition'>
 
@@ -22,8 +27,16 @@ export interface NewFeedbackValue {
 	value: FeedbackValue
 }
 
-export interface NewIsInvertedValue {
-	entityId: string
-	controlId: string
-	isInverted: boolean
+type StoreResultInLocalVariable = {
+	type: RawStoreResultLocalVariable['type']
+	location: ExpressionValueType<RawStoreResultLocalVariable['location']>
+	variableName: ExpressionValueType<RawStoreResultLocalVariable['variableName']>
 }
+
+type StoreResultInCustomVariable = {
+	type: RawStoreResultCustomVariable['type']
+	variableName: ExpressionValueType<RawStoreResultCustomVariable['variableName']>
+	createIfNotExists: RawStoreResultCustomVariable['createIfNotExists']
+}
+
+export type StoreResult = StoreResultInLocalVariable | StoreResultInCustomVariable

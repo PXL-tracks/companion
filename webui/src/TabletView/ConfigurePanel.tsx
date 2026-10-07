@@ -1,9 +1,14 @@
-import React, { useState } from 'react'
-import { PreventDefaultHandler, useMountEffect } from '~/Resources/util.js'
-import { CButton, CCol, CForm, CFormInput, CFormCheck, CRow } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCog, faExpand } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useId, useState } from 'react'
 import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
+import { Button } from '~/Components/Button'
+import { CheckboxInputFieldWithLabel } from '~/Components/CheckboxInputField'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { NumberInputField } from '~/Components/NumberInputField'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
+import { PreventDefaultHandler, useMountEffect } from '~/Resources/util.js'
 
 interface ConfigurePanelProps {
 	updateQueryUrl: (key: string, value: any) => void
@@ -24,97 +29,110 @@ export function ConfigurePanel({ updateQueryUrl, query, gridSize }: ConfigurePan
 		}
 	})
 
+	const pagesFieldId = useId()
+	const minColFieldId = useId()
+	const maxColFieldId = useId()
+	const minRowFieldId = useId()
+	const maxRowFieldId = useId()
+	const displayColumnFieldId = useId()
+
 	return show ? (
-		<CRow className="configure">
-			<CCol sm={12}>
+		<Grid.Row className="configure">
+			<Grid.Col sm={12}>
 				<h3>
 					Configure Buttons View
-					<CButton className="close-config" onClick={() => setShow(false)} title="Close">
+					<Button className="close-config" onClick={() => setShow(false)} title="Close">
 						<FontAwesomeIcon icon={faCog} />
-					</CButton>
+					</Button>
 				</h3>
-				<CForm onSubmit={PreventDefaultHandler}>
-					<CRow>
-						<CCol sm={6} xs={12}>
-							<CFormInput
-								label="Pages"
-								value={query['pages'] || ''}
-								onChange={(e) => updateQueryUrl('pages', e.currentTarget.value)}
+				<Form onSubmit={PreventDefaultHandler}>
+					<Grid.Row>
+						<Grid.Col sm={6} xs={12}>
+							<FormLabel htmlFor={pagesFieldId}>Pages</FormLabel>
+							<TextInputFieldSimple
+								id={pagesFieldId}
+								value={query['pages'] ? String(query['pages']) : ''}
+								setValue={(val) => updateQueryUrl('pages', val)}
 								placeholder={'1..99'}
 							/>
-							<p>use 1..6 for ranges, and commas for multiple selections. Follows provided order</p>
+							<p className="text-muted">
+								use 1..6 for ranges, and commas for multiple selections. Follows provided order
+							</p>
 
-							<CFormInput
-								label="Min Column"
-								type="number"
-								max={query['max_col'] ?? gridSize.maxColumn}
+							<FormLabel htmlFor={minColFieldId}>Min Column</FormLabel>
+							<NumberInputField
+								id={minColFieldId}
+								value={Number(query['min_col']) || 0}
+								setValue={(val) => updateQueryUrl('min_col', val)}
+								max={Number(query['max_col']) || gridSize.maxColumn}
 								min={gridSize.minColumn}
-								value={query['min_col'] || 0}
-								onChange={(e) => updateQueryUrl('min_col', e.currentTarget.value)}
 							/>
-							<CFormInput
-								label="Max Column"
-								type="number"
-								min={query['min_col'] ?? gridSize.minColumn}
+
+							<FormLabel htmlFor={maxColFieldId}>Max Column</FormLabel>
+							<NumberInputField
+								id={maxColFieldId}
+								value={Number(query['max_col']) || 0}
+								setValue={(val) => updateQueryUrl('max_col', val)}
 								max={gridSize.maxColumn}
-								value={query['max_col'] || gridSize.maxColumn}
-								onChange={(e) => updateQueryUrl('max_col', e.currentTarget.value)}
+								min={Number(query['min_col']) || gridSize.minColumn}
 							/>
 
-							<CFormInput
-								label="Min Row"
-								type="number"
-								max={query['max_row'] ?? gridSize.maxRow}
+							<FormLabel htmlFor={minRowFieldId}>Min Row</FormLabel>
+							<NumberInputField
+								id={minRowFieldId}
+								value={Number(query['min_row']) || 0}
+								setValue={(val) => updateQueryUrl('min_row', val)}
+								max={Number(query['max_row']) || gridSize.maxRow}
 								min={gridSize.minRow}
-								value={query['min_row'] || 0}
-								onChange={(e) => updateQueryUrl('min_row', e.currentTarget.value)}
-							/>
-							<CFormInput
-								label="Max Row"
-								type="number"
-								min={query['min_row'] ?? gridSize.minRow}
-								max={gridSize.maxRow}
-								value={query['max_row'] || gridSize.maxRow}
-								onChange={(e) => updateQueryUrl('max_row', e.currentTarget.value)}
-							/>
-						</CCol>
-						<CCol sm={6} xs={12}>
-							<CFormCheck
-								label="Hide configure button"
-								type="checkbox"
-								checked={!!query['noconfigure']}
-								onChange={(e) => updateQueryUrl('noconfigure', !!e.currentTarget.checked)}
-							/>
-							<CFormCheck
-								label="Hide fullscreen button"
-								type="checkbox"
-								checked={!!query['nofullscreen']}
-								onChange={(e) => updateQueryUrl('nofullscreen', !!e.currentTarget.checked)}
 							/>
 
-							<CFormCheck
+							<FormLabel htmlFor={maxRowFieldId}>Max Row</FormLabel>
+							<NumberInputField
+								id={maxRowFieldId}
+								value={Number(query['max_row']) || 0}
+								setValue={(val) => updateQueryUrl('max_row', val)}
+								max={gridSize.maxRow}
+								min={Number(query['min_row']) || gridSize.minRow}
+							/>
+						</Grid.Col>
+						<Grid.Col sm={6} xs={12}>
+							<CheckboxInputFieldWithLabel
+								className="my-1"
+								label="Hide configure button"
+								value={!!query['noconfigure']}
+								setValue={(val) => updateQueryUrl('noconfigure', val)}
+							/>
+							<CheckboxInputFieldWithLabel
+								className="my-1"
+								label="Hide fullscreen button"
+								value={!!query['nofullscreen']}
+								setValue={(val) => updateQueryUrl('nofullscreen', val)}
+							/>
+
+							<CheckboxInputFieldWithLabel
+								className="my-1"
 								label="Show page headings"
-								type="checkbox"
-								checked={!!query['showpages']}
-								onChange={(e) => updateQueryUrl('showpages', !!e.currentTarget.checked)}
+								value={!!query['showpages']}
+								setValue={(val) => updateQueryUrl('showpages', val)}
 							/>
-							<CFormInput
-								label="Display Columns (0 for dynamic)"
-								type="number"
+
+							<FormLabel htmlFor={displayColumnFieldId}>Display Columns (0 for dynamic)</FormLabel>
+							<NumberInputField
+								id={displayColumnFieldId}
+								value={Number(query['display_cols']) || 0}
+								setValue={(val) => updateQueryUrl('display_cols', val)}
 								min={0}
-								value={query['display_cols'] || '0'}
-								onChange={(e) => updateQueryUrl('display_cols', e.currentTarget.value)}
 							/>
-						</CCol>
-					</CRow>
-				</CForm>
-			</CCol>
-		</CRow>
+						</Grid.Col>
+					</Grid.Row>
+				</Form>
+			</Grid.Col>
+		</Grid.Row>
 	) : (
-		<CRow className="header">
-			<CCol xs={12}>
+		<Grid.Row className="header">
+			<Grid.Col xs={12}>
 				{(!fullscreen || !query['noconfigure']) && !query['nofullscreen'] && (
-					<CButton
+					<Button
 						onClick={() => {
 							document.documentElement.requestFullscreen().catch((err) => {
 								console.error('Error attempting to enable full-screen mode:', err)
@@ -124,14 +142,14 @@ export function ConfigurePanel({ updateQueryUrl, query, gridSize }: ConfigurePan
 						title="Fullscreen"
 					>
 						<FontAwesomeIcon icon={faExpand} />
-					</CButton>
+					</Button>
 				)}
 				{!query['noconfigure'] && (
-					<CButton className="open-config" onClick={() => setShow(true)} title="Configure">
+					<Button className="open-config" onClick={() => setShow(true)} title="Configure">
 						<FontAwesomeIcon icon={faCog} />
-					</CButton>
+					</Button>
 				)}
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 }

@@ -1,26 +1,16 @@
 import EventEmitter from 'node:events'
-import type { CompanionSurfaceConfigField, GridSize } from '@companion-app/shared/Model/Surfaces.js'
-import type {
-	DrawButtonItem,
-	SurfaceExecuteExpressionFn,
-	SurfacePanel,
-	SurfacePanelEvents,
-	SurfacePanelInfo,
-} from './Types.js'
-import LogController, { type Logger } from '../Log/Controller.js'
-import {
-	BrightnessConfigField,
-	LockConfigFields,
-	OffsetConfigFields,
-	RotationConfigField,
-} from './CommonConfigFields.js'
-import type { VariableValue } from '@companion-app/shared/Model/Variables.js'
-import type { JsonValue, ReadonlyDeep } from 'type-fest'
-import type { SurfaceSchemaControlStylePreset, SurfaceSchemaLayoutDefinition } from '@companion-surface/host'
-import { ImageWriteQueue } from '../Resources/ImageWriteQueue.js'
-import { parseColor, parseColorToNumber, transformButtonImage } from '../Resources/Util.js'
 import debounceFn from 'debounce-fn'
+import type { JsonValue, ReadonlyDeep } from 'type-fest'
+import { parseColor } from '@companion-app/shared/Graphics/Util.js'
+import type { CompanionSurfaceConfigField, GridSize } from '@companion-app/shared/Model/Surfaces.js'
+import type { VariableValue } from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import type {
+	SurfaceRotation,
+	SurfaceSchemaControlStylePreset,
+	SurfaceSchemaLayoutDefinition,
+} from '@companion-surface/host'
 import type { IpcWrapper } from '../Instance/Common/IpcWrapper.js'
 import type {
 	HostOpenDeviceResult,
@@ -28,8 +18,17 @@ import type {
 	IpcDrawProps,
 	SurfaceModuleToHostEvents,
 } from '../Instance/Surface/IpcTypes.js'
-import type * as imageRs from '@julusian/image-rs'
-import { stringifyError } from '@companion-app/shared/Stringify.js'
+import LogController, { type Logger } from '../Log/Controller.js'
+import { ImageWriteQueue } from '../Resources/ImageWriteQueue.js'
+import { parseColorToNumber } from '../Resources/Util.js'
+import { BrightnessConfigField, OffsetConfigFields, RotationConfigField } from './CommonConfigFields.js'
+import type {
+	DrawButtonItem,
+	SurfaceExecuteExpressionFn,
+	SurfacePanel,
+	SurfacePanelEvents,
+	SurfacePanelInfo,
+} from './Types.js'
 
 interface SatelliteInputVariableInfo {
 	id: string
@@ -55,7 +54,16 @@ function generateConfigFields(
 
 	// If there are any controls, add rotation and lock config
 	if (gridSize.columns > 0 && gridSize.rows > 0) {
-		fields.push(RotationConfigField, ...LockConfigFields)
+		fields.push(RotationConfigField)
+	}
+
+	if (surfaceInfo.canChangePage) {
+		fields.push({
+			id: 'canChangePage',
+			type: 'checkbox',
+			label: surfaceInfo.canChangePage.label,
+			default: false,
+		})
 	}
 
 	// Add any additional config fields from the surface info
@@ -162,6 +170,9 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 
 	#config: Record<string, any>
 
+	/** The module has already closed this surface, so it must not be told to close it again */
+	#closedByModule = false
+
 	constructor(
 		ipcWrapper: IpcWrapper<HostToSurfaceModuleEvents, SurfaceModuleToHostEvents>,
 		instanceId: string,
@@ -189,35 +200,28 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 			try {
 				const drawProps: IpcDrawProps = {
 					controlId: controlDefinition.id,
+					pageNumber: drawItem.location?.pageNumber,
 				}
 
-				const style = drawItem.image.style
+				const style = drawItem.defaultRender.style
 
 				if (controlDefinition.style.bitmap) {
-					// TODO - support more pixel formats, for now this is all we can handle
-					let format: imageRs.PixelFormat = 'rgb'
-					if (controlDefinition.style.bitmap.format === 'rgba') {
-						format = controlDefinition.style.bitmap.format
-					}
-
-					const buffer = await transformButtonImage(
-						drawItem.image,
-						this.#config.rotation,
+					const buffer = await drawItem.defaultRender.drawNative(
 						controlDefinition.style.bitmap.w,
 						controlDefinition.style.bitmap.h,
-						format
+						this.#config.rotation,
+						controlDefinition.style.bitmap.format || 'rgb'
 					)
 
 					if (buffer === undefined || buffer.length == 0) {
 						this.#logger.warn('buffer has invalid size')
 					} else {
-						drawProps.image = buffer.toString('base64')
+						drawProps.image = buffer.toBase64()
 					}
 				}
 
 				if (controlDefinition.style.colors) {
-					let bgcolor =
-						typeof style !== 'string' && style ? parseColor(style.bgcolor).replaceAll(' ', '') : 'rgb(0,0,0)'
+					let bgcolor = parseColor(drawItem.defaultRender.bgcolor).replaceAll(' ', '')
 					// let fgcolor = typeof style !== 'string' && style ? parseColor(style.color).replaceAll(' ', '') : 'rgb(0,0,0)'
 
 					if (controlDefinition.style.colors !== 'rgb') {
@@ -230,13 +234,14 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 				}
 
 				if (controlDefinition.style.text) {
-					drawProps.text = (typeof style !== 'string' && style?.text) || ''
+					drawProps.text = style?.text?.text || ''
 				}
 				// if (controlDefinition.style.textStyle) {
 				// 	params['FONT_SIZE'] = typeof style !== 'string' && style ? style.size : 'auto'
 				// }
 
-				this.#ipcWrapper
+				// Await the send so the write queue paces itself to the child process.
+				await this.#ipcWrapper
 					.sendWithCb('drawControls', {
 						surfaceId: this.#surfaceInfo.surfaceId,
 						drawProps: [drawProps],
@@ -266,6 +271,7 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 			surfaceId: surfaceInfo.surfaceId,
 			description: surfaceInfo.description,
 			configFields: configFields,
+			canChangePage: !!surfaceInfo.canChangePage,
 			location: surfaceInfo.location ?? null,
 			isRemote: surfaceInfo.isRemote,
 			// hasFirmwareUpdates?: SurfaceFirmwareUpdateInfo
@@ -322,8 +328,6 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 		this.#config = config
 	}
 
-	getDefaultConfig?: (() => any) | undefined
-
 	/**
 	 * Propagate variable changes
 	 */
@@ -345,7 +349,7 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 					let expressionResult: VariableValue | undefined = VARIABLE_UNKNOWN_VALUE
 
 					const expressionText = this.#config[outputVariable.id]
-					const parseResult = this.#executeExpression(expressionText ?? '', this.info.surfaceId, undefined)
+					const parseResult = this.#executeExpression(expressionText ?? '', this.info.surfaceId)
 					if (parseResult.ok) {
 						expressionResult = parseResult.value
 					} else {
@@ -380,18 +384,45 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 		outputVariable.triggerUpdate()
 	}
 
+	/**
+	 * Mark the surface as closed by the module.
+	 * A closeSurface sent after this could arrive after the module has reopened the same surfaceId, and close that instead
+	 */
+	markClosedByModule(): void {
+		this.#closedByModule = true
+	}
+
 	quit(): void {
+		if (this.#closedByModule) return
+
 		this.#ipcWrapper.sendWithCb('closeSurface', { surfaceId: this.#surfaceInfo.surfaceId }).catch((e) => {
 			this.#logger.debug(`Close surface failed: ${e}`)
 		})
 	}
 
 	setLocked(locked: boolean, characterCount: number): void {
+		let rotation: SurfaceRotation = 0
+		switch (this.#config.rotation) {
+			case 'surface-90':
+			case -90:
+				rotation = -90
+				break
+			case 'surface180':
+			case 180:
+				rotation = 180
+				break
+			case 'surface90':
+			case 90:
+				rotation = 90
+				break
+		}
+
 		this.#ipcWrapper
 			.sendWithCb('setLocked', {
 				surfaceId: this.#surfaceInfo.surfaceId,
 				locked,
 				characterCount,
+				rotation,
 			})
 			.catch((e) => {
 				this.#logger.debug(`Set locked status failed: ${e}`)
@@ -420,6 +451,7 @@ export class SurfacePluginPanel extends EventEmitter<SurfacePanelEvents> impleme
 	}
 
 	changePage(forward: boolean): void {
+		if (!this.info.canChangePage || !this.#config.canChangePage) return
 		this.emit('changePage', forward)
 	}
 

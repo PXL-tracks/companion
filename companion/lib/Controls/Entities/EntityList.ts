@@ -1,3 +1,4 @@
+import { canAddEntityToFeedbackList } from '@companion-app/shared/Entity.js'
 import {
 	EntityModelType,
 	FeedbackEntitySubType,
@@ -5,18 +6,16 @@ import {
 	type EntitySupportedChildGroupDefinition,
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import { ControlEntityInstance } from './EntityInstance.js'
-import type { FeedbackStyleBuilder } from './FeedbackStyleBuilder.js'
 import { clamp } from '../../Resources/Util.js'
+import { ControlEntityInstance } from './EntityInstance.js'
+import type { EntityPoolSpecialExpressionManager } from './EntitySpecialExpressionManager.js'
+import type { NewSpecialExpressionValue } from './SpecialExpressions.js'
 import type {
 	InstanceDefinitionsForEntity,
 	InternalControllerForEntity,
 	NewFeedbackValue,
-	NewIsInvertedValue,
 	ProcessManagerForEntity,
 } from './Types.js'
-import { canAddEntityToFeedbackList } from '@companion-app/shared/Entity.js'
-import type { EntityPoolIsInvertedManager } from './EntityIsInvertedManager.js'
 
 export type ControlEntityListDefinition = Pick<
 	EntitySupportedChildGroupDefinition,
@@ -27,7 +26,7 @@ export class ControlEntityList {
 	readonly #instanceDefinitions: InstanceDefinitionsForEntity
 	readonly #internalModule: InternalControllerForEntity
 	readonly #processManager: ProcessManagerForEntity
-	readonly #isInvertedManager: EntityPoolIsInvertedManager
+	readonly #specialExpressionManager: EntityPoolSpecialExpressionManager
 
 	/**
 	 * Id of the control this belongs to
@@ -52,7 +51,7 @@ export class ControlEntityList {
 		instanceDefinitions: InstanceDefinitionsForEntity,
 		internalModule: InternalControllerForEntity,
 		processManager: ProcessManagerForEntity,
-		isInvertedManager: EntityPoolIsInvertedManager,
+		specialExpressionManager: EntityPoolSpecialExpressionManager,
 		controlId: string,
 		ownerId: EntityOwner | null,
 		listDefinition: ControlEntityListDefinition
@@ -60,7 +59,7 @@ export class ControlEntityList {
 		this.#instanceDefinitions = instanceDefinitions
 		this.#internalModule = internalModule
 		this.#processManager = processManager
-		this.#isInvertedManager = isInvertedManager
+		this.#specialExpressionManager = specialExpressionManager
 		this.#controlId = controlId
 		this.#ownerId = ownerId
 		this.#listDefinition = listDefinition
@@ -106,7 +105,7 @@ export class ControlEntityList {
 						this.#instanceDefinitions,
 						this.#internalModule,
 						this.#processManager,
-						this.#isInvertedManager,
+						this.#specialExpressionManager,
 						this.#controlId,
 						entity,
 						!!isCloned
@@ -183,7 +182,7 @@ export class ControlEntityList {
 			this.#instanceDefinitions,
 			this.#internalModule,
 			this.#processManager,
-			this.#isInvertedManager,
+			this.#specialExpressionManager,
 			this.#controlId,
 			entityModel,
 			!!isCloned
@@ -220,14 +219,16 @@ export class ControlEntityList {
 	}
 
 	/**
-	 * Reorder an entity directly in in the list
+	 * Reorder an entity directly in in the list, where newIndex is its desired final index.
 	 */
-	moveEntity(oldIndex: number, newIndex: number): void {
+	moveEntity(oldIndex: number, newIndex: number): ControlEntityInstance | undefined {
 		oldIndex = clamp(oldIndex, 0, this.#entities.length)
 		newIndex = clamp(newIndex, 0, this.#entities.length)
-		if (oldIndex < newIndex) newIndex -= 1
+		if (oldIndex === newIndex) return undefined
 
 		this.#entities.splice(newIndex, 0, ...this.#entities.splice(oldIndex, 1))
+
+		return this.#entities[newIndex]
 	}
 
 	/**
@@ -299,7 +300,7 @@ export class ControlEntityList {
 				this.#instanceDefinitions,
 				this.#internalModule,
 				this.#processManager,
-				this.#isInvertedManager,
+				this.#specialExpressionManager,
 				this.#controlId,
 				entityModel,
 				true
@@ -410,21 +411,6 @@ export class ControlEntityList {
 	}
 
 	/**
-	 * Get the unparsed style for the feedbacks
-	 * Note: Does not clone the style
-	 */
-	buildFeedbackStyle(styleBuilder: FeedbackStyleBuilder): void {
-		if (this.#listDefinition.type !== EntityModelType.Feedback || !!this.#listDefinition.feedbackListType)
-			throw new Error('ControlEntityList is not style feedbacks')
-
-		// Note: We don't need to consider children of the feedbacks here, as that can only be from boolean feedbacks which are handled by the `getBooleanValue`
-
-		for (const entity of this.#entities) {
-			entity.buildFeedbackStyle(styleBuilder)
-		}
-	}
-
-	/**
 	 * Update the feedbacks on the button with new values
 	 * @param connectionId The instance the feedbacks are for
 	 * @param newValues The new feedback values
@@ -440,8 +426,21 @@ export class ControlEntityList {
 	 * Update the isInverted values on the control with new calculated isInverted values
 	 * @param newValues The new isInverted values
 	 */
-	updateIsInvertedValues(newValues: ReadonlyMap<string, NewIsInvertedValue>): ControlEntityInstance[] {
+	updateIsInvertedValues(
+		newValues: ReadonlyMap<string, NewSpecialExpressionValue<'isInverted'>>
+	): ControlEntityInstance[] {
 		return this.#entities.flatMap((entity) => entity.updateIsInvertedValues(newValues))
+	}
+
+	/**
+	 * Update the storeResult values on the control with new calculated
+	 * storeResult values
+	 * @param newValues The new storeResult values
+	 */
+	updateStoreResultValues(
+		newValues: ReadonlyMap<string, NewSpecialExpressionValue<'storeResult'>>
+	): ControlEntityInstance[] {
+		return this.#entities.flatMap((entity) => entity.updateStoreResultValues(newValues))
 	}
 
 	/**

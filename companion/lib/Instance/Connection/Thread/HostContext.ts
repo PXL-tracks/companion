@@ -1,8 +1,16 @@
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import { EntityModelType, isValidFeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
+import type {
+	SharedUdpSocketMessageJoin,
+	SharedUdpSocketMessageLeave,
+	SharedUdpSocketMessageSend,
+} from '@companion-module/base/host-api'
 import {
 	createModuleLogger,
 	type CompanionAdvancedFeedbackResult,
-	type CompanionPresetSection,
+	type CompanionGraphicsCompositeElementDefinitions,
 	type CompanionPresetDefinitions,
+	type CompanionPresetSection,
 	type CompanionRecordedAction,
 	type CompanionVariableValue,
 	type Complete,
@@ -13,20 +21,15 @@ import {
 	type HostVariableValue,
 	type InstanceStatus,
 	type ModuleHostContext,
-	type OSCMetaArgument,
 	type OSCSomeArguments,
 	type SomeCompanionFeedbackInputField,
 } from '@companion-module/host'
+import type { CompositeElementDefinition } from '../../Definitions.js'
 import type { EncodedOSCArgument, ModuleChildIpcWrapper, RecordActionMessage } from '../IpcTypesNew.js'
-import { EntityModelType, isValidFeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
+import { VariableValueBatcher } from '../VariableValueBatcher.js'
 import { translateEntityInputFields } from './ConfigFields.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type {
-	SharedUdpSocketMessageJoin,
-	SharedUdpSocketMessageLeave,
-	SharedUdpSocketMessageSend,
-} from '@companion-module/base/host-api'
 import { ConvertPresetDefinitions } from './Presets.js'
+import { ConvertLayerPresetElements } from './PresetsLayered.js'
 
 /**
  * The context of methods and properties provided to the surfaces, which they can use to report events or make requests.
@@ -37,6 +40,30 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 
 	readonly #connectionId: string
 	readonly #currentUpgradeIndex: number
+
+	/**
+	 * The `affectedProperties` most recently declared by each feedback definition (keyed by feedback id).
+	 * Retained from `setFeedbackDefinitions` so that `setPresetDefinitions` can limit the style overrides it
+	 * generates for advanced feedbacks to the properties the feedback declares. Empty until the module reports
+	 * its feedbacks, which it is free to do after reporting its presets - hence `#lastReportedPresets` below.
+	 */
+	#feedbackAffectedProperties: ReadonlyMap<string, string[] | undefined> = new Map()
+
+	/**
+	 * The raw presets from the module's last `setPresetDefinitions` call, retained so they can be re-converted
+	 * if the feedback definitions change afterwards. A module is free to report its presets before its
+	 * feedbacks; without this, those presets would keep the unrestricted style overrides that were generated
+	 * while the `affectedProperties` were still unknown.
+	 */
+	#lastReportedPresets: { sections: CompanionPresetSection[]; presets: CompanionPresetDefinitions } | null = null
+
+	/**
+	 * Coalesce variable value updates before sending them over IPC, to avoid a flood of tiny messages
+	 * when a module pushes values very frequently (e.g. a stopwatch).
+	 */
+	readonly #variableValuesBatcher = new VariableValueBatcher<HostVariableValue>((values) =>
+		this.#ipcWrapper.sendWithNoCb('setVariableValues', { newValues: values })
+	)
 
 	constructor(ipcWrapper: ModuleChildIpcWrapper, connectionId: string, currentUpgradeIndex: number) {
 		this.#ipcWrapper = ipcWrapper
@@ -56,7 +83,7 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 			actions[rawAction.id] = {
 				entityType: EntityModelType.Action,
 				label: rawAction.name,
-				sortKey: rawAction.sortName || null,
+				sortKey: rawAction.sortName ? String(rawAction.sortName) : null,
 				description: rawAction.description,
 				options: translateEntityInputFields(rawAction.options || [], EntityModelType.Action),
 				optionsToMonitorForInvalidations: rawAction.optionsToMonitorForSubscribe || null,
@@ -64,12 +91,16 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 				hasLearn: !!rawAction.hasLearn,
 				learnTimeout: rawAction.learnTimeout,
 
+				actionHasResult: !!rawAction.hasResult,
+
 				showInvert: false,
 				showButtonPreview: false,
 				supportsChildGroups: [],
 
 				feedbackType: null,
 				feedbackStyle: undefined,
+				feedbackAffectedProperties: undefined,
+				feedbackDisableStyleOverrides: false,
 
 				optionsSupportExpressions: true,
 			} satisfies Complete<ClientEntityDefinition>
@@ -80,23 +111,30 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 	/** The feedbacks available in the connection have changed */
 	setFeedbackDefinitions(rawFeedbacks: HostFeedbackDefinition[]): void {
 		const feedbacks: Record<string, ClientEntityDefinition> = {}
+		const affectedProperties = new Map<string, string[] | undefined>()
 
 		for (const rawFeedback of rawFeedbacks) {
+			affectedProperties.set(rawFeedback.id, rawFeedback.affectedProperties)
+
 			if (!isValidFeedbackEntitySubType(rawFeedback.type)) continue
 
 			feedbacks[rawFeedback.id] = {
 				entityType: EntityModelType.Feedback,
 				label: rawFeedback.name,
-				sortKey: rawFeedback.sortName || null,
+				sortKey: rawFeedback.sortName ? String(rawFeedback.sortName) : null,
 				description: rawFeedback.description,
 				options: translateEntityInputFields(rawFeedback.options || [], EntityModelType.Feedback),
 				optionsToMonitorForInvalidations: null,
 				feedbackType: rawFeedback.type,
 				feedbackStyle: rawFeedback.defaultStyle,
+				feedbackAffectedProperties: rawFeedback.affectedProperties,
+				feedbackDisableStyleOverrides: false,
 				hasLifecycleFunctions: true, // Feedbacks always have lifecycle functions
 				hasLearn: !!rawFeedback.hasLearn,
 				learnTimeout: rawFeedback.learnTimeout,
 				showInvert: rawFeedback.showInvert ?? shouldShowInvertForFeedback(rawFeedback.options || []),
+
+				actionHasResult: undefined,
 
 				showButtonPreview: false,
 				supportsChildGroups: [],
@@ -105,7 +143,16 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 			} satisfies Complete<ClientEntityDefinition>
 		}
 
+		const affectedPropertiesChanged = !areAffectedPropertiesEqual(this.#feedbackAffectedProperties, affectedProperties)
+		this.#feedbackAffectedProperties = affectedProperties
+
 		this.#ipcWrapper.sendWithNoCb('setFeedbackDefinitions', { feedbacks })
+
+		// The style overrides generated for the presets were derived from the previous `affectedProperties`,
+		// so they must be rebuilt against the new ones.
+		if (affectedPropertiesChanged && this.#lastReportedPresets) {
+			this.#sendPresetDefinitions(this.#lastReportedPresets.sections, this.#lastReportedPresets.presets)
+		}
 	}
 	/** The variables available in the connection have changed */
 	setVariableDefinitions(definitions: HostVariableDefinition[], values: HostVariableValue[]): void {
@@ -116,12 +163,20 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 	}
 	/** The presets provided by the connection have changed */
 	setPresetDefinitions(rawSections: CompanionPresetSection[], rawPresets: CompanionPresetDefinitions): void {
+		this.#lastReportedPresets = { sections: rawSections, presets: rawPresets }
+
+		this.#sendPresetDefinitions(rawSections, rawPresets)
+	}
+
+	/** Convert the given raw presets against the current feedback definitions, and report them to the host */
+	#sendPresetDefinitions(rawSections: CompanionPresetSection[], rawPresets: CompanionPresetDefinitions): void {
 		const { presets, uiPresets } = ConvertPresetDefinitions(
 			this.#logger,
 			this.#connectionId,
 			this.#currentUpgradeIndex,
 			rawSections,
-			rawPresets
+			rawPresets,
+			this.#feedbackAffectedProperties
 		)
 
 		this.#ipcWrapper.sendWithNoCb('setPresetDefinitions', {
@@ -129,10 +184,46 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 			uiPresets: uiPresets,
 		})
 	}
+	/** The composite graphics elements provided by the connection have changed */
+	setCompositeElementDefinitions(compositeElements: CompanionGraphicsCompositeElementDefinitions): void {
+		const convertedElements: CompositeElementDefinition[] = []
+
+		for (const [id, rawElement] of Object.entries(compositeElements)) {
+			if (!rawElement) continue
+			convertedElements.push({
+				id,
+				name: rawElement.name,
+				description: rawElement.description,
+				options: translateEntityInputFields(rawElement.options || [], EntityModelType.Feedback),
+				elements: ConvertLayerPresetElements(
+					this.#logger,
+					this.#connectionId,
+					undefined,
+					rawElement.elements || [],
+					true // Force new unique IDs for elements within composite definitions
+				).slice(
+					1 // Crop off the canvas element
+				),
+			} satisfies Complete<CompositeElementDefinition>)
+		}
+
+		this.#ipcWrapper.sendWithNoCb('setCompositeElementDefinitions', {
+			definitions: convertedElements,
+		})
+	}
 	/** The connection has some new values for variables */
 	setVariableValues(values: HostVariableValue[]): void {
-		this.#ipcWrapper.sendWithNoCb('setVariableValues', { newValues: values })
+		this.#variableValuesBatcher.add(values)
 	}
+
+	/**
+	 * Tear down the context. Called when the connection is being destroyed, to release any pending timers
+	 * (e.g. the batched variable value flush) so the module thread can exit cleanly.
+	 */
+	destroy(): void {
+		this.#variableValuesBatcher.destroy()
+	}
+
 	/** The connection has some new values for feedbacks it is running */
 	updateFeedbackValues(values: HostFeedbackValue[]): void {
 		// Transform advanced feedback imageBuffers from Uint8Array to base64 strings, to make them json serializable
@@ -147,7 +238,7 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 							value: {
 								...valueObject,
 								// Backwards compatibility fixup, ensure the imageBuffer is a string
-								imageBuffer: uint8ArrayToBuffer(imageBuffer).toString('base64'),
+								imageBuffer: imageBuffer.toBase64(),
 							},
 						}
 					} else {
@@ -173,22 +264,22 @@ export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig
 
 		if (args !== undefined && args !== null) {
 			// Simplify as an array
-			if (!Array.isArray(args)) args = [args as OSCMetaArgument]
+			const argsArr = !Array.isArray(args) ? [args] : args
 
-			for (const arg of args) {
+			for (const arg of argsArr) {
 				if (typeof arg === 'string') {
 					encodedArgs.push({ type: 's', value: arg })
 				} else if (typeof arg === 'number') {
 					encodedArgs.push({ type: 'f', value: arg })
 				} else if (arg instanceof Uint8Array) {
 					// Future: use native toBase64 when available
-					encodedArgs.push({ type: 'b', value: uint8ArrayToBuffer(arg).toString('base64') })
+					encodedArgs.push({ type: 'b', value: arg.toBase64() })
 				} else if (arg && typeof arg === 'object') {
 					if (arg.type === 's' || arg.type === 'f' || arg.type === 'i') {
 						encodedArgs.push(arg)
 					} else if (arg.type === 'b' && arg.value instanceof Uint8Array) {
 						// Future: use native toBase64 when available
-						encodedArgs.push({ type: 'b', value: uint8ArrayToBuffer(arg.value).toString('base64') })
+						encodedArgs.push({ type: 'b', value: arg.value.toBase64() })
 					} else {
 						throw new Error(`Unsupported OSC argument type: ${JSON.stringify(arg)}`)
 					}
@@ -249,8 +340,27 @@ function shouldShowInvertForFeedback(options: SomeCompanionFeedbackInputField[])
 }
 
 /**
- * Note: explicitly copied away from Resources/Util.ts to avoid circular dependencies
+ * Whether two `affectedProperties` maps describe the same set of limits, so that an unchanged report of the
+ * feedback definitions doesn't needlessly rebuild (and re-report) the presets.
  */
-function uint8ArrayToBuffer(arr: Uint8Array | Uint8ClampedArray): Buffer {
-	return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength)
+function areAffectedPropertiesEqual(
+	a: ReadonlyMap<string, string[] | undefined>,
+	b: ReadonlyMap<string, string[] | undefined>
+): boolean {
+	if (a.size !== b.size) return false
+
+	for (const [id, aProperties] of a) {
+		if (!b.has(id)) return false
+
+		const bProperties = b.get(id)
+		if (aProperties === undefined || bProperties === undefined) {
+			if (aProperties !== bProperties) return false
+			continue
+		}
+
+		if (aProperties.length !== bProperties.length) return false
+		if (aProperties.some((property, i) => property !== bProperties[i])) return false
+	}
+
+	return true
 }

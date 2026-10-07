@@ -1,7 +1,7 @@
+import { createRequire } from 'node:module'
+import semver from 'semver'
 import { describe, expect, test } from 'vitest'
 import { isModuleApiVersionCompatible } from '../ModuleApiVersionCheck.js'
-import { createRequire } from 'module'
-import semver from 'semver'
 
 const require = createRequire(import.meta.url)
 const moduleBasePkg = require('@companion-module/base/package.json')
@@ -52,20 +52,20 @@ describe('isModuleApiVersionCompatible', () => {
 	test('check previous minor version', () => {
 		const version = semver.parse(moduleBasePkg.version)
 		expect(version).not.toBe(null)
-		expect(version?.minor).toEqual(0) // hack: temporary disable until reaches 2.1.0
-		// version!.minor--
-		// version!.prerelease = []
+		version!.minor--
+		version!.prerelease = []
 
-		// const versionStr = version!.format()
-		// expect(versionStr).toBeTruthy()
-		// expect(versionStr).not.toBe(moduleBasePkg.version)
+		const versionStr = version!.format()
+		expect(versionStr).toBeTruthy()
+		expect(versionStr).not.toBe(moduleBasePkg.version)
 
-		// expect(isModuleApiVersionCompatible(versionStr)).toBe(true)
+		expect(isModuleApiVersionCompatible(versionStr)).toBe(true)
 	})
 	test('check previous major version', () => {
 		const version = semver.parse(moduleBasePkg.version)
 		expect(version).not.toBe(null)
 		version!.major--
+		version!.prerelease = []
 
 		const versionStr = version!.format()
 		expect(versionStr).toBeTruthy()

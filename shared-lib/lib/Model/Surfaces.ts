@@ -1,4 +1,5 @@
 import type { Operation as JsonPatchOperation } from 'fast-json-patch'
+import type { CollectionBase } from './Collections.js'
 import type { DropdownChoice } from './Common.js'
 import type {
 	CompanionInputFieldCheckboxExtended,
@@ -9,7 +10,6 @@ import type {
 	CompanionInputFieldStaticTextExtended,
 	CompanionInputFieldTextInputExtended,
 } from './Options.js'
-import type { CollectionBase } from './Collections.js'
 
 export type GridSize = { columns: number; rows: number }
 export type SurfaceRotation = 'surface90' | 'surface-90' | 'surface180' | 'surface0' | 0 | -90 | 90 | 180
@@ -50,6 +50,7 @@ export interface ClientSurfaceItem {
 
 	size: RowsAndColumns | null
 	rotation: SurfaceRotation | null
+	brightness: number | null
 	offset: RowsAndColumns | null
 }
 
@@ -87,6 +88,7 @@ export interface SurfaceGroupConfig {
 	last_page_id: string
 	startup_page_id: string
 	use_last_page: boolean
+	never_lock: boolean
 	restrict_pages?: boolean
 	allowed_page_ids?: string[]
 
@@ -104,7 +106,6 @@ export interface SurfacePanelConfig {
 	rotation: SurfaceRotation
 
 	// companion owned defaults
-	never_lock: boolean
 	xOffset: number
 	yOffset: number
 	groupId: string | null
@@ -114,10 +115,7 @@ export interface SurfacePanelConfig {
 }
 
 export type SurfacesUpdate =
-	| SurfacesUpdateInitOp
-	| SurfacesUpdateRemoveOp
-	| SurfacesUpdateAddOp
-	| SurfacesUpdateUpdateOp
+	SurfacesUpdateInitOp | SurfacesUpdateRemoveOp | SurfacesUpdateAddOp | SurfacesUpdateUpdateOp
 
 export interface SurfacesUpdateInitOp {
 	type: 'init'
@@ -161,9 +159,7 @@ export interface OutboundSurfaceCollectionData {
 export type OutboundSurfaceCollection = CollectionBase<OutboundSurfaceCollectionData>
 
 export type OutboundSurfacesUpdate =
-	| OutboundSurfacesUpdateInitOp
-	| OutboundSurfacesUpdateRemoveOp
-	| OutboundSurfacesUpdateAddOp
+	OutboundSurfacesUpdateInitOp | OutboundSurfacesUpdateRemoveOp | OutboundSurfacesUpdateAddOp
 
 export interface OutboundSurfacesUpdateInitOp {
 	type: 'init'
@@ -202,14 +198,13 @@ export interface ClientDiscoveredSurfaceInfoPlugin {
 
 	name: string
 	description: string
+	address: string | null
 
 	config: Record<string, any>
 }
 
 export type SurfacesDiscoveryUpdate =
-	| SurfaceDiscoveryUpdateInitOp
-	| SurfaceDiscoveryUpdateRemoveOp
-	| SurfaceDiscoveryUpdateUpdateOp
+	SurfaceDiscoveryUpdateInitOp | SurfaceDiscoveryUpdateRemoveOp | SurfaceDiscoveryUpdateUpdateOp
 
 export interface SurfaceDiscoveryUpdateRemoveOp {
 	type: 'remove'

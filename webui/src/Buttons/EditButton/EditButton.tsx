@@ -1,26 +1,25 @@
-import { CAlert, CCol } from '@coreui/react'
-import React, { useContext, useRef } from 'react'
+import { faFileArrowDown, faFileArrowUp, faFileLines, faSquarePlus } from '@fortawesome/free-solid-svg-icons'
+import { observer } from 'mobx-react-lite'
+import { useContext, useRef } from 'react'
+import type { SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import { StaticAlert } from '~/Components/Alert.js'
 import { ButtonPreviewBase } from '~/Components/ButtonPreview.js'
 import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { KeyReceiver } from '~/Resources/util.js'
-import { MyErrorBoundary } from '~/Resources/Error.js'
-import { LoadingRetryOrError } from '~/Resources/Loading.js'
-import { ButtonStyleConfig } from '~/Controls/ButtonStyleConfig.js'
-import { ControlOptionsEditor } from '~/Controls/ControlOptionsEditor.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { NormalButtonModel, SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
-import { ControlClearButton } from './ControlClearButton.js'
-import { SelectButtonTypeDropdown } from './SelectButtonTypeDropdown.js'
-import { ControlHotPressButtons } from './ControlHotPressButtons.js'
-import { ButtonEditorTabs, type ButtonEditorExtraTabs } from './ButtonEditorTabs.js'
-import { ControlEntitiesEditor } from '~/Controls/EntitiesEditor.js'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
-import { LocalVariablesEditor } from '../../Controls/LocalVariablesEditor.js'
-import { useLocalVariablesStore } from '../../Controls/LocalVariablesStore.js'
+import { Grid } from '~/Components/Grid'
+import { NonIdealState } from '~/Components/NonIdealState.js'
+import { ControlNotesEditor } from '~/Controls/ControlNotesEditor.js'
 import { useButtonImageForControlId } from '~/Hooks/useButtonImageForControlId.js'
 import { useControlConfig } from '~/Hooks/useControlConfig.js'
+import { MyErrorBoundary } from '~/Resources/Error.js'
+import { LoadingRetryOrError } from '~/Resources/Loading.js'
+import { KeyReceiver } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ControlClearButton } from './ControlClearButton.js'
+import { ControlHotPressButtons } from './ControlHotPressButtons.js'
+import { ConvertToNormalButton } from './ConvertToNormalButton.js'
+import { CreateButtonTypeButtons } from './CreateButtonTypeButtons.js'
+import { LayeredButtonEditor } from './LayeredButtonEditor/LayeredButtonEditor.js'
 
 interface EditButtonProps {
 	location: ControlLocation
@@ -51,9 +50,9 @@ export const EditButton = observer(function EditButton({ location, onKeyUp }: Ed
 					<LoadingRetryOrError dataReady={dataReady} error={loadError} doRetry={reloadConfig} design="pulse" />
 					{dataReady &&
 						(controlConfig.config.type === 'trigger' || controlConfig.config.type === 'expression-variable' ? (
-							<CAlert color="warning">
+							<StaticAlert color="warning">
 								An incompatible control was selected! This is likely a bug, please report it.
-							</CAlert>
+							</StaticAlert>
 						) : (
 							<EditButtonContent
 								resetModalRef={resetModalRef}
@@ -67,18 +66,20 @@ export const EditButton = observer(function EditButton({ location, onKeyUp }: Ed
 				</>
 			) : (
 				<>
-					<CCol sm={12}>
-						<ButtonPreviewBase fixedSize preview={previewImage} right={true} />
-						<MyErrorBoundary>
-							<SelectButtonTypeDropdown location={location} resetModalRef={resetModalRef} configRef={undefined} />
-						</MyErrorBoundary>
+					<Grid.Col sm={12}>
+						<div className="d-flex mb-0">
+							<div className="flex-grow-1 min-w-0 d-flex flex-column gap-1"></div>
+							<ButtonPreviewBase fixedSize={100} preview={previewImage} />
+						</div>
 
-						<h4>Empty button</h4>
-						<p className="mt-3">
-							To get started, click button above to create a regular button, or use the drop down to make a special
-							button.
-						</p>
-					</CCol>
+						<NonIdealState icon={faSquarePlus} className="px-3">
+							<h4 className="mt-1">Empty button</h4>
+							<p className="mt-3">Choose a button type to get started.</p>
+							<MyErrorBoundary>
+								<CreateButtonTypeButtons location={location} />
+							</MyErrorBoundary>
+						</NonIdealState>
+					</Grid.Col>
 				</>
 			)}
 		</KeyReceiver>
@@ -103,135 +104,52 @@ const EditButtonContent = observer(function EditButton({
 }: EditButtonContentProps) {
 	return (
 		<>
-			<CCol sm={12}>
-				<ButtonPreviewBase fixedSize preview={previewImage} right={true} />
-
-				<ControlClearButton location={location} resetModalRef={resetModalRef} />
-				<MyErrorBoundary>
-					{config.type === 'button' && (
-						<ControlHotPressButtons location={location} showRotaries={config.options.rotaryActions} />
+			<div className="d-flex mb-0">
+				<div className="flex-grow-1 min-w-0 d-flex flex-column gap-1">
+					<div className="d-flex flex-wrap align-items-center gap-1">
+						<ControlClearButton location={location} resetModalRef={resetModalRef} />
+						<MyErrorBoundary>
+							{(config.type === 'pageup' || config.type === 'pagenum' || config.type === 'pagedown') && (
+								<ConvertToNormalButton location={location} />
+							)}
+							{config.type === 'button-layered' && (
+								<ControlHotPressButtons location={location} showRotaries={config.options.rotaryActions} />
+							)}
+						</MyErrorBoundary>
+					</div>
+					{config.type === 'button-layered' && (
+						<MyErrorBoundary>
+							<ControlNotesEditor controlId={controlId} notes={config.options.notes} className="w-100 mt-1" />
+						</MyErrorBoundary>
 					)}
-				</MyErrorBoundary>
-			</CCol>
+				</div>
+				<ButtonPreviewBase fixedSize={100} preview={previewImage} />
+			</div>
 
 			{config.type === 'pageup' && (
-				<>
-					<h4>Page up button</h4>
+				<NonIdealState icon={faFileArrowUp}>
+					<h4 className="mt-1">Page up button</h4>
 					<p className="mt-3">No configuration available for page up buttons</p>
-				</>
+				</NonIdealState>
 			)}
 
 			{config.type === 'pagenum' && (
-				<>
-					<h4>Page number button</h4>
+				<NonIdealState icon={faFileLines}>
+					<h4 className="mt-1">Page number button</h4>
 					<p className="mt-3">No configuration available for page number buttons</p>
-				</>
+				</NonIdealState>
 			)}
 
 			{config.type === 'pagedown' && (
-				<>
-					<h4>Page down button</h4>
+				<NonIdealState icon={faFileArrowDown}>
+					<h4 className="mt-1">Page down button</h4>
 					<p className="mt-3">No configuration available for page down buttons</p>
-				</>
+				</NonIdealState>
 			)}
 
-			{config.type === 'button' && (
-				<NormalButtonEditor config={config} controlId={controlId} runtimeProps={runtimeProps} location={location} />
+			{config.type === 'button-layered' && (
+				<LayeredButtonEditor config={config} controlId={controlId} runtimeProps={runtimeProps} location={location} />
 			)}
 		</>
 	)
 })
-
-const NormalButtonExtraTabs: ButtonEditorExtraTabs[] = [
-	{ id: 'feedbacks', name: 'Feedbacks', position: 'end' },
-	{ id: 'variables', name: 'Local Variables', position: 'end' },
-]
-
-function NormalButtonEditor({
-	config,
-	controlId,
-	runtimeProps,
-	location,
-}: {
-	config: NormalButtonModel
-	controlId: string
-	runtimeProps: Record<string, any> | false
-	location: ControlLocation
-}) {
-	const configRef = useRef<SomeButtonModel>()
-	configRef.current = config || undefined // update the ref every render
-
-	const localVariablesStore = useLocalVariablesStore(controlId, config.localVariables)
-
-	return (
-		<>
-			<MyErrorBoundary>
-				<ButtonStyleConfig
-					style={config.style}
-					configRef={configRef}
-					controlId={controlId}
-					localVariablesStore={localVariablesStore}
-					mainDialog
-				/>
-			</MyErrorBoundary>
-			<MyErrorBoundary>
-				<div style={{ marginLeft: '5px' }}>
-					<ControlOptionsEditor options={config.options} configRef={configRef} controlId={controlId} />
-				</div>
-			</MyErrorBoundary>
-			{runtimeProps && (
-				<MyErrorBoundary>
-					<ButtonEditorTabs
-						location={location}
-						controlId={controlId}
-						steps={config.steps || {}}
-						disabledSetStep={config?.options?.stepProgression === 'expression'}
-						runtimeProps={runtimeProps}
-						rotaryActions={config?.options?.rotaryActions}
-						extraTabs={NormalButtonExtraTabs}
-						localVariablesStore={localVariablesStore}
-					>
-						{(currentTab) => {
-							if (currentTab === 'feedbacks') {
-								return (
-									<div className="mt-10">
-										{/* Wrap the entity-category, for :first-child to work */}
-										<MyErrorBoundary>
-											<ControlEntitiesEditor
-												heading="Feedbacks"
-												controlId={controlId}
-												entities={config.feedbacks}
-												location={location}
-												listId="feedbacks"
-												entityType={EntityModelType.Feedback}
-												entityTypeLabel="feedback"
-												feedbackListType={null}
-												localVariablesStore={localVariablesStore}
-												localVariablePrefix={null}
-											/>
-										</MyErrorBoundary>
-									</div>
-								)
-							} else if (currentTab === 'variables') {
-								return (
-									<div className="mt-10">
-										<MyErrorBoundary>
-											<LocalVariablesEditor
-												controlId={controlId}
-												location={location}
-												variables={config.localVariables}
-												localVariablesStore={localVariablesStore}
-											/>
-										</MyErrorBoundary>
-									</div>
-								)
-							}
-
-							return null
-						}}
-					</ButtonEditorTabs>
-				</MyErrorBoundary>
-			)}
-		</>
-	)
-}

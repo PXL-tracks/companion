@@ -1,10 +1,10 @@
+import { createRequire } from 'node:module'
+import path from 'node:path'
 import fs from 'fs-extra'
-import { isPackaged } from '../Resources/Util.js'
-import path from 'path'
-import { doesModuleSupportPermissionsModel } from './Connection/ApiVersions.js'
 import type { SomeModuleManifest } from '@companion-app/shared/Model/ModuleManifest.js'
 import type { ModuleManifestRuntime } from '@companion-module/base/manifest'
-import { createRequire } from 'module'
+import { isPackaged } from '../Resources/Util.js'
+import { doesModuleSupportPermissionsModel } from './Connection/ApiVersions.js'
 
 /**
  * Get the path to the Node.js binary for the given runtime type.
@@ -32,6 +32,18 @@ export async function getNodeJsPath(runtimeType: string): Promise<string | null>
 	return nodePath
 }
 
+/**
+ * Resolve a path to its real on-disk location (following symlinks), falling back to the input if it
+ * cannot be resolved. Needed because Node's permission model matches grants against canonicalised paths.
+ */
+export function realPathOrSelf(inputPath: string): string {
+	try {
+		return fs.realpathSync(inputPath)
+	} catch (_e) {
+		return inputPath
+	}
+}
+
 export function getNodeJsPermissionArguments(
 	manifest: SomeModuleManifest,
 	moduleApiVersion: string,
@@ -53,21 +65,31 @@ export function getNodeJsPermissionArguments(
 	// Node18 is more limited in supported arguments
 	if (manifest.runtime.type === 'node18') return args
 
-	args.push('--use-system-ca')
+	if (!process.env.COMPANION_SKIP_SYSTEM_CA) {
+		args.push('--use-system-ca')
+	}
 
 	if (!enableInspect) {
+		// Node canonicalises filesystem accesses to their real path before checking them against the granted
+		// paths, but does not canonicalise the grants themselves. So the grants must be real paths too.
+		const companionCodeDir = isPackaged() ? import.meta.dirname : path.join(import.meta.dirname, '../../..')
 		args.push(
 			'--no-warnings=SecurityWarning',
 			'--permission',
 			// Always allow read access to the module source directory
-			`--allow-fs-read=${moduleDir}`,
-			`--allow-fs-read=${isPackaged() ? import.meta.dirname : path.join(import.meta.dirname, '../../..')}` // Allow read access to companion code, because of some esm loader issues
+			`--allow-fs-read=${realPathOrSelf(moduleDir)}`,
+			`--allow-fs-read=${realPathOrSelf(companionCodeDir)}` // Allow read access to companion code, because of some esm loader issues
 		)
+
+		// If using node25+, we must allow network access when using permissions model
+		if (manifest.runtime.type !== 'node22') args.push('--allow-net')
 
 		if (!isPackaged()) {
 			// Always allow read access to module host package, needed when running a dev version
 			const require = createRequire(import.meta.url)
-			args.push(`--allow-fs-read=${path.join(path.dirname(require.resolve('@companion-module/host')), '../../..')}`)
+			args.push(
+				`--allow-fs-read=${realPathOrSelf(path.join(path.dirname(require.resolve('@companion-module/host')), '../../..'))}`
+			)
 		}
 
 		let forceReadWriteAll = false

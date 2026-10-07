@@ -1,7 +1,9 @@
-import { themes as prismThemes } from 'prism-react-renderer'
-import type { Config } from '@docusaurus/types'
 import type * as Preset from '@docusaurus/preset-classic'
+import type { Config } from '@docusaurus/types'
+// @ts-expect-error No types provided for this plugin
 import lunrPlugin from 'docusaurus-lunr-search'
+import { themes as prismThemes } from 'prism-react-renderer'
+import remarkVideo from './src/remark/remark-video'
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -13,6 +15,8 @@ const config: Config = {
 	// Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
 	future: {
 		v4: true, // Improve compatibility with the upcoming Docusaurus v4
+		// Not worth the extra dependencies
+		faster: false,
 	},
 
 	// Set the production url of your site here
@@ -23,6 +27,8 @@ const config: Config = {
 
 	organizationName: 'bitfocus', // Usually your GitHub org/user name.
 	projectName: 'companion', // Usually your repo name.
+
+	// trailingSlash: true,
 
 	onBrokenLinks: 'throw',
 	onBrokenAnchors: 'throw',
@@ -44,6 +50,7 @@ const config: Config = {
 					routeBasePath: '/',
 					sidebarPath: './sidebars.ts',
 					editUrl: 'https://github.com/bitfocus/companion/tree/main/docs/',
+					beforeDefaultRemarkPlugins: [remarkVideo],
 				},
 				theme: {
 					customCss: './src/css/custom.css',
@@ -194,6 +201,7 @@ const config: Config = {
 	} satisfies Preset.ThemeConfig,
 
 	plugins: [lunrPlugin],
+	clientModules: process.env.NODE_ENV === 'development' ? [require.resolve('./src/hash-nav.js')] : [],
 }
 
 export default config

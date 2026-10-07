@@ -1,27 +1,27 @@
-import type { ClientInstanceConfigBase } from '@companion-app/shared/Model/Instance.js'
-import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
-import { CFormSwitch, CPopover, CButtonGroup, CButton } from '@coreui/react'
 import {
+	faBug,
+	faEllipsisV,
 	faExclamationTriangle,
 	faFlask,
 	faQuestionCircle,
-	faBug,
 	faTerminal,
 	faTrash,
-	faEllipsisV,
 } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import React, { useContext, useCallback } from 'react'
-import { Tuck } from '~/Components/Tuck'
+import { useCallback, useContext } from 'react'
+import type { ClientInstanceConfigBase } from '@companion-app/shared/Model/Instance.js'
+import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
+import { Popover } from '~/Components/Popover'
+import { SwitchInputField } from '~/Components/SwitchInputField'
 import { windowLinkOpen } from '~/Helpers/Window'
 import { MyErrorBoundary } from '~/Resources/Error'
 import { isCollectionEnabled, makeAbsolutePath } from '~/Resources/util'
 import type { GenericCollectionsStore } from '~/Stores/GenericCollectionsStore'
 import { RootAppStoreContext } from '~/Stores/RootAppStore'
-import { InstanceTableStatusCell } from './InstanceTableStatusCell'
 import { UpdateInstanceToLatestBadge } from '../UpdateInstanceToLatestBadge'
 import { getModuleVersionInfo } from '../Util'
+import { InstanceTableStatusCell } from './InstanceTableStatusCell'
 
 export interface InstancesListTableRowProps<TMetaData extends { enabled?: boolean }> {
 	collectionsStore: GenericCollectionsStore<TMetaData>
@@ -85,29 +85,23 @@ export const InstancesListTableRow = observer(function InstancesListTableRow<TMe
 			: `Enable ${labelStr}`
 
 	return (
-		<div className="flex flex-row align-items-center gap-2 hand">
+		<div className="flex flex-row align-items-center gap-2 hand" title={`Click to configure the ${moduleDisplayName}.`}>
 			<div onClick={doEdit} className="flex flex-column grow" style={{ minWidth: 0 }}>
 				<b>{instance.label}</b>
-				<span className="auto-ellipsis" title={moduleDisplayName}>
-					{moduleDisplayName}
-				</span>
+				<span className="auto-ellipsis">{moduleDisplayName}</span>
 			</div>
 
 			<div onClick={doEdit} className="no-break">
 				<MyErrorBoundary>
 					{moduleVersion?.isLegacy && (
-						<>
-							<FontAwesomeIcon
-								icon={faExclamationTriangle}
-								color="#f80"
-								title="This module has not been updated for Companion 3.0, and may not work fully"
-							/>{' '}
-						</>
+						<span title="This module has not been updated for Companion 3.0, and may not work fully">
+							<FontAwesomeIcon icon={faExclamationTriangle} color="#f80" />{' '}
+						</span>
 					)}
 					{moduleVersion?.isBeta && (
-						<>
-							<FontAwesomeIcon icon={faFlask} title="Beta" />{' '}
-						</>
+						<span title="Beta">
+							<FontAwesomeIcon icon={faFlask} />{' '}
+						</span>
 					)}
 					{moduleVersion?.displayName ?? instance.moduleVersionId}
 
@@ -119,78 +113,51 @@ export const InstancesListTableRow = observer(function InstancesListTableRow<TMe
 			</div>
 			<div className="flex">
 				<div className="ms-2" title={toggleEnabledTitle}>
-					<CFormSwitch
+					<SwitchInputField
+						id={undefined}
+						value={isEnabled}
+						setValue={doToggleEnabled}
 						disabled={!moduleInfo || !moduleVersion || !canToggleEnabled}
-						color="success"
-						checked={isEnabled}
-						onChange={doToggleEnabled}
-						size="xl"
 					/>
 				</div>
-				<CPopover
-					trigger="focus"
-					placement="right"
-					style={{ backgroundColor: 'white' }}
-					content={
-						<>
-							{/* Note: the popover closing due to focus loss stops mouseup/click events propagating */}
-							<CButtonGroup vertical>
-								<CButton
-									onMouseDown={doShowHelp}
-									color="secondary"
-									title="Help"
-									disabled={!moduleVersion?.helpPath}
-									style={{ textAlign: 'left' }}
-								>
-									<Tuck>
-										<FontAwesomeIcon icon={faQuestionCircle} />
-									</Tuck>
-									Help
-								</CButton>
-
-								<CButton
-									onMouseDown={openBugUrl}
-									color="secondary"
-									title="Issue Tracker"
-									disabled={!moduleInfo?.display?.bugUrl}
-									style={{ textAlign: 'left' }}
-								>
-									<Tuck>
-										<FontAwesomeIcon icon={faBug} />
-									</Tuck>
-									Known issues
-								</CButton>
-
-								{extraMenuItems}
-
-								{!!debugLogUrl && (
-									<CButton
-										onMouseDown={() => windowLinkOpen({ href: makeAbsolutePath(debugLogUrl), title: 'View debug log' })}
-										title="Logs"
-										color="secondary"
-										style={{ textAlign: 'left' }}
-									>
-										<Tuck>
-											<FontAwesomeIcon icon={faTerminal} />
-										</Tuck>
-										View logs
-									</CButton>
-								)}
-
-								<CButton onMouseDown={doDelete} title="Delete" color="secondary" style={{ textAlign: 'left' }}>
-									<Tuck>
-										<FontAwesomeIcon icon={faTrash} />
-									</Tuck>
-									Delete
-								</CButton>
-							</CButtonGroup>
-						</>
-					}
-				>
-					<CButton color="secondary" style={{ padding: '3px 8px' }} onClick={(e) => e.currentTarget.focus()}>
+				<Popover.Root>
+					<Popover.Trigger
+						color="secondary"
+						className="py-1 px-2"
+						title="Click for additional options."
+						aria-label="Click for additional options."
+					>
 						<FontAwesomeIcon icon={faEllipsisV} />
-					</CButton>
-				</CPopover>
+					</Popover.Trigger>
+					<Popover.Popup arrow side="right" align="center">
+						<Popover.Item onClick={doShowHelp} title="Help" disabled={!moduleVersion?.helpPath}>
+							<FontAwesomeIcon icon={faQuestionCircle} className="me-2" />
+							Help
+						</Popover.Item>
+
+						<Popover.Item onClick={openBugUrl} title="Issue Tracker" disabled={!moduleInfo?.display?.bugUrl}>
+							<FontAwesomeIcon icon={faBug} className="me-2" />
+							Known issues
+						</Popover.Item>
+
+						{extraMenuItems}
+
+						{!!debugLogUrl && (
+							<Popover.Item
+								onClick={() => windowLinkOpen({ href: makeAbsolutePath(debugLogUrl), title: 'View debug log' })}
+								title="Logs"
+							>
+								<FontAwesomeIcon icon={faTerminal} className="me-2" />
+								View logs
+							</Popover.Item>
+						)}
+
+						<Popover.Item onClick={doDelete} title="Delete">
+							<FontAwesomeIcon icon={faTrash} className="me-2" />
+							Delete
+						</Popover.Item>
+					</Popover.Popup>
+				</Popover.Root>
 			</div>
 		</div>
 	)

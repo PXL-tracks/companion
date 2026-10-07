@@ -1,8 +1,7 @@
-import React from 'react'
-import { ResetButton, type UserConfigProps } from './Common.js'
+import { observer } from 'mobx-react-lite'
 import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
 import { TextInputField } from '~/Components/TextInputField.js'
-import { observer } from 'mobx-react-lite'
+import { ResetButton, type UserConfigProps } from './Common.js'
 
 interface UserConfigTextInputRowProps {
 	userConfig: UserConfigProps
@@ -21,6 +20,7 @@ export const UserConfigTextInputRow = observer(function UserConfigTextInputRow({
 			<td>{label}</td>
 			<td>
 				<TextInputField
+					id={undefined} // Future: set this for better accessibility
 					value={String(userConfig.config[field] as any)}
 					setValue={(value) => userConfig.setValue(field, value)}
 					useVariables={useVariables}

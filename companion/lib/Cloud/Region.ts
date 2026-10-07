@@ -9,14 +9,14 @@
  * this program.
  */
 
-import SCClient from 'socketcluster-client'
-import isEqual from 'fast-deep-equal'
-import { delay } from '../Resources/Util.js'
-import LogController, { Logger } from '../Log/Controller.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { CloudController, CloudUIEvents } from './Controller.js'
 import type EventEmitter from 'node:events'
+import isEqual from 'fast-deep-equal'
+import SCClient from 'socketcluster-client'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import { stringifyError } from '@companion-app/shared/Stringify.js'
+import LogController, { Logger } from '../Log/Controller.js'
+import { delay } from '../Resources/Util.js'
+import type { CloudController, CloudUIEvents } from './Controller.js'
 
 /**
  * Functionality for a connection region for cloud control
@@ -96,7 +96,7 @@ export class CloudRegion {
 	/**
 	 * Process a <code>getBanks</code> call from a remote client
 	 */
-	async #clientGetBanks(): Promise<object> {
+	async #clientGetBanks(): Promise<object[]> {
 		this.#logger.silly('Client requested getBanks()')
 		return this.#cloud.getBanks()
 	}
@@ -436,7 +436,7 @@ export class CloudRegion {
 		if (!this.#socket) throw new Error('No socket')
 		await this.#socket.transmitPublish('companion-banks:' + this.#cloud.state.uuid, {
 			type: 'full',
-			data: this.#cloud.getBanks(),
+			data: await this.#cloud.getBanks(),
 		})
 	}
 

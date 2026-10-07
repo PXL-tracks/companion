@@ -1,4 +1,41 @@
-import React, {
+import { faFacebook, faGithub, faSlack } from '@fortawesome/free-brands-svg-icons'
+import {
+	faArrowsDownToLine,
+	faArrowsUpToLine,
+	faCheck,
+	faClipboardList,
+	faClock,
+	faCloud,
+	faCog,
+	faDollarSign,
+	faExternalLinkSquare,
+	faFileImport,
+	faFloppyDisk,
+	faGamepad,
+	faHammer,
+	faHatWizard,
+	faHeadset,
+	faImages,
+	faInfo,
+	faNetworkWired,
+	faPeopleArrows,
+	faPlug,
+	faPuzzlePiece,
+	faScrewdriver,
+	faSquareCaretRight,
+	faSquareRootVariable,
+	faStar,
+	faTable,
+	faTableCells,
+	faTabletScreenButton,
+	faToolbox,
+	type IconDefinition,
+} from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { Link, useMatchRoute } from '@tanstack/react-router'
+import classNames from 'classnames'
+import { observer } from 'mobx-react-lite'
+import {
 	createContext,
 	memo,
 	useCallback,
@@ -8,67 +45,35 @@ import React, {
 	useRef,
 	useState,
 	type CSSProperties,
-	type ReactNode,
+	type HTMLAttributes,
 	type MouseEventHandler,
 	type ReactElement,
+	type ReactNode,
 } from 'react'
-import { CSidebarNav, CNavItem, CNavLink, CSidebarBrand, CSidebarHeader, CBackdrop } from '@coreui/react'
-import {
-	type IconDefinition,
-	faFileImport,
-	faCheck,
-	faCog,
-	faClipboardList,
-	faCloud,
-	faTh,
-	faClock,
-	faPlug,
-	faDollarSign,
-	faGamepad,
-	faExternalLinkSquare,
-	faHeadset,
-	faSquareCaretRight,
-	faPuzzlePiece,
-	faInfo,
-	faStar,
-	faHatWizard,
-	faSquareRootVariable,
-	faArrowsUpToLine,
-	faArrowsDownToLine,
-} from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faGithub, faFacebook, faSlack } from '@fortawesome/free-brands-svg-icons'
-import {
-	SurfacesConfiguredTabNotifyIcon,
-	ConnectionsTabNotifyIcon,
-	SurfacesTabNotifyIcon,
-	SurfacesInstancesTabNotifyIcon,
-} from '~/Surfaces/TabNotifyIcon.js'
 import { createPortal } from 'react-dom'
-import classNames from 'classnames'
-import { useLocalStorage, useMediaQuery } from 'usehooks-ts'
-import { Link } from '@tanstack/react-router'
 import { Transition } from 'react-transition-group'
-import { observer } from 'mobx-react-lite'
+import type { ConnectionCollection } from '@companion-app/shared/Model/Connections.js'
+import { type MenuItemProps } from '~/Components/ActionMenu'
+import { ContextMenu } from '~/Components/ContextMenu'
+import { Tooltip } from '~/Components/Tooltip.js'
+import { MenuSeparator, useContextMenuState } from '~/Components/useContextMenuProps'
+import { useMobileMode } from '~/Hooks/useLayoutMode'
+import { useLocalStorage } from '~/Hooks/useLocalStorage.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { useSortedConnectionsThatHaveVariables, type ClientConnectionConfigWithId } from '~/Stores/Util.js'
-import { makeAbsolutePath } from '~/Resources/util.js'
-import { trpc } from '~/Resources/TRPC'
-import { useQuery } from '@tanstack/react-query'
-import type { ConnectionCollection } from '@companion-app/shared/Model/Connections.js'
-import { ContextMenu } from '~/Components/ContextMenu'
-import { useContextMenuState, MenuSeparator } from '~/Components/useContextMenuProps'
-import { type MenuItemData } from '~/Components/ActionMenu'
+import { ConnectionsTabNotifyIcon, SurfacesTabNotifyIcon } from '~/Surfaces/TabNotifyIcon.js'
+import { SidebarFooter, SidebarHeader } from './SidebarHeader'
 
 function foldableIcon(foldable: boolean): ReactElement {
 	return <FontAwesomeIcon icon={faArrowsDownToLine} style={{ rotate: foldable ? '-90deg' : '90deg' }} />
 }
 export interface SidebarStateProps {
-	showToggle: boolean
-	clickToggle: () => void
-	toggleEvent: EventTarget
+	mobileMode: boolean
+	handleShowSidebar: () => void
+	showSidebarEvent: EventTarget
 }
 const SidebarStateContext = createContext<SidebarStateProps | null>(null)
+const NarrowModeContext = createContext(false) // used locally for labelling: true if in narrow mode
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function useSidebarState(): SidebarStateProps {
@@ -78,19 +83,20 @@ export function useSidebarState(): SidebarStateProps {
 }
 
 export function SidebarStateProvider({ children }: React.PropsWithChildren): React.ReactNode {
-	const isOnMobile = useMediaQuery('(max-width: 991.98px)')
+	const mobileMode = useMobileMode()
 
 	const event = useMemo(() => new EventTarget(), [])
 
 	const value = useMemo(() => {
 		return {
-			showToggle: isOnMobile,
-			clickToggle: () => {
+			mobileMode: mobileMode,
+			// the next two are for the hamburger toggle
+			handleShowSidebar: () => {
 				event.dispatchEvent(new Event('show'))
 			},
-			toggleEvent: event,
+			showSidebarEvent: event,
 		} satisfies SidebarStateProps
-	}, [isOnMobile, event])
+	}, [mobileMode, event])
 
 	return <SidebarStateContext.Provider value={value}>{children}</SidebarStateContext.Provider>
 }
@@ -101,9 +107,28 @@ interface SidebarMenuItemProps {
 	icon: IconDefinition | null | 'empty'
 	notifications?: React.ComponentType<Record<string, never>>
 	path?: string
+	activePath?: string
 	onClick?: () => void
 	target?: string
 	title?: string
+}
+
+/**
+ * NarrowModePopover - creates a "tooltip" showing the label text in narrow mode; otherwise is a no-op.
+ * @param label - the tooltip text
+ */
+function NarrowModePopover({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+	const isNarrow = useContext(NarrowModeContext)
+	if (!isNarrow) return <>{children}</>
+
+	return (
+		<Tooltip.Root>
+			<Tooltip.Trigger render={children as React.ReactElement} delay={100} closeDelay={100} />
+			<Tooltip.Popup side="right" arrow noPadding>
+				{title}
+			</Tooltip.Popup>
+		</Tooltip.Root>
+	)
 }
 
 function SidebarMenuItemLabel(item: SidebarMenuItemProps) {
@@ -121,7 +146,7 @@ function SidebarMenuItemLabel(item: SidebarMenuItemProps) {
 				)}
 			</span>
 
-			<span className="flex-fill text-truncate">
+			<span className="flex-fill text-truncate full-label">
 				<span>{item.name}</span>
 				{!!item.subheading && (
 					<>
@@ -131,32 +156,62 @@ function SidebarMenuItemLabel(item: SidebarMenuItemProps) {
 				)}
 			</span>
 
-			{item.target === '_blank' && <FontAwesomeIcon icon={faExternalLinkSquare} className="ms-1" />}
+			{item.target === '_blank' && <FontAwesomeIcon icon={faExternalLinkSquare} className="ms-1 full-label" />}
 			{!!item.notifications && <item.notifications />}
 		</>
 	)
 }
 
 function SidebarMenuItem(item: SidebarMenuItemProps) {
+	const isNarrow = useContext(NarrowModeContext)
 	const onClick2 = (e: React.MouseEvent) => {
 		if (!item.onClick) return
 		e.preventDefault()
 		item.onClick()
 	}
+
+	// const groupCtx = useContext(SidebarGroupContext)
+	// Ensure the active link is visible
+	// TODO: this is a bit flawed, it doesn't allow the current group to be collapsed
+	// Maybe it could be hooked into the router so that it only changes when entering/leaving the group..
+	// useEffect(() => {
+	// 	if (active && groupCtx) groupCtx.setGroupVisible()
+	// }, [active, groupCtx])
+
+	// note: NarrowModePopover must wrap CNavLink directly to get a ref-forwarding component. It didn't work with CNavItem
 	return (
-		<CNavItem idx={item.path ?? item.name} className={item.subheading ? 'nav-two-line' : undefined}>
-			{item.path ? (
-				<CNavLink to={item.path} target={item.target} as={Link} onClick={onClick2} title={item.title}>
-					<SidebarMenuItemLabel {...item} />
-				</CNavLink>
-			) : (
-				<CNavLink onClick={onClick2} style={{ cursor: 'pointer' }} title={item.title}>
-					<SidebarMenuItemLabel {...item} />
-				</CNavLink>
-			)}
-		</CNavItem>
+		<li className={item.subheading ? 'nav-two-line' : undefined} onContextMenu={blockPropagation}>
+			<NarrowModePopover title={item.title || item.name}>
+				{item.path ? (
+					<Link
+						className="nav-link"
+						to={item.path}
+						target={item.target}
+						onClick={onClick2}
+						title={isNarrow ? undefined : item.title /* In narrow mode we put the title in the popover */}
+					>
+						<SidebarMenuItemLabel {...item} />
+					</Link>
+				) : (
+					<a
+						className="nav-link"
+						onClick={onClick2}
+						style={{ cursor: 'pointer' }}
+						title={isNarrow ? undefined : item.title}
+					>
+						<SidebarMenuItemLabel {...item} />
+					</a>
+				)}
+			</NarrowModePopover>
+		</li>
 	)
 }
+
+// const SidebarGroupContext = createContext<{
+// 	setGroupVisible: () => void
+// }>({
+// 	setGroupVisible: () => {},
+// })
 
 interface SidebarMenuItemGroupProps extends SidebarMenuItemProps {
 	children?: React.ReactNode
@@ -164,36 +219,69 @@ interface SidebarMenuItemGroupProps extends SidebarMenuItemProps {
 	groupSetVisible: (val: boolean) => void
 }
 
-function SidebarMenuItemGroup(item: SidebarMenuItemGroupProps) {
+function SidebarMenuItemGroup({ children, groupVisible, groupSetVisible, ...item }: SidebarMenuItemGroupProps) {
+	// const parentGroup = useContext(SidebarGroupContext)
+
+	// const groupContext = useMemo(
+	// 	() => ({
+	// 		setGroupVisible: () => {
+	// 			parentGroup.setGroupVisible()
+	// 			groupSetVisible(true)
+	// 		},
+	// 	}),
+	// 	[groupSetVisible, parentGroup]
+	// )
+
 	return (
-		<CNavGroup
+		<SidebarNavGroup
 			toggler={<SidebarMenuItemLabel {...item} />}
+			title={item.title || item.name + ' group'}
 			to={item.path}
-			visible={item.groupVisible}
-			setVisible={item.groupSetVisible}
+			activePath={item.activePath}
+			visible={groupVisible}
+			setVisible={groupSetVisible}
 		>
-			{item.children}
-		</CNavGroup>
+			{/* <SidebarGroupContext.Provider value={groupContext}> */}
+			{children}
+			{/* </SidebarGroupContext.Provider> */}
+		</SidebarNavGroup>
 	)
 }
 
 export const MySidebar = memo(function MySidebar() {
-	const { whatsNewModal, showWizard } = useContext(RootAppStoreContext)
+	const { whatsNewModal, wizardOpen } = useContext(RootAppStoreContext)
 	// unfold-able, not un-foldable! Unfortunately "unfoldable" is CoreUI terminology, so probably shouldn't be changed.
-	const [unfoldable, setUnfoldable] = useLocalStorage('sidebar-foldable', false)
-	const sidebarState = useSidebarState()
+	const [unfoldable, setUnfoldable] = useLocalStorage('sidebar_foldable', false)
+	const [narrowMode, setNarrowMode] = useLocalStorage('sidebar_narrow_mode', false)
+	const { mobileMode } = useSidebarState()
 
 	const [hideHelp, setHideHelp] = useLocalStorage('hide_sidebar_help', false)
 	const showHelpButtons = !hideHelp
+	const [hideModuleVars, setHideModuleVars] = useLocalStorage('hide_sidebar_module_vars', false)
 	const [accordionMode, setAccordionMode] = useLocalStorage('sidebar_auto_collapse', false)
+	// tempNarrow is used in unfoldable mode to make it temporarily narrow on click, so it is independent of narrowMode
+	const [tempNarrow, setTempNarrow] = useState(false)
 
-	const [surfacesGroupVis, setSurfacesGroupVis] = useState(false)
-	const [variablesGroupVis, setVariablesGroupVis] = useState(false)
-	const [settingsGroupVis, setSettingsGroupVis] = useState(false)
-	const [ibuttonsGroupVis, setIbuttonsGroupVis] = useState(false)
-	const [supportGroupVis, setSupportGroupVis] = useState(false)
+	const [surfacesGroupVis, setSurfacesGroupVis] = useLocalStorage('surface_group_vis', false)
+	const [variablesGroupVis, setVariablesGroupVis] = useLocalStorage('variables_group_vis', false)
+	const [settingsGroupVis, setSettingsGroupVis] = useLocalStorage('settings_group_vis', false)
+	const [ibuttonsGroupVis, setIbuttonsGroupVis] = useLocalStorage('ibuttons_group_vis', false)
+	const [supportGroupVis, setSupportGroupVis] = useLocalStorage('support_group_vis', false)
 
-	const doToggle = useCallback(() => setUnfoldable((val) => !val), [setUnfoldable])
+	const toggleUnfoldable = useCallback(() => {
+		setUnfoldable((val) => {
+			// enabling folding → fold now; disabling folding → unfold now
+			setTempNarrow(!val)
+			return !val
+		})
+	}, [setUnfoldable])
+
+	const toggleNarrowMode = useCallback(() => {
+		setNarrowMode((val) => {
+			if (!val) setTempNarrow(false) // so sidebar unfolds when we later turn narrowMode off
+			return !val
+		})
+	}, [setNarrowMode])
 
 	const whatsNewOpen = useCallback(() => whatsNewModal.current?.show(), [whatsNewModal])
 
@@ -220,19 +308,19 @@ export const MySidebar = memo(function MySidebar() {
 	)
 
 	// note: the context menu has to be defined inside the component to use the internal states as well as `whatsNewOpen` which is a useCallback
-	const contextMenuItems: MenuItemData[] = useMemo(
+	const contextMenuItems: MenuItemProps[] = useMemo(
 		() => [
 			{
 				id: 'collapse-all',
 				label: 'Collapse All Groups',
-				to: () => expandAllGroups(false),
+				do: () => expandAllGroups(false),
 				tooltip: 'Collapse all top-level groups in the sidebar.',
 			},
 			{
 				// not sure this is useful
 				id: 'expand-all',
 				label: 'Expand All Groups',
-				to: () => {
+				do: () => {
 					expandAllGroups(true)
 					setAccordionMode(false)
 				},
@@ -242,174 +330,194 @@ export const MySidebar = memo(function MySidebar() {
 				id: 'accordion-mode',
 				label: 'Auto-Collapse Groups',
 				icon: accordionMode ? faCheck : undefined,
-				to: () => setAccordionMode(!accordionMode),
+				do: () => setAccordionMode((value) => !value),
 				tooltip:
 					'Allow only one top-level group to be expanded at a time: opening one top-level group closes all others.',
 			},
 			MenuSeparator,
-			...(sidebarState.showToggle
+			{
+				id: 'hide-module-vars',
+				label: hideModuleVars ? 'Show Module Variables' : 'Hide Module Variables',
+				icon: faDollarSign,
+				do: () => setHideModuleVars((value) => !value),
+				tooltip:
+					'Toggle whether to show individual modules in the sidebar Variables group. They are always accessible from the main Variables page.',
+			},
+			{
+				id: 'hide-help',
+				label: hideHelp ? 'Show Sidebar Help' : 'Hide Sidebar Help',
+				icon: hideHelp ? faArrowsUpToLine : faArrowsDownToLine,
+				do: () => setHideHelp((value) => !value),
+				tooltip: 'Free up some space: the help items are available from the help menu in the top-right corner.',
+			},
+			MenuSeparator,
+			...(mobileMode || narrowMode
 				? []
 				: [
 						{
 							id: 'hide-sidebar',
-							label: unfoldable ? 'Fixed-width Sidebar' : 'Folding Sidebar',
+							label: unfoldable ? 'Full-width Sidebar' : 'Folding Sidebar',
 							icon: () => foldableIcon(unfoldable),
-							to: doToggle,
+							do: toggleUnfoldable,
 							tooltip:
 								'Toggle between a static, fixed-width sidebar and dynamic-width sidebar that expands when the mouse is over it.',
 						},
 					]),
 			{
-				id: 'hide-help',
-				label: hideHelp ? 'Show Sidebar Help' : 'Hide Sidebar Help',
-				icon: hideHelp ? faArrowsUpToLine : faArrowsDownToLine,
-				to: () => setHideHelp(!hideHelp),
-				tooltip: 'Free up some space: the help items are available from the help menu in the top-right corner.',
+				id: 'narrow-sidebar',
+				label: 'Keep Sidebar Folded',
+				icon: narrowMode ? faCheck : undefined,
+				do: toggleNarrowMode,
+				tooltip: 'When active, the sidebar remains narrow.',
 			},
 		],
-		[unfoldable, doToggle, hideHelp, expandAllGroups, accordionMode, setHideHelp, setAccordionMode, sidebarState]
+		[
+			accordionMode,
+			mobileMode,
+			narrowMode,
+			unfoldable,
+			toggleUnfoldable,
+			toggleNarrowMode,
+			hideModuleVars,
+			hideHelp,
+			expandAllGroups,
+			setAccordionMode,
+			setHideModuleVars,
+			setHideHelp,
+		]
 	)
 
 	// we need the following primarily to provide the onContextMenu callback, which resides in the parent, not the component.
 	const contextState = useContextMenuState(contextMenuItems)
+	const DontSetOrUnset: React.Dispatch<React.SetStateAction<boolean>> = () => {}
 
 	return (
-		<CSidebar unfoldable={unfoldable} onContextMenu={contextState.onContextMenu}>
-			<ContextMenu {...contextState} />
-			<CSidebarHeader className="brand">
-				<CSidebarBrand>
-					<div className="sidebar-brand-full">
-						<img src={makeAbsolutePath('/img/icons/48x48.png')} height="30" alt="logo" />
-						&nbsp; Bitfocus&nbsp;
-						<span style={{ fontWeight: 'bold' }}>Companion</span>
-					</div>
-					<div className="sidebar-brand-narrow">
-						<img src={makeAbsolutePath('/img/icons/48x48.png')} height="42px" alt="logo" />
-					</div>
-				</CSidebarBrand>
-			</CSidebarHeader>
-			<CSidebarNav className="nav-main-scroller">
-				<SidebarMenuItem
-					name="Connections"
-					icon={faPlug}
-					notifications={ConnectionsTabNotifyIcon}
-					path="/connections"
-				/>
-				<SidebarMenuItem name="Buttons" icon={faTh} path="/buttons" />
-				<SidebarMenuItemGroup
-					name="Surfaces"
-					icon={faGamepad}
-					notifications={SurfacesTabNotifyIcon}
-					path="/surfaces"
-					groupVisible={surfacesGroupVis}
-					groupSetVisible={(expand) => smartExpand(setSurfacesGroupVis, expand)}
-				>
+		<NarrowModeContext.Provider value={tempNarrow || narrowMode}>
+			<SidebarRoot
+				unfoldable={unfoldable}
+				narrow={tempNarrow || narrowMode}
+				setNarrow={narrowMode ? DontSetOrUnset : setTempNarrow}
+				onContextMenu={contextState.onContextMenu}
+			>
+				<ContextMenu {...contextState} />
+				<SidebarHeader />
+
+				<ul className="sidebar-nav nav-main-scroller">
 					<SidebarMenuItem
-						name="Configured"
-						icon={null}
-						notifications={SurfacesConfiguredTabNotifyIcon}
-						path="/surfaces/configured"
+						name="Connections"
+						icon={faPlug}
+						notifications={ConnectionsTabNotifyIcon}
+						path="/connections"
 					/>
-					<SidebarMenuItem
-						name="Integrations"
-						notifications={SurfacesInstancesTabNotifyIcon}
-						icon={null}
-						path="/surfaces/integrations"
-					/>
-					<SidebarMenuItem name="Remote" icon={null} path="/surfaces/remote" />
-				</SidebarMenuItemGroup>
-				<SidebarMenuItem name="Triggers" icon={faClock} path="/triggers" />
-				<SidebarMenuItemGroup
-					name="Variables"
-					icon={faDollarSign}
-					path="/variables"
-					groupVisible={variablesGroupVis}
-					groupSetVisible={(expand) => smartExpand(setVariablesGroupVis, expand)}
-				>
-					<SidebarMenuItem name="Custom Variables" icon={faDollarSign} path="/variables/custom" />
-					<SidebarMenuItem name="Expression Variables" icon={faSquareRootVariable} path="/variables/expression" />
-					<SidebarMenuItem name="Internal" icon={null} path="/variables/connection/internal" />
-					<SidebarVariablesGroups />
-				</SidebarMenuItemGroup>
-				<SidebarMenuItem name="Modules" icon={faPuzzlePiece} path="/modules" />
-				<SidebarMenuItemGroup
-					name="Settings"
-					icon={faCog}
-					path="/settings"
-					groupVisible={settingsGroupVis}
-					groupSetVisible={(expand) => smartExpand(setSettingsGroupVis, expand)}
-				>
-					<SidebarMenuItem name="Configuration Wizard" icon={faHatWizard} onClick={showWizard} />
-					<SidebarMenuItem name="General" icon={null} path="/settings/general" />
-					<SidebarMenuItem name="Buttons" icon={null} path="/settings/buttons" />
-					<SidebarMenuItem name="Surfaces" icon={null} path="/settings/surfaces" />
-					<SidebarMenuItem name="Protocols" icon={null} path="/settings/protocols" />
-					<SidebarMenuItem name="Backups" icon={null} path="/settings/backups" />
-					<SidebarMenuItem name="Advanced" icon={null} path="/settings/advanced" />
-				</SidebarMenuItemGroup>
-				<SidebarMenuItem name="Import / Export" icon={faFileImport} path="/import-export" />
-				<SidebarMenuItem name="Log" icon={faClipboardList} path="/log" />
-				{window.localStorage.getItem('show_companion_cloud') === '1' && (
-					<SidebarMenuItem name="Cloud" icon={faCloud} path="/cloud" />
-				)}
-				<SidebarMenuItemGroup
-					name="Interactive Buttons"
-					icon={faSquareCaretRight}
-					groupVisible={ibuttonsGroupVis}
-					groupSetVisible={(expand) => smartExpand(setIbuttonsGroupVis, expand)}
-				>
-					<SidebarMenuItem name="Emulator" icon={null} path="/emulator" target="_blank" />
-					<SidebarMenuItem name="Web buttons" icon={null} path="/tablet" target="_blank" />
-				</SidebarMenuItemGroup>
-			</CSidebarNav>
-			<div className="sidebar-bottom-shadow-container">
-				<div className="sidebar-bottom-shadow" />
-			</div>
-			{showHelpButtons && (
-				<CSidebarNav className="nav-secondary border-top">
-					<SidebarMenuItem name="What's New" icon={faStar} onClick={whatsNewOpen} />
-					<SidebarMenuItem name="User Guide" icon={faInfo} path="/user-guide/" target="_blank" />
+					<SidebarMenuItem name="Buttons" icon={faTableCells} path="/buttons" />
+					<SidebarMenuItem name="Image Library" icon={faImages} path="/image-library" />
 					<SidebarMenuItemGroup
-						name="Support"
-						icon={faHeadset}
-						groupVisible={supportGroupVis}
-						groupSetVisible={(expand) => smartExpand(setSupportGroupVis, expand)}
+						name="Surfaces"
+						icon={faGamepad}
+						notifications={SurfacesTabNotifyIcon}
+						path="/surfaces"
+						groupVisible={surfacesGroupVis}
+						groupSetVisible={(expand) => smartExpand(setSurfacesGroupVis, expand)}
 					>
-						<SidebarMenuItem
-							name="Report an Issue"
-							title="Report bugs or request features on GitHub."
-							icon={faGithub}
-							path="https://l.companion.free/q/QZbI6mdNd"
-							target="_blank"
-						/>
-						<SidebarMenuItem
-							name="Community Forum"
-							title="Share your experience or ask questions to your Companions."
-							icon={faFacebook}
-							path="https://l.companion.free/q/6pc9ciJR5"
-							target="_blank"
-						/>
-						<SidebarMenuItem
-							name="Slack Chat"
-							title="Discuss technical issues on Slack."
-							icon={faSlack}
-							path="https://l.companion.free/q/OWxbBnDKG"
-							target="_blank"
-						/>
-						<SidebarMenuItem
-							name="Sponsor"
-							title="Contribute funds to Bitfocus Companion."
-							icon={faDollarSign}
-							path="https://l.companion.free/q/6PtdAvZab"
-							target="_blank"
-						/>
+						<SidebarMenuItem name="Remote" icon={faPeopleArrows} path="/surfaces/remote" />
 					</SidebarMenuItemGroup>
-				</CSidebarNav>
-			)}
-			<CSidebarHeader className="border-top d-none d-lg-flex sidebar-header-toggler">
-				<SidebarTogglerAndVersion doToggle={doToggle} />
-			</CSidebarHeader>
-		</CSidebar>
+					<SidebarMenuItem name="Triggers" icon={faClock} path="/triggers" />
+					<SidebarMenuItemGroup
+						name="Variables"
+						icon={faDollarSign}
+						path="/variables"
+						groupVisible={variablesGroupVis}
+						groupSetVisible={(expand) => smartExpand(setVariablesGroupVis, expand)}
+					>
+						<SidebarMenuItem name="Custom Variables" icon={faDollarSign} path="/variables/custom" />
+						<SidebarMenuItem name="Expression Variables" icon={faSquareRootVariable} path="/variables/expression" />
+						<SidebarMenuItem name="Internal" icon={faToolbox} path="/variables/connection/internal" />
+						{!hideModuleVars && <SidebarVariablesGroups />}
+					</SidebarMenuItemGroup>
+					<SidebarMenuItem name="Modules" icon={faPuzzlePiece} path="/modules" />
+					<SidebarMenuItemGroup
+						name="Settings"
+						icon={faCog}
+						path="/settings"
+						groupVisible={settingsGroupVis}
+						groupSetVisible={(expand) => smartExpand(setSettingsGroupVis, expand)}
+					>
+						<SidebarMenuItem name="Configuration Wizard" icon={faHatWizard} onClick={() => wizardOpen.set(true)} />
+						<SidebarMenuItem name="General" icon={faScrewdriver} path="/settings/general" />
+						<SidebarMenuItem name="Buttons" icon={faTableCells} path="/settings/buttons" />
+						<SidebarMenuItem
+							name="Surfaces"
+							icon={faGamepad}
+							path="/surfaces/integrations"
+							title="Surface settings have moved to the main Surfaces Page."
+						/>
+						<SidebarMenuItem name="Protocols" icon={faNetworkWired} path="/settings/protocols" />
+						<SidebarMenuItem name="Backups" icon={faFloppyDisk} path="/settings/backups" />
+						<SidebarMenuItem name="Advanced" icon={faHammer} path="/settings/advanced" />
+					</SidebarMenuItemGroup>
+					<SidebarMenuItem name="Import / Export" icon={faFileImport} path="/import-export" />
+					<SidebarMenuItem name="Log" icon={faClipboardList} path="/log" />
+					{window.localStorage.getItem('show_companion_cloud') === '1' && (
+						<SidebarMenuItem name="Cloud" icon={faCloud} path="/cloud" />
+					)}
+					<SidebarMenuItemGroup
+						name="Interactive Buttons"
+						icon={faSquareCaretRight}
+						groupVisible={ibuttonsGroupVis}
+						groupSetVisible={(expand) => smartExpand(setIbuttonsGroupVis, expand)}
+					>
+						<SidebarMenuItem name="Emulator" icon={faTabletScreenButton} path="/emulator" target="_blank" />
+						<SidebarMenuItem name="Web buttons" icon={faTable} path="/tablet" target="_blank" />
+					</SidebarMenuItemGroup>
+				</ul>
+				<div className="sidebar-bottom-shadow-container">
+					<div className="sidebar-bottom-shadow" />
+				</div>
+				{showHelpButtons && (
+					<ul className="sidebar-nav nav-secondary border-top">
+						<SidebarMenuItem name="What's New" icon={faStar} onClick={whatsNewOpen} />
+						<SidebarMenuItem name="User Guide" icon={faInfo} path="/user-guide/" target="_blank" />
+						<SidebarMenuItemGroup
+							name="Support"
+							title="Support options (click to expand)."
+							icon={faHeadset}
+							groupVisible={supportGroupVis}
+							groupSetVisible={(expand) => smartExpand(setSupportGroupVis, expand)}
+						>
+							<SidebarMenuItem
+								name="Report an Issue"
+								title="Report bugs or request features on GitHub."
+								icon={faGithub}
+								path="https://l.companion.free/q/QZbI6mdNd"
+								target="_blank"
+							/>
+							<SidebarMenuItem
+								name="Community Forum"
+								title="Share your experience or ask questions to your Companions on Facebook."
+								icon={faFacebook}
+								path="https://l.companion.free/q/6pc9ciJR5"
+								target="_blank"
+							/>
+							<SidebarMenuItem
+								name="Slack Chat"
+								title="Discuss technical issues on Slack."
+								icon={faSlack}
+								path="https://l.companion.free/q/OWxbBnDKG"
+								target="_blank"
+							/>
+							<SidebarMenuItem
+								name="Sponsor"
+								title="Contribute funds to Bitfocus Companion."
+								icon={faDollarSign}
+								path="https://l.companion.free/q/6PtdAvZab"
+								target="_blank"
+							/>
+						</SidebarMenuItemGroup>
+					</ul>
+				)}
+				{!narrowMode && <SidebarFooter onContextMenu={contextState.onContextMenu} />}
+			</SidebarRoot>
+		</NarrowModeContext.Provider>
 	)
 })
 
@@ -498,64 +606,37 @@ const SidebarMenuItemSubGroup = observer(function SidebarMenuItemSubGroup(props:
 	)
 })
 
-const SidebarTogglerAndVersion = observer(function SidebarTogglerAndVersion({ doToggle }: { doToggle: () => void }) {
-	const versionInfo = useQuery(trpc.appInfo.version.queryOptions())
-
-	let versionString = ''
-	let versionSubheading = ''
-
-	if (versionInfo.data) {
-		if (versionInfo.data.appBuild.includes('-stable-')) {
-			versionString = `v${versionInfo.data.appVersion}`
-		} else {
-			// split appBuild into parts.
-			const splitPoint = versionInfo.data.appBuild.indexOf('-')
-			if (splitPoint === -1) {
-				versionString = `v${versionInfo.data.appBuild}`
-			} else {
-				versionString = `v${versionInfo.data.appBuild.substring(0, splitPoint)}`
-				versionSubheading = versionInfo.data.appBuild.substring(splitPoint + 1)
-			}
-		}
-	}
-
-	return (
-		<div className="nav-link sidebar-header-toggler2">
-			<span className="nav-icon-wrapper" onClick={doToggle}>
-				<span className="nav-icon sidebar-toggler"></span>
-			</span>
-
-			<span className="flex-fill text-truncate">
-				<span className="version">{versionString || 'Unknown'}</span>
-				{/* <br /> */}
-				<span className="version-sub">{versionSubheading}</span>
-			</span>
-		</div>
-	)
-})
-
 /**
  * This is a stripped down copy of CSidebar from coreui-react.
  * Since changing the sidebar, it no longer makes sense to be able to hide it entirely,
  * but coreui doesn't give us the tools to use the toggling behaviour on mobile and avoid allowing it to be hidden on desktop.
  * There was also a bug on mobile where it took 2 clicks to show, because we are maintaining a boolean state, which it was not updating.
  */
-interface CSidebarProps {
+interface SidebarRootProps {
 	/**
 	 * Expand narrowed sidebar on hover.
 	 */
 	unfoldable?: boolean
-	onContextMenu?: MouseEventHandler<HTMLDivElement>
+	narrow: boolean
+	setNarrow: React.Dispatch<React.SetStateAction<boolean>>
+	onContextMenu: MouseEventHandler<HTMLDivElement>
 }
-function CSidebar({ children, unfoldable, onContextMenu }: React.PropsWithChildren<CSidebarProps>) {
+function SidebarRoot({
+	children,
+	unfoldable,
+	narrow,
+	setNarrow,
+	onContextMenu,
+}: React.PropsWithChildren<SidebarRootProps>) {
 	const sidebarRef = useRef<HTMLDivElement>(null)
 
 	const [visibleMobile, setVisibleMobile] = useState<boolean>(false)
 
-	const sidebarState = useSidebarState()
+	const { showSidebarEvent: toggleEvent, mobileMode } = useSidebarState()
 
+	// handle the "hamburger" to show the sidebar in mobile mode
 	useEffect(() => {
-		const event = sidebarState.toggleEvent
+		const event = toggleEvent
 		const handler = () => {
 			setVisibleMobile(true)
 		}
@@ -564,92 +645,135 @@ function CSidebar({ children, unfoldable, onContextMenu }: React.PropsWithChildr
 		return () => {
 			event.removeEventListener('show', handler)
 		}
-	}, [sidebarState.toggleEvent, setVisibleMobile])
+	}, [toggleEvent, setVisibleMobile])
 
+	// default behavior in mobile mode: hide the sidebar
 	useEffect(() => {
-		if (sidebarState.showToggle) setVisibleMobile(false)
-	}, [sidebarState.showToggle])
+		if (mobileMode) setVisibleMobile(false)
+	}, [mobileMode])
 
+	// handle clicks in the sidebar for mobile mode and "unfolding" mode
 	const handleOnClick = useCallback(
 		(event: MouseEvent) => {
 			const target = event.target
+			// note: middle-click currently opens the nav-link target in a new tab, so it makes sense to close the sidebar in that case.
+			// Only context-menu should leave the sidebar alone, since it is acting on the current sidebar, hence "event.button === 2".
 			if (!(target instanceof Element) || event.button === 2) return // leave context menu alone (note button# is OS-independent)
 
-			// If the user clicked on the text, it's not a nav-link so the original code failed to close the navbar
-			// Instead we search up the DOM for a nav-link.
+			if (target.closest('.block-collapse')) return // ignore clicks on certain elements
+
+			// The footer toggler only opens the context menu now; folding is toggled from there (see toggleUnfoldable).
+			if (target.closest('.sidebar-footer2')) return
+
+			// If the user clicked on the text of a sidebar "button", it's not a nav-link so we need to
+			// search up the DOM for a nav-link to capture all possibilities.
 			const navLink = target.closest('.nav-link')
 			const navGroupToggle = navLink?.closest('.nav-group-toggle')
-			if (navLink && !navGroupToggle && sidebarState.showToggle) {
+			if (!navLink || navGroupToggle) return // only act for click on sidebar elements (excludes the context-menu, blank areas,...)
+
+			// if we got here the user clicked on a nav-link, not a non-active area, group-toggle or context-menu item
+			if (mobileMode) {
+				// Mobile mode ("hamburger" toggle reveals sidebar; click on item hides sidebar)
 				setVisibleMobile(false)
+			} else if (unfoldable) {
+				// In folding mode, clicking a nav-link makes the sidebar temporarily narrow so it folds after the click.
+				setTimeout(() => setNarrow(true), 0) // we need to defer this action or navigation can fail due to an apparent race with re-rendering the sidebar.
 			}
 		},
-		[sidebarState.showToggle]
+		[setNarrow, mobileMode, unfoldable]
 	)
 
-	const handleKeyup = useCallback(
+	// if in "temporary narrow-mode" return to folding mode after the mouse leaves the sidebar
+	// note that in "permanent" narrow-mode, setNarrow is passed as a no-op, so this callback is active only when not in narrow-mode
+	const handleMouseLeave = useCallback(() => {
+		if (narrow) setNarrow(false)
+	}, [narrow, setNarrow])
+
+	const handleKeyOrClickOutside = useCallback(
 		(event: Event) => {
-			if (sidebarState.showToggle && sidebarRef.current && !sidebarRef.current.contains(event.target as HTMLElement)) {
+			if (mobileMode && sidebarRef.current && !sidebarRef.current.contains(event.target as HTMLElement)) {
 				setVisibleMobile(false)
 			}
 		},
-		[sidebarState.showToggle, sidebarRef]
-	)
-	const handleClickOutside = useCallback(
-		(event: Event) => {
-			if (sidebarState.showToggle && sidebarRef.current && !sidebarRef.current.contains(event.target as HTMLElement)) {
-				setVisibleMobile(false)
-			}
-		},
-		[sidebarState.showToggle, sidebarRef]
+		[mobileMode, sidebarRef]
 	)
 
 	useEffect(() => {
-		window.addEventListener('mouseup', handleClickOutside)
-		window.addEventListener('keyup', handleKeyup)
+		window.addEventListener('mouseup', handleKeyOrClickOutside)
+		window.addEventListener('keyup', handleKeyOrClickOutside)
 
 		const sideBarElement = sidebarRef.current
 
 		sideBarElement?.addEventListener('mouseup', handleOnClick)
 
 		return () => {
-			window.removeEventListener('mouseup', handleClickOutside)
-			window.removeEventListener('keyup', handleKeyup)
+			window.removeEventListener('mouseup', handleKeyOrClickOutside)
+			window.removeEventListener('keyup', handleKeyOrClickOutside)
 
 			sideBarElement?.removeEventListener('mouseup', handleOnClick)
 		}
-	}, [sidebarRef, handleOnClick, handleKeyup, handleClickOutside])
+	}, [sidebarRef, handleOnClick, handleKeyOrClickOutside])
 
 	return (
 		<>
 			<div
 				className={classNames('sidebar sidebar-dark sidebar-fixed', {
 					// [`sidebar-${colorScheme}`]: colorScheme,
-					// 'sidebar-narrow': narrow,
+					'sidebar-narrow': narrow,
+					//'no-transition-all': narrow, // optional, but this works only after very long transitions (modules page)
 					// 'sidebar-overlaid': overlaid,
 					// [`sidebar-${placement}`]: placement,
 					// [`sidebar-${position}`]: position,
 					// [`sidebar-${size}`]: size,
-					'sidebar-narrow-unfoldable': unfoldable, // // unfold-able. This is a CoreUI class so can't be renamed.
-					show: sidebarState.showToggle && visibleMobile,
-					// hide: visibleDesktop === false && !sidebarState.showToggle && !overlaid,
+					'sidebar-narrow-unfoldable': unfoldable, // // unfold-able. This is a CoreUI class so can't be renamed for clarity.
+					show: mobileMode && visibleMobile,
+					// hide: visibleDesktop === false && !showToggle && !overlaid,
 				})}
 				ref={sidebarRef}
+				onMouseLeave={handleMouseLeave}
 				onContextMenu={onContextMenu}
 			>
 				{children}
 			</div>
 			{typeof window !== 'undefined' &&
-				sidebarState.showToggle &&
-				createPortal(
-					<CBackdrop className="sidebar-backdrop" visible={sidebarState.showToggle && visibleMobile} />,
-					document.body
-				)}
+				mobileMode &&
+				createPortal(<Backdrop className="sidebar-backdrop" visible={mobileMode && visibleMobile} />, document.body)}
 		</>
 	)
 }
 
-interface CNavGroupProps {
+interface BackdropProps extends HTMLAttributes<HTMLDivElement> {
+	/**
+	 * A string of all className you want applied to the base component.
+	 */
+	className?: string
+	/**
+	 * Toggle the visibility of modal component.
+	 */
+	visible?: boolean
+}
+
+function Backdrop({ className = 'modal-backdrop', visible, ...rest }: BackdropProps) {
+	const backdropRef = useRef<HTMLDivElement>(null)
+
+	return (
+		<Transition in={visible} mountOnEnter nodeRef={backdropRef} timeout={150} unmountOnExit>
+			{(state) => (
+				<div
+					className={classNames(className, 'fade', {
+						show: state === 'entered',
+					})}
+					{...rest}
+					ref={backdropRef}
+				/>
+			)}
+		</Transition>
+	)
+}
+
+interface SidebarNavGroupProps {
 	to?: string
+	activePath?: string
 
 	/**
 	 * A string of all className you want applied to the component.
@@ -664,6 +788,11 @@ interface CNavGroupProps {
 	 */
 	toggler: ReactNode
 	/**
+	 * Set group toggler title (popover) in narrow mode.
+	 */
+	title: ReactNode
+
+	/**
 	 * Show nav group items.
 	 */
 	visible: boolean
@@ -673,25 +802,39 @@ interface CNavGroupProps {
 /*
  * A variant of CNavGroup from coreui-react that allows for making the group item be a link
  */
-function CNavGroup({
+function SidebarNavGroup({
 	children,
 	to,
+	activePath,
 	className,
 	compact,
 	toggler,
+	title,
 	visible,
 	setVisible,
 	...rest
-}: React.PropsWithChildren<CNavGroupProps>) {
+}: React.PropsWithChildren<SidebarNavGroupProps>) {
 	const [height, setHeight] = useState<number | string>()
 	const navItemsRef = useRef<HTMLUListElement>(null)
-
+	const matchRoute = useMatchRoute()
 	//const [_visible, setVisible] = useState(Boolean(visible))
 
-	const handleTogglerOnCLick = (event: React.MouseEvent<HTMLElement>) => {
-		event.preventDefault()
-		// but don't stop propagation, or it will prevent context-menus
-		setVisible(!visible)
+	const handleTogglerOnClick = (e: React.MouseEvent<HTMLElement>) => {
+		//event.preventDefault() // don't do this now that the action is taking place on Link
+		// and don't stop propagation, or it will prevent context-menus
+		if (!(e.target instanceof Element)) return
+		// if clicking on the caret, which is ::after, the target class will be it's "parent"
+		// otherwise, clicking on the nav-link parts of the component, the target will be a child of nav-group-toggle
+		if (
+			e.target.classList.contains('nav-group-toggle') ||
+			e.target.closest('.toggle-basic') ||
+			(to && matchRoute({ to })) // note: the guard isn't strictly necessary since the previous condition implicitly excludes undefined `to`
+		) {
+			setVisible(!visible)
+		} else {
+			// open but don't close the group if clicking on a nav element. (Option: close if already on that element?)
+			setVisible(true)
+		}
 	}
 
 	const style: CSSProperties = {
@@ -724,31 +867,32 @@ function CNavGroup({
 	const transitionStyles = {
 		entering: { display: 'block', height: height },
 		entered: { display: 'block', height: height },
-		exiting: { display: 'block', height: height },
+		exiting: { height: height }, // adding display: block here causes it to bounce in narrow-moode when closing hides the scrollbar
 		exited: { height: height },
 		unmounted: {},
 	}
 
+	// note: we need nav-link on both the div and Link/span elements for the sidebar to format correctly
+	// also note: the <div> around the toggler Link/span creates the split-button effect by placing the ::after caret
+	// relative to the outer <div> rather than relative to the Link/span element.
 	return (
-		<li className={classNames('nav-group', { show: visible }, className)} {...rest}>
-			{to ? (
-				<div
-					className="nav-link nav-group-toggle nav-group-toggle-link"
-					onClick={(event) => handleTogglerOnCLick(event)}
-				>
-					<Link to={to} className="nav-link">
-						{toggler}
-					</Link>
+		<li className={classNames('nav-group', { show: visible }, className)} onContextMenu={blockPropagation} {...rest}>
+			<NarrowModePopover title={title}>
+				<div className="nav-link nav-group-toggle" onClick={handleTogglerOnClick}>
+					{to ? (
+						<Link
+							to={to}
+							className={classNames('nav-link', {
+								active: !!activePath && !!matchRoute({ to: activePath, fuzzy: true }),
+							})}
+						>
+							{toggler}
+						</Link>
+					) : (
+						<span className="nav-link toggle-basic">{toggler}</span>
+					)}
 				</div>
-			) : (
-				<a
-					className="nav-link nav-group-toggle nav-group-toggle-basic"
-					onClick={(event) => handleTogglerOnCLick(event)}
-				>
-					{toggler}
-				</a>
-			)}
-
+			</NarrowModePopover>
 			<Transition
 				in={visible}
 				nodeRef={navItemsRef}
@@ -776,4 +920,8 @@ function CNavGroup({
 			</Transition>
 		</li>
 	)
+}
+
+const blockPropagation = (e: React.MouseEvent) => {
+	e.stopPropagation()
 }

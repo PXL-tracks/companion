@@ -1,18 +1,18 @@
-import LogController from '../Log/Controller.js'
-import path from 'path'
+import path from 'node:path'
 import fs from 'fs-extra'
-import { validateManifest, type ModuleManifest } from '@companion-module/base/manifest'
+import semver from 'semver'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import type { ModuleDisplayInfo } from '@companion-app/shared/Model/ModuleInfo.js'
+import type { SomeModuleManifest } from '@companion-app/shared/Model/ModuleManifest.js'
+import { assertNever } from '@companion-app/shared/Util.js'
 import {
 	validateManifest as validateManifestOld,
 	type ModuleManifest as ModuleManifestOld,
 } from '@companion-module/base-old'
-import type { ConnectionModuleVersionInfo, SomeModuleVersionInfo, SurfaceModuleVersionInfo } from './Types.js'
-import type { ModuleDisplayInfo } from '@companion-app/shared/Model/ModuleInfo.js'
-import semver from 'semver'
-import { assertNever } from '@companion-app/shared/Util.js'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
-import type { SomeModuleManifest } from '@companion-app/shared/Model/ModuleManifest.js'
+import { validateManifest, type ModuleManifest } from '@companion-module/base/manifest'
 import { validateSurfaceManifest, type SurfaceModuleManifest } from '@companion-surface/base'
+import LogController from '../Log/Controller.js'
+import type { ConnectionModuleVersionInfo, SomeModuleVersionInfo, SurfaceModuleVersionInfo } from './Types.js'
 
 export class InstanceModuleScanner {
 	readonly #logger = LogController.createLogger('Instance/ModuleScanner')
@@ -66,23 +66,47 @@ export class InstanceModuleScanner {
 			}
 			const manifestJsonStr = await fs.readFile(manifestPath)
 			const manifestJson: SomeModuleManifest = JSON.parse(manifestJsonStr.toString())
+			const manifestType = manifestJson.type
+
+			// A self-contained build (e.g. produced by `yarn package`) bundles its base library and so declares it as a
+			// dependency nowhere, whereas a source checkout always declares it - even before `node_modules` is installed.
+			// So a module which doesn't depend on its base library is a packaged build, and its manifest apiVersion can be
+			// trusted. This catches builds dropped into the dev folder without the `DEBUG-PACKAGED`/`pkg` layout.
+			if (!isPackaged) {
+				const baseLibName = manifestType === 'surface' ? '@companion-surface/base' : '@companion-module/base'
+				if (!(await this.#moduleDeclaresDependency(fullpath, baseLibName))) {
+					isPackaged = true
+				}
+			}
 
 			// Parse the manifest based on the type
 			if (manifestJson.type === undefined) {
 				return await this.#parseConnectionManifest(manifestJson, fullpath, isPackaged)
 			} else if (manifestJson.type === 'connection') {
-				// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 				return await this.#parseConnectionV2Manifest(manifestJson as ModuleManifest, fullpath, isPackaged)
 			} else if (manifestJson.type === 'surface') {
 				return await this.#parseSurfaceManifest(manifestJson, fullpath, isPackaged)
 			} else {
-				assertNever(manifestJson.type)
-				throw new Error(`Unknown module type "${manifestJson.type}" in manifest`)
+				assertNever(manifestJson)
+				throw new Error(`Unknown module type "${manifestType}" in manifest`)
 			}
 		} catch (e) {
 			this.#logger.silly(`Error loading module from ${fullpath}`, e)
 			this.#logger.error(`Error loading module from "${fullpath}": ` + e)
 			return undefined
+		}
+	}
+
+	/**
+	 * Check whether a module's own `package.json` declares the given dependency in any dependency field.
+	 * A missing or unparsable `package.json` is treated as not declaring it.
+	 */
+	async #moduleDeclaresDependency(basePath: string, name: string): Promise<boolean> {
+		try {
+			const pkg = JSON.parse(await fs.readFile(path.join(basePath, 'package.json'), 'utf-8'))
+			return !!(pkg.dependencies?.[name] || pkg.devDependencies?.[name])
+		} catch {
+			return false
 		}
 	}
 
@@ -98,19 +122,20 @@ export class InstanceModuleScanner {
 		const helpPath = path.join(fullpath, 'companion/HELP.md')
 		const hasHelp = await fs.pathExists(helpPath)
 
-		let products = manifestJson.products.map((p) => `${manifestJson.manufacturer}: ${p}`)
-		if (products.length === 0) {
-			products = [manifestJson.manufacturer]
-		}
-
 		const moduleDisplay: ModuleDisplayInfo = {
 			id: manifestJson.id,
-			name: products.join('; '),
+			name:
+				manifestJson.products.length === 0
+					? manifestJson.manufacturer
+					: manifestJson.manufacturer + ': ' + manifestJson.products.join('; '),
 			// version: manifestJson.version,
 			helpPath: getHelpPathForInstalledModule(ModuleInstanceType.Connection, manifestJson.id, manifestJson.version),
 			bugUrl: manifestJson.bugs || manifestJson.repository,
 			shortname: manifestJson.shortname,
-			products: products,
+			products:
+				manifestJson.products.length === 0
+					? [manifestJson.manufacturer]
+					: manifestJson.products.map((p) => `${manifestJson.manufacturer}: ${p}`),
 			keywords: manifestJson.keywords,
 		}
 
@@ -150,19 +175,25 @@ export class InstanceModuleScanner {
 		const helpPath = path.join(fullpath, 'companion/HELP.md')
 		const hasHelp = await fs.pathExists(helpPath)
 
-		let products = manifestJson.products.map((p) => `${manifestJson.manufacturer}: ${p}`)
-		if (products.length === 0) {
-			products = [manifestJson.manufacturer]
+		let moduleName = manifestJson.name
+		if (moduleName === manifestJson.id) {
+			moduleName =
+				manifestJson.products.length === 0
+					? manifestJson.manufacturer
+					: manifestJson.manufacturer + ': ' + manifestJson.products.join('; ')
 		}
 
 		const moduleDisplay: ModuleDisplayInfo = {
 			id: manifestJson.id,
-			name: products.join('; '),
+			name: moduleName,
 			// version: manifestJson.version,
 			helpPath: getHelpPathForInstalledModule(ModuleInstanceType.Connection, manifestJson.id, manifestJson.version),
 			bugUrl: manifestJson.bugs || manifestJson.repository,
 			shortname: manifestJson.shortname,
-			products: products,
+			products:
+				manifestJson.products.length === 0
+					? [manifestJson.manufacturer]
+					: manifestJson.products.map((p) => `${manifestJson.manufacturer}: ${p}`),
 			keywords: manifestJson.keywords,
 		}
 
@@ -202,7 +233,7 @@ export class InstanceModuleScanner {
 
 		const moduleDisplay: ModuleDisplayInfo = {
 			id: manifestJson.id,
-			name: manifestJson.products.join('; '),
+			name: manifestJson.name,
 			// version: manifestJson.version,
 			helpPath: getHelpPathForInstalledModule(ModuleInstanceType.Surface, manifestJson.id, manifestJson.version),
 			bugUrl: manifestJson.bugs || manifestJson.repository,

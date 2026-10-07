@@ -1,9 +1,9 @@
-import { useComputed } from '~/Resources/util.js'
 import { go as fuzzySearch } from 'fuzzysort'
+import { useContext } from 'react'
+import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import type { ClientModuleInfo } from '@companion-app/shared/Model/ModuleInfo.js'
 import type { ModuleStoreListCacheEntry } from '@companion-app/shared/Model/ModulesStore.js'
-import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
-import { useContext } from 'react'
+import { useComputed } from '~/Resources/util.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore'
 
 export function useAllModuleProducts(
@@ -21,8 +21,9 @@ export function useAllModuleProducts(
 		for (const moduleInfo of modules.allModules.values()) {
 			if (onlyModuleType && moduleInfo.moduleType !== onlyModuleType) continue
 
+			// Prefer the dev version to highlight any pending changes, then chain through the stability levels
 			const latestVersion =
-				moduleInfo.stableVersion ?? moduleInfo.betaVersion ?? moduleInfo.builtinVersion ?? moduleInfo.devVersion
+				moduleInfo.devVersion ?? moduleInfo.stableVersion ?? moduleInfo.betaVersion ?? moduleInfo.builtinVersion
 			if (!latestVersion) continue // shouldn't happen, but just in case
 
 			for (const product of moduleInfo.display.products) {

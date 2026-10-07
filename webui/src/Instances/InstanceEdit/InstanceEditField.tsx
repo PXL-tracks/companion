@@ -1,20 +1,19 @@
-import React, { useCallback } from 'react'
-import { CFormSwitch } from '@coreui/react'
-import {
-	ColorInputField,
-	DropdownInputField,
-	MultiDropdownInputField,
-	NumberInputField,
-	TextInputField,
-} from '~/Components/index.js'
-import { BonjourDeviceInputField } from '~/Components/BonjourDeviceInputField.js'
-import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
-import { StaticTextFieldText } from '~/Controls/StaticTextField.js'
-import { validateInputValue } from '@companion-app/shared/ValidateInputValue.js'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { useCallback } from 'react'
 import type { JsonValue } from 'type-fest'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
+import { validateInputValue } from '@companion-app/shared/ValidateInputValue.js'
+import { BonjourDeviceInputField } from '~/Components/BonjourDeviceInputField.js'
+import { ColorInputField } from '~/Components/ColorInputField'
+import { DropdownInputField } from '~/Components/DropdownInputField'
+import { MultiDropdownInputField } from '~/Components/MultiDropdownInputField'
+import { NumberInputField } from '~/Components/NumberInputField'
+import { SwitchInputField } from '~/Components/SwitchInputField'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
+import { StaticTextFieldText } from '~/Controls/StaticTextField.js'
 
 interface InstanceEditFieldProps {
+	inputId: string
 	setValue: (value: JsonValue | undefined) => void
 	definition: SomeCompanionInputField
 	value: JsonValue | undefined
@@ -23,35 +22,40 @@ interface InstanceEditFieldProps {
 }
 
 export function InstanceEditField({
+	inputId,
 	setValue,
 	definition,
 	value,
 	moduleType,
 	instanceId,
 }: InstanceEditFieldProps): React.JSX.Element {
+	// Tri-state validity (valid/invalid/unknown) used by every field's validation indicator/styling
 	const checkValid = useCallback(
-		(value: JsonValue | undefined) => validateInputValue(definition, value).validationError === undefined,
+		(value: JsonValue | undefined) => validateInputValue(definition, value).validity,
 		[definition]
 	)
 
 	const fieldType = definition.type
 	switch (definition.type) {
 		case 'static-text': {
-			return <StaticTextFieldText {...definition} allowImages />
+			return <StaticTextFieldText {...definition} id={inputId} allowImages />
 		}
 		case 'textinput':
 			return (
-				<TextInputField
+				<TextInputFieldSimple
+					id={inputId}
 					value={value as any}
 					setValue={setValue}
 					checkValid={checkValid}
 					multiline={definition.multiline}
 					placeholder={definition.placeholder}
+					immediateValue
 				/>
 			)
 		case 'number':
 			return (
 				<NumberInputField
+					id={inputId}
 					min={definition.min}
 					max={definition.max}
 					step={definition.step}
@@ -59,27 +63,21 @@ export function InstanceEditField({
 					value={value as any}
 					setValue={setValue}
 					checkValid={checkValid}
+					immediateValue
 				/>
 			)
 		case 'checkbox':
 			return (
 				<div style={{ marginRight: 40, marginTop: 2 }}>
-					<CFormSwitch
-						color="success"
-						checked={value as any}
-						size="xl"
-						onChange={() => {
-							setValue(!value)
-						}}
-					/>
+					<SwitchInputField id={inputId} value={!!value} setValue={setValue} tooltip={definition.tooltip} />
 				</div>
 			)
 		case 'dropdown':
 			return (
 				<DropdownInputField
+					htmlName={inputId}
 					choices={definition.choices}
 					allowCustom={definition.allowCustom}
-					minChoicesForSearch={definition.minChoicesForSearch}
 					regex={definition.regex}
 					value={value as any}
 					setValue={setValue}
@@ -89,11 +87,12 @@ export function InstanceEditField({
 		case 'multidropdown':
 			return (
 				<MultiDropdownInputField
+					htmlName={inputId}
 					choices={definition.choices}
 					allowCustom={definition.allowCustom}
 					minSelection={definition.minSelection}
-					minChoicesForSearch={definition.minChoicesForSearch}
 					maxSelection={definition.maxSelection}
+					sortSelection={definition.sortSelection}
 					regex={definition.regex}
 					value={value as any}
 					setValue={setValue}
@@ -103,6 +102,7 @@ export function InstanceEditField({
 		case 'colorpicker': {
 			return (
 				<ColorInputField
+					id={inputId}
 					value={value as any}
 					setValue={setValue}
 					enableAlpha={definition.enableAlpha ?? false}
@@ -114,6 +114,7 @@ export function InstanceEditField({
 		case 'bonjour-device':
 			return moduleType === ModuleInstanceType.Connection ? (
 				<BonjourDeviceInputField
+					id={inputId}
 					value={value as any}
 					setValue={setValue}
 					connectionId={instanceId}

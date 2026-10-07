@@ -1,14 +1,16 @@
+import { useMemo, useRef } from 'react'
+import type { JsonValue } from 'type-fest'
 import {
 	stringifySocketEntityLocation,
-	type SomeSocketEntityLocation,
 	type EntityModelType,
 	type EntityOwner,
+	type FeedbackEntityStyleOverride,
+	type RawStoreResult,
 	type SomeEntityModel,
+	type SomeSocketEntityLocation,
 } from '@companion-app/shared/Model/EntityModel.js'
 import type { ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
 import type { VariableValue } from '@companion-app/shared/Model/Variables.js'
-import { useMemo, useRef } from 'react'
-import type { JsonValue } from 'type-fest'
 import type { GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
 
@@ -42,11 +44,14 @@ export interface IEntityEditorService {
 	setEnabled: ((entityId: string, enabled: boolean) => void) | undefined
 	setHeadline: ((entityId: string, headline: string) => void) | undefined
 
+	setRawStoreResult: ((entityId: string, target: RawStoreResult | undefined) => void) | undefined
+
 	setInverted: (entityId: string, inverted: ExpressionOrValue<boolean>) => void
 	setVariableName: (entityId: string, name: string) => void
 	setVariableValue: (entityId: string, value: VariableValue) => void
-	setSelectedStyleProps: (entityId: string, keys: string[]) => void
-	setStylePropsValue: (entityId: string, key: string, value: any) => void
+
+	replaceStyleOverride: (entityId: string, override: FeedbackEntityStyleOverride) => void
+	removeStyleOverride: (entityId: string, overrideId: string) => void
 }
 
 export interface IEntityEditorActionService {
@@ -58,11 +63,14 @@ export interface IEntityEditorActionService {
 	setEnabled: ((enabled: boolean) => void) | undefined
 	setHeadline: ((headline: string) => void) | undefined
 
+	setRawStoreResult: ((target: RawStoreResult | undefined) => void) | undefined
+
 	setInverted: (inverted: ExpressionOrValue<boolean>) => void
 	setVariableName: (name: string) => void
 	setVariableValue: (value: VariableValue) => void
-	setSelectedStyleProps: (keys: string[]) => void
-	setStylePropsValue: (key: string, value: any) => void
+
+	replaceStyleOverride: (override: FeedbackEntityStyleOverride) => void
+	removeStyleOverride: (overrideId: string) => void
 }
 
 export function useControlEntitiesEditorService(
@@ -80,10 +88,11 @@ export function useControlEntitiesEditorService(
 	const setEnabledMutation = useMutationExt(trpc.controls.entities.setEnabled.mutationOptions())
 	const setHeadlineMutation = useMutationExt(trpc.controls.entities.setHeadline.mutationOptions())
 	const setInvertedMutation = useMutationExt(trpc.controls.entities.setInverted.mutationOptions())
-	const setStyleSelectionMutation = useMutationExt(trpc.controls.entities.setStyleSelection.mutationOptions())
-	const setStyleValueMutation = useMutationExt(trpc.controls.entities.setStyleValue.mutationOptions())
+	const setRawStoreResultMutation = useMutationExt(trpc.controls.entities.setRawStoreResult.mutationOptions())
 	const setVariableNameMutation = useMutationExt(trpc.controls.entities.setVariableName.mutationOptions())
 	const setVariableValueMutation = useMutationExt(trpc.controls.entities.setVariableValue.mutationOptions())
+	const replaceStyleOverrideMutation = useMutationExt(trpc.controls.entities.replaceStyleOverride.mutationOptions())
+	const removeStyleOverrideMutation = useMutationExt(trpc.controls.entities.removeStyleOverride.mutationOptions())
 
 	return useMemo(
 		() => ({
@@ -236,6 +245,19 @@ export function useControlEntitiesEditorService(
 					})
 			},
 
+			setRawStoreResult: (entityId: string, target: RawStoreResult | undefined) => {
+				setRawStoreResultMutation
+					.mutateAsync({
+						controlId,
+						entityLocation: listId,
+						entityId,
+						target,
+					})
+					.catch((e) => {
+						console.error('Failed to set store action result target', e)
+					})
+			},
+
 			setVariableName: (entityId: string, name: string) => {
 				setVariableNameMutation
 					.mutateAsync({
@@ -261,30 +283,28 @@ export function useControlEntitiesEditorService(
 					})
 			},
 
-			setSelectedStyleProps: (entityId: string, selected: string[]) => {
-				setStyleSelectionMutation
+			replaceStyleOverride: (entityId: string, override: FeedbackEntityStyleOverride) => {
+				replaceStyleOverrideMutation
 					.mutateAsync({
 						controlId,
 						entityLocation: listId,
 						entityId,
-						selected,
+						override,
 					})
 					.catch((e) => {
-						console.error('Failed to set entity style selected props', e)
+						console.error('Failed to replace style override', e)
 					})
 			},
-
-			setStylePropsValue: (entityId: string, key: string, value: any) => {
-				setStyleValueMutation
+			removeStyleOverride: (entityId: string, overrideId: string) => {
+				removeStyleOverrideMutation
 					.mutateAsync({
 						controlId,
 						entityLocation: listId,
 						entityId,
-						key,
-						value,
+						overrideId,
 					})
 					.catch((e) => {
-						console.error('Failed to set entity style value', e)
+						console.error('Failed to remove style override', e)
 					})
 			},
 		}),
@@ -300,14 +320,14 @@ export function useControlEntitiesEditorService(
 			setEnabledMutation,
 			setHeadlineMutation,
 			setInvertedMutation,
-			setStyleSelectionMutation,
-			setStyleValueMutation,
 			setVariableNameMutation,
 			setVariableValueMutation,
+			replaceStyleOverrideMutation,
+			removeStyleOverrideMutation,
 
 			confirmModal,
 			controlId,
-			// eslint-disable-next-line react-hooks/exhaustive-deps
+			// eslint-disable-next-line react-hooks/use-memo
 			stringifySocketEntityLocation(listId),
 		]
 	)
@@ -337,11 +357,15 @@ export function useControlEntityService(
 			setHeadline: serviceFactory.setHeadline
 				? (headline: string) => serviceFactory.setHeadline?.(entityId, headline)
 				: undefined,
+			setRawStoreResult: serviceFactory.setRawStoreResult
+				? (target: RawStoreResult | undefined) => serviceFactory.setRawStoreResult?.(entityId, target)
+				: undefined,
 			setInverted: (inverted: ExpressionOrValue<boolean>) => serviceFactory.setInverted(entityId, inverted),
 			setVariableName: (name: string) => serviceFactory.setVariableName(entityId, name),
 			setVariableValue: (value: VariableValue) => serviceFactory.setVariableValue(entityId, value),
-			setSelectedStyleProps: (keys: string[]) => serviceFactory.setSelectedStyleProps(entityId, keys),
-			setStylePropsValue: (key: string, value: any) => serviceFactory.setStylePropsValue(entityId, key, value),
+			replaceStyleOverride: (override: FeedbackEntityStyleOverride) =>
+				serviceFactory.replaceStyleOverride(entityId, override),
+			removeStyleOverride: (overrideId: string) => serviceFactory.removeStyleOverride(entityId, overrideId),
 		}),
 		[serviceFactory, entityId, entityTypeLabel]
 	)

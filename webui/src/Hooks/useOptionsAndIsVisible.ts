@@ -1,16 +1,14 @@
+import { toJS } from 'mobx'
+import type { JsonValue } from 'type-fest'
+import { getCompiledIsVisibleExpressionFn } from '@companion-app/shared/IsVisible.js'
 import {
 	convertExpressionOptionsWithoutParsing,
 	type ExpressionableOptionsObject,
 	type SomeCompanionInputField,
 } from '@companion-app/shared/Model/Options.js'
-import { assertNever, deepFreeze, useComputed } from '~/Resources/util.js'
-import { sandbox } from '~/Resources/sandbox.js'
 import type { CompanionOptionValues } from '@companion-module/base'
-import { toJS } from 'mobx'
-import { ParseExpression } from '@companion-app/shared/Expression/ExpressionParse.js'
-import { type GetVariableValueProps, ResolveExpression } from '@companion-app/shared/Expression/ExpressionResolve.js'
-import { ExpressionFunctions } from '@companion-app/shared/Expression/ExpressionFunctions.js'
-import type { JsonValue } from 'type-fest'
+import { sandbox } from '~/Resources/sandbox.js'
+import { assertNever, deepFreeze, useComputed } from '~/Resources/util.js'
 
 export type IsVisibleFn = (
 	options: CompanionOptionValues,
@@ -68,6 +66,31 @@ export function useOptionsVisibility(
 	}, [isVisibleFns, optionValues, allowedReferences, optionsSupportExpressions])
 }
 
+export function usePlainOptionsVisibility(
+	itemOptions: Array<SomeCompanionInputField> | undefined | null,
+	optionValues: Record<string, JsonValue | undefined> | undefined | null
+): ReadonlyMap<string, boolean> {
+	return useComputed<ReadonlyMap<string, boolean>>(() => {
+		const visibility = new Map<string, boolean>()
+
+		if (!optionValues) return visibility
+
+		for (const option of itemOptions ?? []) {
+			try {
+				const isVisibleFn = parseIsVisibleFn(option)
+				if (!isVisibleFn) continue
+
+				const simpleOptions = structuredClone(toJS(optionValues))
+				visibility.set(option.id, isVisibleFn(simpleOptions))
+			} catch (e) {
+				console.error('Failed to check visibility', e)
+			}
+		}
+
+		return visibility
+	}, [itemOptions, optionValues])
+}
+
 export function parseIsVisibleFn(option: SomeCompanionInputField): IsVisibleFn | null {
 	try {
 		if (!option.isVisibleUi) return null
@@ -79,29 +102,12 @@ export function parseIsVisibleFn(option: SomeCompanionInputField): IsVisibleFn |
 				return (options: CompanionOptionValues) => fn(options, userData)
 			}
 			case 'expression': {
-				const expression = ParseExpression(option.isVisibleUi.fn)
+				const compiled = getCompiledIsVisibleExpressionFn(option.isVisibleUi)
+				if (!compiled) return null
 				const userData = deepFreeze(toJS(option.isVisibleUi.data))
 				return (optionsRaw: CompanionOptionValues, getOptionValue?: (id: string) => JsonValue | undefined) => {
-					try {
-						const options = toJS(optionsRaw)
-						const val = ResolveExpression(
-							expression,
-							(props: GetVariableValueProps) => {
-								if (props.label === 'this' || props.label === 'options') {
-									return getOptionValue ? getOptionValue(props.name) : options[props.name]
-								} else if (props.label === 'data') {
-									return userData[props.name]
-								} else {
-									throw new Error(`Unknown variable "${props.variableId}"`)
-								}
-							},
-							ExpressionFunctions
-						)
-						return !!val && val !== 'false' && val !== '0'
-					} catch (e) {
-						console.error('Failed to resolve expression', e)
-						return true
-					}
+					const options = toJS(optionsRaw)
+					return compiled(getOptionValue ?? ((name) => options[name]), userData)
 				}
 			}
 			default:

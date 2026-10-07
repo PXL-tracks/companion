@@ -9,7 +9,9 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
+import EventEmitter from 'node:events'
+import { diffObjects } from '@companion-app/shared/Diff.js'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type {
 	AllVariableDefinitions,
 	ModuleVariableDefinitions,
@@ -17,10 +19,9 @@ import type {
 	VariableDefinitionUpdate,
 	VariableDefinitionUpdateInitOp,
 } from '@companion-app/shared/Model/Variables.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import EventEmitter from 'node:events'
-import { diffObjects } from '@companion-app/shared/Diff.js'
 import type { Complete } from '@companion-module/base'
+import LogController from '../Log/Controller.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 
 /**
  * Variable definitions as defined by the instances/connections
@@ -82,6 +83,7 @@ export class VariablesInstanceDefinitions {
 
 		const variablesObj: ModuleVariableDefinitions = {}
 		for (const variable of variables || []) {
+			if (BANNED_PROPS.has(variable.name)) continue
 			// Prune out the name
 			const newVarObj: Complete<VariableDefinition> = {
 				name: variable.name,

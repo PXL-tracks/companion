@@ -1,19 +1,25 @@
-import React, { useCallback } from 'react'
-import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
-import { SecretTextInputField } from '~/Components/SecretTextInputField'
-import { validateInputValue } from '@companion-app/shared/ValidateInputValue.js'
+import { useCallback } from 'react'
 import type { JsonValue } from 'type-fest'
+import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
 import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { validateInputValue } from '@companion-app/shared/ValidateInputValue.js'
+import { SecretTextInputField } from '~/Components/SecretTextInputField'
 
 interface InstanceSecretFieldProps {
+	inputId: string
 	setValue: (value: JsonValue | undefined) => void
 	definition: SomeCompanionInputField
 	value: JsonValue | undefined
 }
 
-export function InstanceSecretField({ setValue, definition, value }: InstanceSecretFieldProps): React.JSX.Element {
+export function InstanceSecretField({
+	inputId,
+	setValue,
+	definition,
+	value,
+}: InstanceSecretFieldProps): React.JSX.Element {
 	const checkValid = useCallback(
-		(value: JsonValue | undefined) => validateInputValue(definition, value).validationError === undefined,
+		(value: JsonValue | undefined) => validateInputValue(definition, value).validity,
 		[definition]
 	)
 
@@ -21,7 +27,13 @@ export function InstanceSecretField({ setValue, definition, value }: InstanceSec
 	switch (definition.type) {
 		case 'secret-text':
 			return (
-				<SecretTextInputField value={stringifyVariableValue(value) ?? ''} setValue={setValue} checkValid={checkValid} />
+				<SecretTextInputField
+					id={inputId}
+					value={stringifyVariableValue(value) ?? ''}
+					setValue={setValue}
+					checkValid={checkValid}
+					immediateValue
+				/>
 			)
 		default:
 			return <p>Unknown secret field "{fieldType}"</p>
