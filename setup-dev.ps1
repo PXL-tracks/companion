@@ -15,7 +15,10 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigTemplate = Join-Path $ScriptDir "config-template"
 $CompanionData = Join-Path $ScriptDir "companion-data"
 $NodeRuntimeCache = Join-Path $ScriptDir ".cache\node-runtime"
-$AppDataConfig = "$env:APPDATA\companion-nodejs\Config\v4.2"
+# Companion uses one config folder per major/minor release, the latest is the last entry of ConfigReleaseDirs
+$PathsFile = Join-Path $ScriptDir "shared-lib\lib\Paths.ts"
+$ConfigRelease = ([regex]::Matches((Get-Content $PathsFile -Raw), "'(v\d+\.\d+)'") | Select-Object -Last 1).Groups[1].Value
+$AppDataConfig = "$env:APPDATA\companion-nodejs\Config\$ConfigRelease"
 
 # Step 1: Check node-runtime cache (read versions from assets/nodejs-versions.json)
 Write-Host "`n[1/4] Checking node-runtime cache..." -ForegroundColor Yellow
@@ -30,13 +33,10 @@ if (-not (Test-Path $versionsFile)) {
     exit 1
 }
 $versions = Get-Content $versionsFile | ConvertFrom-Json
-$node18Version = $versions.node18
-$node22Version = $versions.node22
-Write-Host "  Required: Node 18 = $node18Version, Node 22 = $node22Version" -ForegroundColor Gray
+$requiredVersions = @($versions.PSObject.Properties | ForEach-Object { $_.Value })
+Write-Host "  Required: $(($versions.PSObject.Properties | ForEach-Object { "$($_.Name) = $($_.Value)" }) -join ', ')" -ForegroundColor Gray
 
 $arch = "win32-x64"
-$node18Dir = Join-Path $NodeRuntimeCache "$arch-$node18Version"
-$node22Dir = Join-Path $NodeRuntimeCache "$arch-$node22Version"
 
 function Download-NodeRuntime($version, $destDir) {
     $dlArch = "win-x64"
@@ -55,20 +55,17 @@ function Download-NodeRuntime($version, $destDir) {
     Remove-Item $zipPath -Force
 }
 
-if (-not (Test-Path "$node18Dir\node.exe") -or -not (Test-Path "$node22Dir\node.exe")) {
+$missingVersions = @($requiredVersions | Where-Object { -not (Test-Path (Join-Path $NodeRuntimeCache "$arch-$_\node.exe")) })
+if ($missingVersions.Count -gt 0) {
     Write-Host "  Node runtimes missing! Downloading..." -ForegroundColor Red
 
-    if (-not (Test-Path "$node18Dir\node.exe")) {
-        Download-NodeRuntime $node18Version $node18Dir
-    }
-
-    if (-not (Test-Path "$node22Dir\node.exe")) {
-        Download-NodeRuntime $node22Version $node22Dir
+    foreach ($version in $missingVersions) {
+        Download-NodeRuntime $version (Join-Path $NodeRuntimeCache "$arch-$version")
     }
 
     Write-Host "  Node runtimes downloaded!" -ForegroundColor Green
 } else {
-    Write-Host "  Node runtimes already present ($node18Version + $node22Version)" -ForegroundColor Green
+    Write-Host "  Node runtimes already present ($($requiredVersions -join ' + '))" -ForegroundColor Green
 }
 
 # Step 2: Copy module environment data
@@ -124,5 +121,5 @@ if (Test-Path $ModuleDir) {
 }
 
 Write-Host "`n=== Setup Complete ===" -ForegroundColor Cyan
-Write-Host "Run Companion with:" -ForegroundColor White
+Write-Host "Run Companion with Node.js $(Get-Content (Join-Path $ScriptDir '.node-version')) (see .node-version):" -ForegroundColor White
 Write-Host "  node companion/dist/main.js --extra-module-path=module-local-dev --admin-address 0.0.0.0" -ForegroundColor Gray
