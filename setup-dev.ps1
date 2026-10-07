@@ -18,7 +18,8 @@ $NodeRuntimeCache = Join-Path $ScriptDir ".cache\node-runtime"
 # Companion uses one config folder per major/minor release, the latest is the last entry of ConfigReleaseDirs
 $PathsFile = Join-Path $ScriptDir "shared-lib\lib\Paths.ts"
 $ConfigRelease = ([regex]::Matches((Get-Content $PathsFile -Raw), "'(v\d+\.\d+)'") | Select-Object -Last 1).Groups[1].Value
-$AppDataConfig = "$env:APPDATA\companion-nodejs\Config\$ConfigRelease"
+$ConfigRoot = "$env:APPDATA\companion-nodejs\Config"
+$AppDataConfig = Join-Path $ConfigRoot $ConfigRelease
 
 # Step 1: Check node-runtime cache (read versions from assets/nodejs-versions.json)
 Write-Host "`n[1/4] Checking node-runtime cache..." -ForegroundColor Yellow
@@ -87,16 +88,19 @@ if ((Test-Path "$ModuleDataSrc\timeline-environment.json") -and (-not (Test-Path
 # Step 3: Copy Companion config to AppData (optional)
 Write-Host "`n[3/4] Setting up Companion config..." -ForegroundColor Yellow
 if (-not $SkipConfigCopy) {
-    if (-not (Test-Path $AppDataConfig)) {
-        New-Item -ItemType Directory -Path $AppDataConfig -Force | Out-Null
-    }
-
     $dbSrc = Join-Path $ConfigTemplate "db.sqlite"
     $dbDst = Join-Path $AppDataConfig "db.sqlite"
 
-    if ((Test-Path $dbSrc) -and (-not (Test-Path $dbDst) -or $Force)) {
+    # Companion imports the config of a previous release on first start (e.g. v4.2 -> v5.0),
+    # so only use the template on a machine without any Companion config
+    $existingDb = Get-ChildItem $ConfigRoot -Filter "db.sqlite" -Recurse -Depth 1 -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if ((Test-Path $dbSrc) -and ($Force -or -not $existingDb)) {
+        New-Item -ItemType Directory -Path $AppDataConfig -Force | Out-Null
         Copy-Item $dbSrc $dbDst -Force
         Write-Host "  Copied db.sqlite to AppData" -ForegroundColor Green
+    } elseif ($existingDb -and -not (Test-Path $dbDst)) {
+        Write-Host "  Existing config found in $($existingDb.DirectoryName), Companion will import it on first start" -ForegroundColor Green
     } else {
         Write-Host "  Config already exists in AppData (use -Force to overwrite)" -ForegroundColor Gray
     }
