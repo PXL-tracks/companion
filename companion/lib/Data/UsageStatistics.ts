@@ -137,7 +137,7 @@ export class DataUsageStatistics {
 
 				connectionCount: this.#instancesController.getAllConnectionIds().length,
 				pageCount: this.#pageController.store.getPageCount(),
-				buttonCount: this.#controlController.getAllControls().size, // Fixed: getAllButtons doesn't exist
+				buttonCount: this.#controlController.getAllButtons().length,
 				triggerCount: this.#controlController.getAllTriggers().length,
 				surfaceGroupCount: this.#surfacesController.getGroupCount(),
 				customVariableCount: Object.keys(this.#variablesController.custom.getDefinitions()).length,
