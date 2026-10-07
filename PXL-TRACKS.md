@@ -102,6 +102,12 @@ yarn workspace @companion-app/webui build
 
 Module runtimes: Companion starts modules with the Node.js versions of `assets/nodejs-versions.json` (`node18` for the sequencer), from `.cache/node-runtime/<platform>-<arch>-<version>/`. `setup-dev.ps1` (Windows) and `pxl-start.sh` (macOS/Linux) download them.
 
+Surfaces (Companion 5+): Stream Deck and X-keys are builtin surface modules that a dev build looks for in `.cache/builtin-surfaces/`. Without them no physical surface is detected (`Configured instance "elgato-stream-deck" could not be loaded, unknown module`). `yarn dev` and the launcher download them; by hand:
+
+```bash
+yarn tsx --eval "import('./tools/fetch_builtin_modules.mts').then((m) => m.fetchBuiltinSurfaceModules())"
+```
+
 Start:
 
 ```bash
