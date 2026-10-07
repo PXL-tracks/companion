@@ -33,23 +33,24 @@ The module runs in its own Node.js process, like every Companion module. It talk
 ```
 Timeline Sequencer module (module-base 1.13, node18 runtime)
   │
-  ├─ IPC fast path, used by playback, one batch per tick
+  ├─ IPC fast path, used by playback (one batch per tick) and single actions (stop/cue, knobs)
   │    process.send({ _type: 'pxl-call', _id: 'tl_<n>', actions: [{ connectionId, actionId, options }] })
   │      → ChildHandlerLegacy (one-line hook)
   │      → companion/lib/Service/Timeline/IpcBridge.ts
   │      → global.pxlCore.executeActions (Service/Timeline/Executor.ts)
   │      → processManager.getConnectionChild(id).actionRun(...)   (all actions in parallel)
-  │      ← process message { _replyTo: 'tl_<n>', success, result }
+  │      ← process message { _replyTo: 'tl_<n>', success, result: { count, elapsed, succeeded, failed } }
   │
   └─ tRPC over WebSocket ws://127.0.0.1:<Companion Port>/trpc
-       controls.pxlFire   run actions (single actions, fallback)
+       controls.pxlFire   run actions (fallback when IPC is not available)
        controls.pxlSniff  read the current value of a connection through a feedback "learn"
        controls.pxlPeek   action metadata (options, min/max, choices...)
        + stock routes: instances.connections.watch, instances.statuses.watch,
          instances.definitions.actions, customVariables.create/delete/setCurrent, appInfo.version
 ```
 
-- **Playback has no tRPC fallback**: if the IPC hook is missing, every batch times out after 5 s and nothing reaches the target connections. tRPC is about twice as slow (measured on v5.0.7: 0.64 ms per 4-action batch over IPC, 1.20 ms with `pxlFire`).
+- **Playback has no tRPC fallback**: if the IPC hook is missing, every batch times out after 5 s and nothing reaches the target connections. tRPC is about twice as slow (measured on v5.0.7: 0.64 ms per 4-action batch over IPC, 1.20 ms with `pxlFire`). The bridge only runs `actions` batches: it rejects method calls (`method: 'pxlFire'`...), which older module versions sent for single actions before falling back to tRPC.
+- **Latency is the device, not the bridge**: `result.elapsed` is the time inside Companion. On an ATEM in 1080p50 (October 2026) the IPC part of the round-trip is 0.2–0.6 ms and the rest (about 13 ms) is the ATEM, which acknowledges each command on its next video frame. The module logs this split every 5 s during playback (see its README, "Where the time goes").
 - **Option format**: since Companion 4.3, entity options are `{ value, isExpression }` objects. The module sends raw values, so the Executor, `pxlFire` and `pxlSniff` wrap them with `optionsObjectToExpressionOptions(options, false)`, and `pxlSniff` unwraps the learned values with `convertExpressionOptionsWithoutParsing` so the module still receives raw values.
 - **Option validation**: Companion 4.3+ validates the options of every action against its definition (module-base 1.13+ modules) and **rejects the whole action** for one invalid value, logging `Failed to parse action options ... The following selected values are not valid: ...`. Companion 4.2 passed them through. Example fixed in the module: the rebuilt `properties` of ATEM DVE / flying key groups listed `mixeffect` and `key`. The IPC reply still says `success: true` with `failed: n`, so look at the Companion log (or the module execution stats) when a connection does not react.
 - **Companion Port**: the module connects tRPC to `127.0.0.1` on its `Companion Port` config field (default 8000). With several Companions on one machine, set it to the port of the Companion running the module, otherwise it talks to the other one.
