@@ -1,10 +1,11 @@
-import { DataStoreBase } from './StoreBase.js'
+import fs from 'node:fs/promises'
+import { backup as SqliteBackup } from 'node:sqlite'
+import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
 import { DataLegacyDatabase } from './Legacy/Database.js'
-import { upgradeStartup } from './Upgrade.js'
 import { createTables as createTablesV1 } from './Schema/v1.js'
 import { createTables as createTablesV8 } from './Schema/v8.js'
-import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
-import fs from 'fs/promises'
+import { DataStoreBase } from './StoreBase.js'
+import { targetVersion, upgradeStartup } from './Upgrade.js'
 
 export interface DataDatabaseDefaultTable {
 	page_config_version: number
@@ -49,7 +50,7 @@ export class DataDatabase extends DataStoreBase<DataDatabaseDefaultTable> {
 	 * Save the defaults since a file could not be found/loaded/parsed
 	 */
 	protected loadDefaults(): void {
-		this.defaultTableView.set('page_config_version', 6)
+		this.defaultTableView.set('page_config_version', targetVersion)
 
 		this.isFirstRun = true
 	}
@@ -76,10 +77,10 @@ export class DataDatabase extends DataStoreBase<DataDatabaseDefaultTable> {
 	 */
 	public async createBackup(filePath: string): Promise<number> {
 		// Ensure the database is synced to disk before backing up
-		this.store.pragma('wal_checkpoint(TRUNCATE)')
+		this.store.exec('PRAGMA wal_checkpoint(TRUNCATE)')
 
 		// Use SQLite's backup functionality to copy the database
-		await this.store.backup(filePath)
+		await SqliteBackup(this.store, filePath)
 
 		// Get the file size of the created backup
 		try {

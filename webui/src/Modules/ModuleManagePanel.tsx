@@ -1,19 +1,22 @@
-import React, { useCallback, useContext } from 'react'
-import { CRow, CCol, CAlert } from '@coreui/react'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { faGithub } from '@fortawesome/free-brands-svg-icons'
+import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useNavigate } from '@tanstack/react-router'
+import { capitalize } from 'lodash-es'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext } from 'react'
+import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import type { ModuleDisplayInfo } from '@companion-app/shared/Model/ModuleInfo.js'
 import type { ModuleStoreListCacheEntry } from '@companion-app/shared/Model/ModulesStore.js'
-import { RefreshModuleInfo } from './RefreshModuleInfo.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Grid } from '~/Components/Grid'
+import { WindowLinkOpen } from '~/Helpers/Window.js'
+import { CloseButton } from '~/Layout/PanelIcons.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { LastUpdatedTimestamp } from './LastUpdatedTimestamp.js'
 import { ModuleVersionsTable } from './ModuleVersionsTable.js'
+import { RefreshModuleInfo } from './RefreshModuleInfo.js'
 import { useModuleStoreInfo } from './useModuleStoreInfo.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faExternalLink, faTimes } from '@fortawesome/free-solid-svg-icons'
-import { faGithub } from '@fortawesome/free-brands-svg-icons'
-import { WindowLinkOpen } from '~/Helpers/Window.js'
-import { useNavigate } from '@tanstack/react-router'
-import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 
 interface ModuleManagePanelProps {
 	moduleType: ModuleInstanceType
@@ -28,11 +31,11 @@ export const ModuleManagePanel = observer(function ModuleManagePanel({ moduleTyp
 
 	if (!moduleInfo && !moduleStoreInfo) {
 		return (
-			<CRow className="edit-connection">
-				<CCol xs={12}>
+			<Grid.Row className="edit-connection">
+				<Grid.Col xs={12}>
 					<p>Module not found</p>
-				</CCol>
-			</CRow>
+				</Grid.Col>
+			</Grid.Row>
 		)
 	}
 
@@ -71,7 +74,9 @@ const ModuleManagePanelInner = observer(function ModuleManagePanelInner({
 	return (
 		<>
 			<div className="secondary-panel-simple-header">
-				<h4 className="panel-title">Manage {baseInfo?.name ?? moduleId}</h4>
+				<h4 className="panel-title">
+					Manage {baseInfo?.name ?? moduleId} ({capitalize(moduleType)})
+				</h4>
 				<div className="header-buttons">
 					{!!moduleStoreBaseInfo?.githubUrl && (
 						<WindowLinkOpen title="Open GitHub Page" href={moduleStoreBaseInfo.githubUrl}>
@@ -83,9 +88,7 @@ const ModuleManagePanelInner = observer(function ModuleManagePanelInner({
 							<FontAwesomeIcon icon={faExternalLink} size="xl" />
 						</WindowLinkOpen>
 					)}
-					<div className="float_right ms-1 d-xl-none" onClick={doCloseModule} title="Close">
-						<FontAwesomeIcon icon={faTimes} size="lg" />
-					</div>
+					<CloseButton closeFn={doCloseModule} visibilityClass=" d-xl-none" />
 				</div>
 			</div>
 			<div className="secondary-panel-simple-body">
@@ -93,7 +96,7 @@ const ModuleManagePanelInner = observer(function ModuleManagePanelInner({
 					<RefreshModuleInfo moduleType={moduleType} moduleId={moduleId} />
 					<LastUpdatedTimestamp timestamp={moduleStoreInfo?.lastUpdated} />
 				</div>
-				{moduleStoreInfo?.updateWarning && <CAlert color="danger">{moduleStoreInfo.updateWarning}</CAlert>}
+				{moduleStoreInfo?.updateWarning && <StaticAlert color="danger">{moduleStoreInfo.updateWarning}</StaticAlert>}
 
 				<ModuleVersionsTable moduleType={moduleType} moduleId={moduleId} moduleStoreInfo={moduleStoreInfo} />
 			</div>

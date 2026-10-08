@@ -1,0 +1,266 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`InstanceDefinitions > createEntityItem > creates a feedback with correct structure 1`] = `
+{
+  "connectionId": "conn1",
+  "definitionId": "fb1",
+  "id": "mock-id-1",
+  "isInverted": {
+    "isExpression": false,
+    "value": false,
+  },
+  "options": {
+    "level": {
+      "isExpression": false,
+      "value": 10,
+    },
+  },
+  "styleOverrides": [],
+  "type": "feedback",
+  "upgradeIndex": 5,
+}
+`;
+
+exports[`InstanceDefinitions > createEntityItem > creates an action with correct structure 1`] = `
+{
+  "connectionId": "conn1",
+  "definitionId": "act1",
+  "id": "mock-id-1",
+  "options": {
+    "myNum": {
+      "isExpression": false,
+      "value": 42,
+    },
+    "myText": {
+      "isExpression": false,
+      "value": "hello",
+    },
+  },
+  "type": "action",
+  "upgradeIndex": 5,
+}
+`;
+
+exports[`InstanceDefinitions > createEventItem > creates an interval event with defaults 1`] = `
+{
+  "enabled": true,
+  "id": "mock-id-1",
+  "options": {
+    "seconds": 10,
+  },
+  "type": "interval",
+}
+`;
+
+exports[`InstanceDefinitions > snapshot: full lifecycle > preset lifecycle: set → convert → preview → update label → forget 1`] = `
+{
+  "feedbacks": [],
+  "localVariables": [],
+  "options": {
+    "canModifyStyleInApis": false,
+    "rotaryActions": false,
+    "stepProgression": "auto",
+  },
+  "steps": {
+    "step1": {
+      "action_sets": {
+        "down": [],
+        "rotate_left": undefined,
+        "rotate_right": undefined,
+        "up": [],
+      },
+      "options": {
+        "runWhileHeld": [],
+      },
+    },
+  },
+  "style": {
+    "layers": [
+      {
+        "color": {
+          "isExpression": false,
+          "value": 16777215,
+        },
+        "enabled": {
+          "isExpression": false,
+          "value": true,
+        },
+        "fontsize": {
+          "isExpression": false,
+          "value": "auto",
+        },
+        "halign": {
+          "isExpression": false,
+          "value": "center",
+        },
+        "height": {
+          "isExpression": false,
+          "value": 72,
+        },
+        "id": "text-1",
+        "name": "text-1",
+        "opacity": {
+          "isExpression": false,
+          "value": 1,
+        },
+        "outlineColor": {
+          "isExpression": false,
+          "value": 0,
+        },
+        "rotation": {
+          "isExpression": false,
+          "value": 0,
+        },
+        "text": {
+          "isExpression": false,
+          "value": "Status $(conn1:status)",
+        },
+        "type": "text",
+        "usage": "text",
+        "valign": {
+          "isExpression": false,
+          "value": "center",
+        },
+        "width": {
+          "isExpression": false,
+          "value": 72,
+        },
+        "x": {
+          "isExpression": false,
+          "value": 0,
+        },
+        "y": {
+          "isExpression": false,
+          "value": 0,
+        },
+      },
+    ],
+  },
+  "type": "button-layered",
+}
+`;
+
+exports[`InstanceDefinitions > snapshot: full lifecycle > preset lifecycle: set → convert → preview → update label → forget 2`] = `
+{
+  "feedbacks": [],
+  "localVariables": [],
+  "options": {
+    "canModifyStyleInApis": false,
+    "rotaryActions": false,
+    "stepProgression": "auto",
+  },
+  "steps": {
+    "step1": {
+      "action_sets": {
+        "down": [],
+        "rotate_left": undefined,
+        "rotate_right": undefined,
+        "up": [],
+      },
+      "options": {
+        "runWhileHeld": [],
+      },
+    },
+  },
+  "style": {
+    "layers": [
+      {
+        "color": {
+          "isExpression": false,
+          "value": 16777215,
+        },
+        "enabled": {
+          "isExpression": false,
+          "value": true,
+        },
+        "fontsize": {
+          "isExpression": false,
+          "value": "auto",
+        },
+        "halign": {
+          "isExpression": false,
+          "value": "center",
+        },
+        "height": {
+          "isExpression": false,
+          "value": 72,
+        },
+        "id": "text-1",
+        "name": "text-1",
+        "opacity": {
+          "isExpression": false,
+          "value": 1,
+        },
+        "outlineColor": {
+          "isExpression": false,
+          "value": 0,
+        },
+        "rotation": {
+          "isExpression": false,
+          "value": 0,
+        },
+        "text": {
+          "isExpression": false,
+          "value": "Status $(conn1:status)",
+        },
+        "type": "text",
+        "usage": "text",
+        "valign": {
+          "isExpression": false,
+          "value": "center",
+        },
+        "width": {
+          "isExpression": false,
+          "value": 72,
+        },
+        "x": {
+          "isExpression": false,
+          "value": 0,
+        },
+        "y": {
+          "isExpression": false,
+          "value": 0,
+        },
+      },
+    ],
+  },
+  "type": "preset:button",
+}
+`;
+
+exports[`InstanceDefinitions > snapshot: full lifecycle > set definitions → create entity → forget → verify cleared 1`] = `
+{
+  "connectionId": "conn1",
+  "definitionId": "doSomething",
+  "id": "mock-id-1",
+  "options": {
+    "text": {
+      "isExpression": false,
+      "value": "hi",
+    },
+  },
+  "type": "action",
+  "upgradeIndex": 5,
+}
+`;
+
+exports[`InstanceDefinitions > snapshot: full lifecycle > set definitions → create entity → forget → verify cleared 2`] = `
+{
+  "connectionId": "conn1",
+  "definitionId": "isOn",
+  "id": "mock-id-2",
+  "isInverted": {
+    "isExpression": false,
+    "value": false,
+  },
+  "options": {
+    "channel": {
+      "isExpression": false,
+      "value": 1,
+    },
+  },
+  "styleOverrides": [],
+  "type": "feedback",
+  "upgradeIndex": 5,
+}
+`;

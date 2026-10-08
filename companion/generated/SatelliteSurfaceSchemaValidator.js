@@ -1,4 +1,3 @@
-/* eslint-disable */
 'use strict'
 export const validate = validate20
 export default validate20
@@ -33,7 +32,7 @@ const schema31 = {
 					type: 'boolean',
 				},
 				colors: {
-					description: 'If set, the control requests colours to be reported.',
+					description: 'If set, the control requests colors to be reported.',
 					type: 'string',
 					enum: ['hex', 'rgb'],
 				},
@@ -55,6 +54,7 @@ const schema31 = {
 			type: 'object',
 			patternProperties: {
 				'^[a-zA-Z0-9\\-\\/]+$': {
+					title: 'SatelliteControlDefinition',
 					description:
 						'Single control definition. The id must be unique and may be user facing in logs. Typically the id would be in the form of 1/0, matching the row/column of the control.',
 					type: 'object',
@@ -90,7 +90,7 @@ const schema32 = {
 		text: { description: 'If true, the control requests text to be reported.', type: 'boolean' },
 		textStyle: { description: 'If true, the control requests text style properties to be reported', type: 'boolean' },
 		colors: {
-			description: 'If set, the control requests colours to be reported.',
+			description: 'If set, the control requests colors to be reported.',
 			type: 'string',
 			enum: ['hex', 'rgb'],
 		},

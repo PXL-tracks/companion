@@ -1,16 +1,23 @@
+import type { SomeExportv6 } from '@companion-app/shared/Model/ExportModel.js'
+import type { UserConfigModel } from '@companion-app/shared/Model/UserConfigModel.js'
 import LogController from '../Log/Controller.js'
-
+import { showFatalError } from '../Resources/Util.js'
+import type { DataDatabase } from './Database.js'
 import v1tov2 from './Upgrades/v1tov2.js'
 import v2tov3 from './Upgrades/v2tov3.js'
 import v3tov4 from './Upgrades/v3tov4.js'
 import v4tov5 from './Upgrades/v4tov5.js'
-import { showFatalError } from '../Resources/Util.js'
-import type { DataDatabase } from './Database.js'
-import type { SomeExportv6 } from '@companion-app/shared/Model/ExportModel.js'
 import v5tov6 from './Upgrades/v5tov6.js'
 import v6tov7 from './Upgrades/v6tov7.js'
 import v7tov8 from './Upgrades/v7tov8.js'
 import v8tov9 from './Upgrades/v8tov9.js'
+import v9tov10 from './Upgrades/v9tov10.js'
+import v10tov11 from './Upgrades/v10tov11.js'
+import v11tov12 from './Upgrades/v11tov12.js'
+import v12tov13 from './Upgrades/v12tov13.js'
+import v13tov14 from './Upgrades/v13tov14.js'
+import v14tov15 from './Upgrades/v14tov15.js'
+import v15tov16 from './Upgrades/v15tov16.js'
 
 const logger = LogController.createLogger('Data/Upgrade')
 
@@ -23,8 +30,15 @@ const allUpgrades = [
 	v6tov7, // v4.0 - rework 'entities' for better nesting https://github.com/bitfocus/companion/pull/3185
 	v7tov8, // v4.0 - break out into more tables
 	v8tov9, // v4.1 - convert button stepAutoProgress to stepProgression
+	v9tov10, // v4.2 - surface integrations
+	v10tov11, // v4.3 - internal action/feedback upgrade & options into ExpressionOrValue
+	v11tov12, // v4.3 - surface plugin config field renames
+	v12tov13, // v5.0 - graphics overhaul
+	v13tov14, // v5.0 - split fontsize into size + allowShrink
+	v14tov15, // v5.0 - move surface never_lock to the surface group
+	v15tov16, // v5.0 - replace remove_topbar boolean with buttons_decoration enum
 ]
-const targetVersion = allUpgrades.length + 1
+export const targetVersion = allUpgrades.length + 1
 
 /**
  * Upgrade the db to the latest version.
@@ -57,20 +71,20 @@ export function upgradeStartup(db: DataDatabase): void {
 	}
 
 	// Debug: uncomment to force the upgrade to run again
-	db.defaultTableView.set('page_config_version', targetVersion - 1)
+	// db.defaultTableView.set('page_config_version', targetVersion - 1)
 }
 
 /**
  * Upgrade an exported page or full configuration to the latest format
  */
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function upgradeImport(obj: any): SomeExportv6 {
+export function upgradeImport(obj: any, userConfig: UserConfigModel): SomeExportv6 {
 	const currentVersion = obj.version || 1
 
 	for (let i = currentVersion; i < targetVersion; i++) {
 		// Run if a script is defined
 		if (allUpgrades[i - 1].upgradeImport !== undefined) {
-			obj = allUpgrades[i - 1].upgradeImport(obj, logger)
+			obj = allUpgrades[i - 1].upgradeImport(obj, logger, userConfig)
 		}
 	}
 

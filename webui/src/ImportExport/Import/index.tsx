@@ -1,10 +1,10 @@
-import { CButton } from '@coreui/react'
-import React, { useCallback, useContext, useEffect, useState } from 'react'
-import { ImportPageWizard } from './Page.js'
-import { ImportFullWizard } from './Full.js'
+import { useCallback, useContext, useEffect, useState } from 'react'
 import type { ClientImportObject } from '@companion-app/shared/Model/ImportExport.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { Button } from '~/Components/Button'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ImportFullWizard } from './Full.js'
+import { ImportPageWizard } from './Page.js'
 
 interface ImportWizardProps {
 	importInfo: [ClientImportObject, Record<string, string | undefined>]
@@ -51,9 +51,9 @@ export function ImportWizard({ importInfo, clearImport }: ImportWizardProps): Re
 		<div className="import-wizard single-page px-1">
 			<h4>
 				Import Single Page
-				<CButton color="danger" size="sm" onClick={clearImport}>
+				<Button color="danger" size="sm" onClick={clearImport}>
 					Cancel
-				</CButton>
+				</Button>
 			</h4>
 
 			<ImportPageWizard
@@ -67,9 +67,9 @@ export function ImportWizard({ importInfo, clearImport }: ImportWizardProps): Re
 		<div className="import-wizard import-full">
 			<h4>
 				Import Configuration
-				<CButton color="danger" size="sm" onClick={clearImport}>
+				<Button color="danger" size="sm" onClick={clearImport}>
 					Cancel
-				</CButton>
+				</Button>
 			</h4>
 			<ImportFullWizard snapshot={snapshot} connectionRemap={connectionRemap} setConnectionRemap={setConnectionRemap} />
 		</div>

@@ -1,27 +1,34 @@
 import dayjs from 'dayjs'
-import LogController, { type Logger } from '../../../../Log/Controller.js'
-import type { TriggerEvents } from '../../../../Controls/TriggerEvents.js'
 import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { getZonedDateParts, zonedTimeToUtc } from '@companion-app/shared/Timezone.js'
+import type { CompanionOptionValues } from '@companion-module/host'
+import type { TriggerEvents } from '../../../../Controls/TriggerEvents.js'
+import type { DataUserConfig } from '../../../../Data/UserConfig.js'
+import LogController, { type Logger } from '../../../../Log/Controller.js'
 import { TriggerExecutionSource } from '../TriggerExecutionSource.js'
 
 interface IntervalEvent {
 	id: string
 	period: number
+	minperiod?: number
+	maxperiod?: number
 	lastExecute: number
 }
 interface TimeOfDayEvent {
 	id: string
-	time: Record<string, any>
+	time: CompanionOptionValues
 	nextExecute: number | null
 }
 interface SpecificDateEvent {
 	id: string
-	date: Record<string, any>
+	date: CompanionOptionValues
 	nextExecute: number | null
 }
 interface SunEvent {
 	id: string
-	params: Record<string, any>
+	params: CompanionOptionValues
 	nextExecute: number
 }
 
@@ -97,18 +104,36 @@ export class TriggersEventTimer {
 	 */
 	#sunEvents: SunEvent[] = []
 
+	/**
+	 * User configuration, used to read the configured timezone
+	 */
+	readonly #userconfig: DataUserConfig
+
+	/**
+	 * The timezone last used to compute the execute times, so we can detect changes
+	 */
+	#lastTimezone: string | undefined
+
 	constructor(
+		userconfig: DataUserConfig,
 		eventBus: TriggerEvents,
 		controlId: string,
 		executeActions: (nowTime: number, source: TriggerExecutionSource) => void
 	) {
 		this.#logger = LogController.createLogger(`Controls/Triggers/Events/Timer/${controlId}`)
 
+		this.#userconfig = userconfig
 		this.#eventBus = eventBus
 		this.#executeActions = executeActions
+		this.#lastTimezone = this.#getTimezone()
 
 		this.#lastTick = eventBus.getLastTickTime()
 		this.#eventBus.on('tick', this.#onTick)
+	}
+
+	/** The configured timezone, or undefined to use the process-local timezone */
+	#getTimezone(): string | undefined {
+		return this.#userconfig.getKey('timezone') || undefined
 	}
 
 	/**
@@ -119,65 +144,124 @@ export class TriggersEventTimer {
 	}
 
 	/**
+	 * Format a duration in seconds to a human-readable string
+	 * @param seconds Duration in seconds
+	 * @returns Formatted string like "1:30:00 hours" or "45 seconds"
+	 */
+	formatSeconds(seconds: number): string {
+		// this is somewhat simplified and modified from Utils.ts `msToStamp``
+		// (note that dayjs isn't a great option for simple durations, so we hand code it)
+		const hours = Math.floor(seconds / 3600)
+		const minutes = Math.floor(seconds / 60) % 60
+		seconds = Math.ceil(seconds) % 60 // note: ceil is correct only for the current 1-sec time-resolution
+
+		const pad2 = (val: number) => String(val).padStart(2, '0')
+		if (hours > 0) {
+			return `${hours}:${pad2(minutes)}:${pad2(seconds)} hour${hours + minutes + seconds === 1 ? '' : 's'}`
+		} else if (minutes > 0) {
+			return `${minutes}:${pad2(seconds)} minute${minutes + seconds === 1 ? '' : 's'}`
+		} else {
+			return `${seconds} second${seconds === 1 ? '' : 's'}`
+		}
+	}
+
+	/**
 	 * Get a description for an interval event
 	 */
 	getIntervalDescription(event: EventInstance): string {
 		const seconds = Number(event.options.seconds)
+		const time = this.formatSeconds(seconds)
 
-		let time = `${seconds} seconds`
-		if (seconds >= 3600) {
-			time = `${Math.floor(seconds / 3600)} hours`
-		} else if (seconds >= 60) {
-			time = `${Math.floor(seconds / 60)} minutes`
+		if (seconds <= 0) {
+			// setInterval() requires period > 0
+			return 'Never: interval must be greater than 0'
+		} else {
+			return `Every <strong>${time}</strong>`
 		}
+	}
 
-		return `Every <strong>${time}</strong>`
+	/**
+	 * Get a description for an interval event
+	 */
+	getRandomIntervalDescription(event: EventInstance): string {
+		// show the actual interval, not what the user typed.
+		const iMin = Math.ceil(Number(event.options.minimum))
+		const iMax = Math.floor(Number(event.options.maximum))
+
+		if (iMax < iMin) {
+			// If illegal range, never trigger
+			return 'Never (maximum is less than minimum interval)'
+		} else if (iMin <= 0) {
+			return 'Never (minimum interval is zero or less)'
+		} else {
+			return `Every <strong>${this.formatSeconds(iMin)} - ${this.formatSeconds(iMax)}</strong>`
+		}
 	}
 
 	/**
 	 * Calculate the next unix time that an timeofday event should execute at
 	 * @param time - time details for timeofday event
 	 */
-	#getNextTODExecuteTime(time: Record<string, any>): number | null {
+	#getNextTODExecuteTime(time: CompanionOptionValues): number | null {
 		if (typeof time.time !== 'string' || !Array.isArray(time.days) || !time.days.length) return null
 
 		const timeMatch = time.time.match(/^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])$/i)
 		if (!timeMatch) return null
 		const parsedDays = time.days.map(Number)
 
-		const res = new Date()
-		const now = res.getTime()
+		const hour = Number(timeMatch[1])
+		const minute = Number(timeMatch[2])
+		const second = Number(timeMatch[3])
 
-		// set the time to that specified
-		res.setHours(Number(timeMatch[1]), Number(timeMatch[2]), Number(timeMatch[3]), 0)
+		const tz = this.#getTimezone()
 
-		// if time is in the past, shift it forwards to the next possible day
-		if (res.getTime() < now) {
-			res.setDate(res.getDate() + 1)
+		const now = Date.now()
+		// Start from the current calendar date as observed in the configured timezone
+		const parts = getZonedDateParts(new Date(now), tz)
+		if (!parts) return null
+
+		// Build the candidate instant for the requested time on the current day (in the configured timezone)
+		let candidate = zonedTimeToUtc({ year: parts.year, month: parts.month, day: parts.day, hour, minute, second }, tz)
+
+		// if time is in the past, shift it forwards to the next day
+		if (candidate < now) {
+			candidate = this.#advanceZonedDay(candidate, tz, hour, minute, second)
 		}
 
-		// ensure the time is for the correct day
-		const currentDay = res.getDay()
-		if (!parsedDays.includes(currentDay)) {
-			let nextDay = null
+		// ensure the time is for an allowed day of week, advancing a day at a time until it matches
+		// (bounded to 8 iterations to cover a full week plus the initial day)
+		for (let i = 0; i < 8; i++) {
+			const candidateParts = getZonedDateParts(new Date(candidate), tz)
+			if (!candidateParts) return null
+			if (parsedDays.includes(candidateParts.weekday)) return candidate
 
-			const futureDays = time.days.filter((d) => d > currentDay)
-			if (futureDays.length > 0) {
-				// find the first day in the remainder of the week
-				nextDay = futureDays.reduce((first, cand) => Math.min(first, cand), futureDays[0])
-			} else {
-				// find the first day next week
-				const firstDay = parsedDays.reduce((first, cand) => Math.min(first, cand), 7)
-				nextDay = 7 + firstDay
-			}
-
-			if (nextDay === null) return null // No day was found somehow...
-
-			// Adjust the date, this will wrap the month by itself
-			res.setDate(res.getDate() + nextDay - currentDay)
+			candidate = this.#advanceZonedDay(candidate, tz, hour, minute, second)
 		}
 
-		return res.getTime()
+		return null // No matching day was found somehow...
+	}
+
+	/**
+	 * Advance a candidate instant by one calendar day in the given timezone, keeping the requested
+	 * wall-clock time. Recomputing from calendar fields (rather than adding 24h) keeps the wall-clock
+	 * time stable across DST transitions.
+	 */
+	#advanceZonedDay(candidate: number, tz: string | undefined, hour: number, minute: number, second: number): number {
+		const parts = getZonedDateParts(new Date(candidate), tz)
+		if (!parts) return candidate + 24 * 60 * 60 * 1000
+		// Add a day at the calendar level; Date.UTC normalises month/year wrapping for us
+		const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1))
+		return zonedTimeToUtc(
+			{
+				year: next.getUTCFullYear(),
+				month: next.getUTCMonth() + 1,
+				day: next.getUTCDate(),
+				hour,
+				minute,
+				second,
+			},
+			tz
+		)
 	}
 
 	/**
@@ -185,8 +269,11 @@ export class TriggersEventTimer {
 	 */
 	getTimeOfDayDescription(event: EventInstance): string {
 		let day_str = 'Unknown'
-		if (event.options.days) {
-			const days = [...event.options.days].sort()
+		if (event.options.days && Array.isArray(event.options.days)) {
+			const days = [...event.options.days]
+				.map(Number)
+				.filter((d) => !isNaN(d))
+				.sort()
 			const days_tmp = days.toString()
 
 			if (days.length === 7) {
@@ -197,22 +284,22 @@ export class TriggersEventTimer {
 				day_str = 'Weekends'
 			} else {
 				try {
-					day_str = days.map((d) => dayjs().day(d).format('ddd')).join(', ')
+					day_str = days.map((d) => dayjs().day(Number(d)).format('ddd')).join(', ')
 				} catch (_e) {
 					day_str = 'Error'
 				}
 			}
 		}
 
-		return `<strong>${day_str}</strong>, ${event.options.time}`
+		return `<strong>${day_str}</strong>, ${stringifyVariableValue(event.options.time) ?? 'Unknown'}`
 	}
 
 	/**
 	 * Get a description for a time of day event
 	 */
 	getSpecificDateDescription(event: EventInstance): string {
-		const date_str = event.options.date ? dayjs(event.options.date).format('YYYY-MM-DD') : 'Unknown'
-		const time_str = event.options.time ? event.options.time : 'Unknown'
+		const date_str = event.options.date ? dayjs(event.options.date as string | number).format('YYYY-MM-DD') : 'Unknown'
+		const time_str = event.options.time ? stringifyVariableValue(event.options.time) : 'Unknown'
 
 		return `<strong>Once</strong>, on ${date_str} at ${time_str}`
 	}
@@ -221,53 +308,88 @@ export class TriggersEventTimer {
 	 * Calculate the next unix time that an specificDate event should execute at
 	 * @param date - date details for specificDate event
 	 */
-	#getSpecificDateExecuteTime(date: Record<string, any>): number | null {
+	#getSpecificDateExecuteTime(date: CompanionOptionValues): number | null {
 		if (typeof date !== 'object' || !date.date || !date.time) return null
 
-		const res = new Date(dayjs(date.date).format('YYYY-MM-DD') + 'T' + date.time)
+		const timeValue: string | number = date.time as string | number
+		const dateStr = dayjs(date.date as string | number).format('YYYY-MM-DD')
+		const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+		const timeMatch = String(timeValue).match(/^([01][0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/)
+		if (!dateMatch || !timeMatch) return null
+
+		// Interpret the wall-clock date/time in the configured timezone
+		const tz = this.#getTimezone()
+		const res = zonedTimeToUtc(
+			{
+				year: Number(dateMatch[1]),
+				month: Number(dateMatch[2]),
+				day: Number(dateMatch[3]),
+				hour: Number(timeMatch[1]),
+				minute: Number(timeMatch[2]),
+				second: Number(timeMatch[3] ?? 0),
+			},
+			tz
+		)
 
 		// if specific date is in the past, ignore
-		const now = new Date()
-		if (res < now) return null
-		return res.getTime()
+		if (res < Date.now()) return null
+		return res
 	}
 
 	/**
 	 * Calculate the next unix time that an sunrise or set event should execute at
 	 */
 
-	#getNextSunExecuteTime(input: Record<string, any>): number {
-		const latitude = input.latitude
-		const longitude = input.longitude
-		const offset = input.offset
+	#getNextSunExecuteTime(input: CompanionOptionValues): number {
+		const latitude = Number(input.latitude)
+		const longitude = Number(input.longitude)
+		const offset = Number(input.offset)
 
 		// convert 0 or 1 to sunrise or sunset
 		const sunset = input.type == 'sunset'
 
-		// get sunrise/set time for today (nextDay is set to 0)
-		let time = getSunEvent(sunset, latitude, longitude, offset, 0)
+		const tz = this.#getTimezone()
+		const now = Date.now()
 
-		// if time is in the past, get the sun event for the next day
-		const now = new Date()
+		// Determine the current calendar date as observed in the configured timezone
+		const parts = getZonedDateParts(new Date(now), tz)
+		if (!parts) return NaN
+
+		// get sunrise/set time for today
+		let time = getSunEvent(sunset, latitude, longitude, offset, parts.year, parts.month, parts.day)
+
+		// if time is in the past, get the sun event for the next calendar day
 		if (time < now) {
-			// call the function for tomorrow (nextDay is set to 1)
-			time = getSunEvent(sunset, latitude, longitude, offset, 1)
+			const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1))
+			time = getSunEvent(
+				sunset,
+				latitude,
+				longitude,
+				offset,
+				next.getUTCFullYear(),
+				next.getUTCMonth() + 1,
+				next.getUTCDate()
+			)
 		}
 
-		return time.getTime()
+		return time
 
 		// Modified function to calculate the sunrise/set time by adam-carter-fms
 		// https://gist.github.com/adam-carter-fms/a44a14c0a8cdacbbc38276f6d553e024#file-sunriseset-js-L12
-		function getSunEvent(sunset: boolean, latitude: number, longitude: number, offset: number, nextDay: number): Date {
-			const res = new Date()
-			res.setDate(res.getDate() + nextDay)
-			const now = res
-
-			const start = new Date(now.getFullYear(), 0, 0)
-			// @ts-expect-error TS claims dates can't be subtracted, this should be revisited but I don't want to touch what works
-			const diff = now - start + (start.getTimezoneOffset() - now.getTimezoneOffset()) * 60 * 1000
-			const oneDay = 1000 * 60 * 60 * 24
-			const day = Math.floor(diff / oneDay)
+		//
+		// Works entirely in UTC so DST transitions never shift the result (issue #3737): both the
+		// day-of-year and the final instant are derived with UTC calendar arithmetic.
+		function getSunEvent(
+			sunset: boolean,
+			latitude: number,
+			longitude: number,
+			offset: number,
+			year: number,
+			month: number,
+			dayOfMonth: number
+		): number {
+			// Day of year (Jan 1 = 1), using UTC arithmetic so DST never affects it
+			const day = Math.floor((Date.UTC(year, month - 1, dayOfMonth) - Date.UTC(year, 0, 0)) / 86400000)
 
 			const zenith = 90.83333333333333
 			const D2R = Math.PI / 180
@@ -333,18 +455,11 @@ export class TriggersEventTimer {
 				UT = UT + 24
 			}
 
-			const ms = UT * 60 * 60 * 1000
-
-			const sunEventTime = new Date(ms)
-			sunEventTime.setFullYear(now.getFullYear())
-			sunEventTime.setMonth(now.getMonth())
-			sunEventTime.setDate(now.getDate())
-
-			const temp_minutes = sunEventTime.getMinutes()
-
-			// add offset to time
-			sunEventTime.setMinutes(temp_minutes + 60 + offset)
-			return sunEventTime
+			// UT is the event's UTC time-of-day (decimal hours). Stamp it onto the same calendar date
+			// (interpreted as a UTC date) and apply the user offset in real minutes.
+			// Note: for extreme longitudes near the date line the UTC date can differ from the local date
+			// by a day; accepted here as the caller only needs the next event within ~24-48h.
+			return Date.UTC(year, month - 1, dayOfMonth) + Math.round(UT * 3600 * 1000) + offset * 60 * 1000
 		}
 	}
 
@@ -360,7 +475,27 @@ export class TriggersEventTimer {
 		} else {
 			type_str = 'Error'
 		}
-		return `At <strong>${type_str}</strong>, ${event.options.offset} min offset`
+		return `At <strong>${type_str}</strong>, ${Number(event.options.offset)} min offset`
+	}
+
+	/**
+	 * Calculate a new random interval if both min & max period were specified.
+	 * Otherwise, do nothing.
+	 * For now, limit intervals to integers. Note that the endpoints are inclusive, but strict (if not integers)
+	 * @param interval The interval object to update
+	 */
+	#calcRandomPeriod(interval: IntervalEvent) {
+		if (interval.maxperiod !== undefined && interval.minperiod !== undefined) {
+			const iMin = Math.ceil(interval.minperiod)
+			const iMax = Math.floor(interval.maxperiod)
+			if (iMax < iMin || iMin <= 0 || isNaN(iMin) || isNaN(iMax)) {
+				// If illegal range, never trigger (and don't make period NaN, although the text-input fields may prevent it from happening)
+				interval.period = Infinity
+				return
+			}
+			const newPeriod = iMin + Math.floor(Math.random() * (iMax - iMin + 1))
+			interval.period = newPeriod
+		}
 	}
 
 	/**
@@ -371,11 +506,26 @@ export class TriggersEventTimer {
 	#onTick = (tickSeconds: number, nowTime: number): void => {
 		let execute = false
 
+		// If the configured timezone has changed, recompute the next execute times for the
+		// timezone-sensitive events so the change takes effect immediately (not just after the next fire)
+		const currentTimezone = this.#getTimezone()
+		if (currentTimezone !== this.#lastTimezone) {
+			this.#lastTimezone = currentTimezone
+			for (const tod of this.#timeOfDayEvents) {
+				tod.nextExecute = this.#getNextTODExecuteTime(tod.time)
+			}
+			for (const date of this.#specificDateEvents) {
+				date.nextExecute = this.#getSpecificDateExecuteTime(date.date)
+			}
+		}
+
 		for (const interval of this.#intervalEvents) {
 			// Check if this interval should cause an execution
 			if (interval.lastExecute + interval.period <= tickSeconds) {
 				execute = true
 				interval.lastExecute = tickSeconds
+				// calculate next period if this is a random interval
+				this.#calcRandomPeriod(interval)
 			}
 		}
 
@@ -391,7 +541,7 @@ export class TriggersEventTimer {
 			// check if this date should cause an execution
 			if (date.nextExecute && date.nextExecute <= nowTime) {
 				execute = true
-				date.nextExecute = this.#getSpecificDateExecuteTime(date)
+				date.nextExecute = this.#getSpecificDateExecuteTime(date.date)
 			}
 		}
 
@@ -407,8 +557,8 @@ export class TriggersEventTimer {
 			setImmediate(() => {
 				try {
 					this.#executeActions(nowTime, TriggerExecutionSource.Other)
-				} catch (e: any) {
-					this.#logger.warn(`Execute actions failed: ${e?.toString?.() ?? e?.message ?? e}`)
+				} catch (e) {
+					this.#logger.warn(`Execute actions failed: ${stringifyError(e)}`)
 				}
 			})
 		}
@@ -424,6 +574,8 @@ export class TriggersEventTimer {
 			// Reset all the intervals, to be based from the next tick
 			for (const interval of this.#intervalEvents) {
 				interval.lastExecute = this.#lastTick + 1
+				// calculate next period if this is a random interval
+				this.#calcRandomPeriod(interval)
 			}
 		}
 
@@ -433,17 +585,22 @@ export class TriggersEventTimer {
 	/**
 	 * Add an interval event listener
 	 * @param id Id of the event
-	 * @param period Time interval of the trigger (in seconds)
+	 * @param period Time interval of the trigger (in seconds). This is the minimum period.
+	 * @param maxperiod for the time interval, if using random intervals (in seconds)
 	 */
-	setInterval(id: string, period: number): void {
+	setInterval(id: string, period: number, maxperiod?: number): void {
 		this.clearInterval(id)
 
 		if (period && period > 0) {
-			this.#intervalEvents.push({
+			const idx = this.#intervalEvents.push({
 				id,
 				period,
+				minperiod: period,
+				maxperiod,
 				lastExecute: this.#lastTick + 1,
 			})
+			// update the period if this is a random interval:
+			this.#calcRandomPeriod(this.#intervalEvents[idx - 1])
 		}
 	}
 
@@ -457,7 +614,7 @@ export class TriggersEventTimer {
 	/**
 	 * Add a timeofday event listener
 	 */
-	setTimeOfDay(id: string, time: Record<string, any>): void {
+	setTimeOfDay(id: string, time: CompanionOptionValues): void {
 		this.clearTimeOfDay(id)
 
 		this.#timeOfDayEvents.push({
@@ -478,7 +635,7 @@ export class TriggersEventTimer {
 	/**
 	 * Add a specificDate event listener
 	 */
-	setSpecificDate(id: string, date: Record<string, any>): void {
+	setSpecificDate(id: string, date: CompanionOptionValues): void {
 		this.clearSpecificDate(id)
 
 		this.#specificDateEvents.push({
@@ -499,7 +656,7 @@ export class TriggersEventTimer {
 	/**
 	 * Add a sun event listener
 	 */
-	setSun(id: string, params: Record<string, any>): void {
+	setSun(id: string, params: CompanionOptionValues): void {
 		this.clearSun(id)
 
 		this.#sunEvents.push({

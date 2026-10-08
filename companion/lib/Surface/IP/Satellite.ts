@@ -8,22 +8,26 @@
  * Individual Contributor License Agreement for companion along with
  * this program.
  */
-import LogController from '../../Log/Controller.js'
-import { EventEmitter } from 'events'
-import { ImageWriteQueue } from '../../Resources/ImageWriteQueue.js'
-import { parseColor, parseColorToNumber, transformButtonImage } from '../../Resources/Util.js'
-import { convertXYToIndexForPanel, convertPanelIndexToXY } from '../Util.js'
-import {
-	BrightnessConfigField,
-	LegacyRotationConfigField,
-	LockConfigFields,
-	OffsetConfigFields,
-	RotationConfigField,
-} from '../CommonConfigFields.js'
+import { EventEmitter } from 'node:events'
 import debounceFn from 'debounce-fn'
-import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
-import type { CompanionVariableValue } from '@companion-module/base'
+import type { JsonValue, ReadonlyDeep } from 'type-fest'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type { CompanionSurfaceConfigField, GridSize } from '@companion-app/shared/Model/Surfaces.js'
+import { stringifyVariableValue, type VariableValue } from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import type { ImageResult } from '../../Graphics/ImageResult.js'
+import { GraphicsRenderer } from '../../Graphics/Renderer.js'
+import LogController from '../../Log/Controller.js'
+import { ImageWriteQueue } from '../../Resources/ImageWriteQueue.js'
+import type { SatelliteMessageArgs, SatelliteSocketWrapper } from '../../Service/Satellite/SatelliteApi.js'
+import { buildSatelliteStyleArgs, type SatelliteBitmapFormat } from '../../Service/Satellite/SatelliteRenderUtil.js'
+import type {
+	SatelliteControlStylePreset,
+	SatelliteSurfaceLayout,
+} from '../../Service/Satellite/SatelliteSurfaceManifestSchema.js'
+import { BrightnessConfigField, OffsetConfigFields, RotationConfigField } from '../CommonConfigFields.js'
+import { createSurfaceConfigPayload } from '../PluginConfigFields.js'
 import type {
 	DrawButtonItem,
 	SurfaceExecuteExpressionFn,
@@ -31,18 +35,14 @@ import type {
 	SurfacePanelEvents,
 	SurfacePanelInfo,
 } from '../Types.js'
-import type { ImageResult } from '../../Graphics/ImageResult.js'
-import type { SatelliteMessageArgs, SatelliteSocketWrapper } from '../../Service/Satellite/SatelliteApi.js'
-import type {
-	SatelliteControlStylePreset,
-	SatelliteSurfaceLayout,
-} from '../../Service/Satellite/SatelliteSurfaceManifestSchema.js'
-import type { ReadonlyDeep } from 'type-fest'
+import { convertPanelIndexToXY, convertXYToIndexForPanel } from '../Util.js'
 
 export interface SatelliteDeviceInfo {
+	connectionId: string
 	deviceId: string
+	serial: string
+	serialIsUnique: boolean
 	productName: string
-	path: string
 	socket: SatelliteSocketWrapper
 	gridSize: GridSize
 	supportsBrightness: boolean
@@ -51,6 +51,13 @@ export interface SatelliteDeviceInfo {
 
 	surfaceManifestFromClient: boolean
 	surfaceManifest: SatelliteSurfaceLayout
+
+	configFields: CompanionSurfaceConfigField[] | undefined
+
+	canChangePage: string | undefined
+
+	/** The bitmap encoding (rgb/png/webp) this surface negotiated for button images */
+	bitmapFormat: SatelliteBitmapFormat
 }
 export interface SatelliteTransferableValue {
 	id: string
@@ -60,18 +67,17 @@ export interface SatelliteTransferableValue {
 }
 interface SatelliteInputVariableInfo {
 	id: string
-	lastValue: CompanionVariableValue
+	lastValue: VariableValue
 }
 interface SatelliteOutputVariableInfo {
 	id: string
 	lastReferencedVariables: ReadonlySet<string> | null
-	lastValue: any
+	lastValue: JsonValue | undefined
 	triggerUpdate?: () => void
 }
 
 function generateConfigFields(
 	deviceInfo: SatelliteDeviceInfo,
-	legacyRotation: boolean,
 	inputVariables: Record<string, SatelliteInputVariableInfo>,
 	outputVariables: Record<string, SatelliteOutputVariableInfo>
 ): CompanionSurfaceConfigField[] {
@@ -79,9 +85,23 @@ function generateConfigFields(
 	if (deviceInfo.supportsBrightness) {
 		fields.push(BrightnessConfigField)
 	}
-	fields.push(legacyRotation ? LegacyRotationConfigField : RotationConfigField, ...LockConfigFields)
+	fields.push(RotationConfigField)
+
+	if (deviceInfo.canChangePage) {
+		fields.push({
+			id: 'canChangePage',
+			type: 'checkbox',
+			label: deviceInfo.canChangePage,
+			default: false,
+		})
+	}
+
+	if (deviceInfo.configFields && deviceInfo.configFields.length > 0) {
+		fields.push(...deviceInfo.configFields)
+	}
 
 	for (const variable of deviceInfo.transferVariables) {
+		if (BANNED_PROPS.has(variable.id)) continue
 		if (variable.type === 'input') {
 			const id = `satellite_input_${variable.id}`
 			fields.push({
@@ -100,10 +120,10 @@ function generateConfigFields(
 
 			fields.push({
 				id,
-				type: 'textinput',
+				type: 'expression',
 				label: variable.name,
 				tooltip: variable.description,
-				isExpression: true,
+				allowInvalidValues: true,
 			})
 
 			outputVariables[variable.id] = {
@@ -168,10 +188,13 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	readonly #writeQueue: ImageWriteQueue<string, [ResolvedControlDefinition, DrawButtonItem]>
 
 	#config: Record<string, any>
+	readonly #hasDeviceConfigFields: boolean
 
 	readonly surfaceManifestFromClient: boolean
 	readonly #surfaceManifest: ReadonlyDeep<SatelliteSurfaceLayout>
 	readonly #controlDefinitions: ReadonlyMap<string, ResolvedControlDefinition[]>
+	readonly #supportsLockedState: boolean
+	readonly #bitmapFormat: SatelliteBitmapFormat
 
 	readonly #inputVariables: Record<string, SatelliteInputVariableInfo> = {}
 	readonly #outputVariables: Record<string, SatelliteOutputVariableInfo> = {}
@@ -181,7 +204,10 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	readonly deviceId: string
 	readonly socket: SatelliteSocketWrapper
 
-	constructor(deviceInfo: SatelliteDeviceInfo, executeExpression: SurfaceExecuteExpressionFn) {
+	// Cache for generated lock images by dimension
+	#lockImage: ImageResult | null = null
+
+	constructor(deviceInfo: SatelliteDeviceInfo, surfaceId: string, executeExpression: SurfaceExecuteExpressionFn) {
 		super()
 
 		this.#executeExpression = executeExpression
@@ -195,20 +221,22 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		this.surfaceManifestFromClient = deviceInfo.surfaceManifestFromClient
 		this.#surfaceManifest = deviceInfo.surfaceManifest
 		this.#controlDefinitions = resolveControlDefinitions(deviceInfo.surfaceManifest)
+		this.#supportsLockedState = deviceInfo.supportsLockedState
+		this.#bitmapFormat = deviceInfo.bitmapFormat
 
-		const anyControlHasBitmap = !!Array.from(this.#controlDefinitions.values()).find(
-			(controls) => !!controls.find((control) => !!control.style.bitmap)
-		)
+		this.#hasDeviceConfigFields = (deviceInfo.configFields ?? []).some((f) => f.type !== 'static-text')
 
 		this.info = {
-			type: deviceInfo.productName,
-			devicePath: deviceInfo.path,
-			configFields: generateConfigFields(deviceInfo, anyControlHasBitmap, this.#inputVariables, this.#outputVariables),
-			deviceId: deviceInfo.path,
-			location: deviceInfo.socket.remoteAddress,
+			description: deviceInfo.productName,
+			configFields: generateConfigFields(deviceInfo, this.#inputVariables, this.#outputVariables),
+			surfaceId: surfaceId,
+			location: deviceInfo.socket.remoteAddress ?? null,
+			isRemote: true, // Satellite connections are always remote
+			canChangePage: !!deviceInfo.canChangePage,
 		}
 
 		this.#logger.info(`Adding Satellite device "${this.deviceId}"`)
+		this.#logger.debug(`Device info: ${JSON.stringify(deviceInfo)}`)
 
 		this.#config = {
 			rotation: 0,
@@ -218,8 +246,8 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		this.#writeQueue = new ImageWriteQueue(this.#logger, async (_id, controlDefinition, drawItem) => {
 			try {
 				await this.#sendDraw(controlDefinition, drawItem)
-			} catch (e: any) {
-				this.#logger.debug(`scale image failed: ${e}\n${e.stack}`)
+			} catch (e) {
+				this.#logger.debug(`scale image failed: ${stringifyError(e)}`)
 				this.emit('remove')
 				return
 			}
@@ -229,22 +257,62 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		for (const [name, outputVariable] of Object.entries(this.#outputVariables)) {
 			this.#triggerOutputVariable(name, outputVariable)
 		}
+	}
 
-		if (deviceInfo.supportsLockedState) {
-			this.setLocked = (locked: boolean, characterCount: number): void => {
-				this.#logger.silly(`locked: ${locked} - ${characterCount}`)
-				if (this.socket !== undefined) {
-					this.socket.sendMessage('LOCKED-STATE', null, this.deviceId, {
-						LOCKED: locked,
-						CHARACTER_COUNT: characterCount,
+	setLocked(locked: boolean, characterCount: number): void {
+		if (this.#supportsLockedState) {
+			this.#logger.silly(`locked: ${locked} - ${characterCount}`)
+			if (this.socket !== undefined) {
+				let rotation = 0
+				switch (this.#config.rotation) {
+					case 'surface-90':
+					case -90:
+						rotation = -90
+						break
+					case 'surface180':
+					case 180:
+						rotation = 180
+						break
+					case 'surface90':
+					case 90:
+						rotation = 90
+						break
+				}
+				this.socket.sendMessage('LOCKED-STATE', null, this.deviceId, {
+					LOCKED: locked,
+					CHARACTER_COUNT: characterCount,
+					ROTATION: rotation,
+				})
+			}
+		} else {
+			// Clear the deck to blank anything we won't be drawing to
+			this.clearDeck()
+
+			if (!locked) return
+
+			// Iterate through all controls and draw lock icons/text
+			for (const definitions of this.#controlDefinitions.values()) {
+				for (const definition of definitions) {
+					// Queue the draw
+					this.#writeQueue.queue(definition.id, definition, {
+						x: definition.column,
+						y: definition.row,
+						defaultRender: this.#getLockImage(),
+						location: null,
 					})
 				}
 			}
 		}
 	}
 
-	// Override the base type, it may be defined by the constructor
-	setLocked: SurfacePanel['setLocked']
+	/**
+	 * Get or generate a lock icon image for a given size
+	 */
+	#getLockImage(): ImageResult {
+		if (!this.#lockImage) this.#lockImage = GraphicsRenderer.drawLockIcon()
+
+		return this.#lockImage
+	}
 
 	quit(): void {}
 
@@ -266,58 +334,17 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 			params['CONTROLID'] = controlDefinition.id
 		}
 
-		const style = drawItem.image.style
-
-		if (controlDefinition.style.bitmap) {
-			const buffer = await transformButtonImage(
-				drawItem.image,
-				this.#config.rotation,
-				controlDefinition.style.bitmap.w,
-				controlDefinition.style.bitmap.h,
-				'rgb'
-			)
-
-			if (buffer === undefined || buffer.length == 0) {
-				this.#logger.warn('buffer has invalid size')
-			} else {
-				params['BITMAP'] = Buffer.from(buffer).toString('base64')
-			}
+		if (drawItem.location) {
+			params['LOCATION'] = `${drawItem.location.pageNumber}/${drawItem.location.row}/${drawItem.location.column}`
 		}
 
-		if (!this.socket) return
-
-		if (controlDefinition.style.colors) {
-			let bgcolor = typeof style !== 'string' && style ? parseColor(style.bgcolor).replaceAll(' ', '') : 'rgb(0,0,0)'
-			let fgcolor = typeof style !== 'string' && style ? parseColor(style.color).replaceAll(' ', '') : 'rgb(0,0,0)'
-
-			if (controlDefinition.style.colors !== 'rgb') {
-				bgcolor = '#' + parseColorToNumber(bgcolor).toString(16).padStart(6, '0')
-				fgcolor = '#' + parseColorToNumber(fgcolor).toString(16).padStart(6, '0')
-			}
-
-			params['COLOR'] = bgcolor
-			params['TEXTCOLOR'] = fgcolor
-		}
-
-		if (controlDefinition.style.text) {
-			const text = (typeof style !== 'string' && style?.text) || ''
-			params['TEXT'] = Buffer.from(text).toString('base64')
-		}
-		if (controlDefinition.style.textStyle) {
-			params['FONT_SIZE'] = typeof style !== 'string' && style ? style.size : 'auto'
-		}
-
-		let type = 'BUTTON'
-		if (style === 'pageup') {
-			type = 'PAGEUP'
-		} else if (style === 'pagedown') {
-			type = 'PAGEDOWN'
-		} else if (style === 'pagenum') {
-			type = 'PAGENUM'
-		}
-
-		params['PRESSED'] = typeof style !== 'string' && !!style?.pushed
-		params['TYPE'] = type
+		const styleArgs = await buildSatelliteStyleArgs(
+			drawItem.defaultRender,
+			controlDefinition.style,
+			this.#config.rotation,
+			this.#bitmapFormat
+		)
+		Object.assign(params, styleArgs)
 
 		if (!this.socket) return
 
@@ -349,12 +376,12 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	/**
 	 * Draw a button
 	 */
-	draw(x: number, y: number, image: ImageResult): void {
-		const definitions = this.#controlDefinitions.get(formatSurfaceXy(x, y))
+	draw(item: DrawButtonItem): void {
+		const definitions = this.#controlDefinitions.get(formatSurfaceXy(item.x, item.y))
 		if (!definitions) return
 
 		for (const definition of definitions) {
-			this.#writeQueue.queue(definition.id, definition, { x, y, image })
+			this.#writeQueue.queue(definition.id, definition, item)
 		}
 	}
 
@@ -376,6 +403,11 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		this.emit('pincodeKey', pincodeKey)
 	}
 
+	doChangePage(forward: boolean): void {
+		if (!this.info.canChangePage || !this.#config.canChangePage) return
+		this.emit('changePage', forward)
+	}
+
 	/**
 	 * Produce a rotation event
 	 */
@@ -393,7 +425,7 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	/**
 	 * Set the value of a variable from this surface
 	 */
-	setVariableValue(variableName: string, variableValue: CompanionVariableValue): void {
+	setVariableValue(variableName: string, variableValue: VariableValue): void {
 		const inputVariableInfo = this.#inputVariables[variableName]
 		if (!inputVariableInfo) return // Not known
 
@@ -417,18 +449,14 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 	/**
 	 * Propagate variable changes
 	 */
-	onVariablesChanged(allChangedVariables: Set<string>): void {
+	onVariablesChanged(allChangedVariables: ReadonlySet<string>): void {
 		for (const [name, outputVariable] of Object.entries(this.#outputVariables)) {
 			if (!outputVariable.lastReferencedVariables) continue
 
-			for (const variable of allChangedVariables.values()) {
-				if (!outputVariable.lastReferencedVariables.has(variable)) continue
+			if (outputVariable.lastReferencedVariables.isDisjointFrom(allChangedVariables)) continue
 
-				// There is a change, recalculate and send the value
-
-				this.#triggerOutputVariable(name, outputVariable)
-				break
-			}
+			// There is a change, recalculate and send the value
+			this.#triggerOutputVariable(name, outputVariable)
 		}
 	}
 
@@ -436,10 +464,10 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		if (!outputVariable.triggerUpdate)
 			outputVariable.triggerUpdate = debounceFn(
 				() => {
-					let expressionResult: CompanionVariableValue | undefined = VARIABLE_UNKNOWN_VALUE
+					let expressionResult: VariableValue | undefined = VARIABLE_UNKNOWN_VALUE
 
 					const expressionText = this.#config[outputVariable.id]
-					const parseResult = this.#executeExpression(expressionText ?? '', this.info.deviceId, undefined)
+					const parseResult = this.#executeExpression(expressionText ?? '', this.info.surfaceId)
 					if (parseResult.ok) {
 						expressionResult = parseResult.value
 					} else {
@@ -454,7 +482,7 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 					outputVariable.lastValue = expressionResult
 
 					if (this.socket !== undefined) {
-						const base64Value = Buffer.from(expressionResult?.toString() ?? '').toString('base64')
+						const base64Value = Buffer.from(stringifyVariableValue(expressionResult) ?? '').toString('base64')
 						this.socket.sendMessage('VARIABLE-VALUE', null, this.deviceId, {
 							VARIABLE: name,
 							VALUE: base64Value,
@@ -491,6 +519,21 @@ export class SurfaceIPSatellite extends EventEmitter<SurfacePanelEvents> impleme
 		}
 
 		this.#config = config
+
+		if (this.#hasDeviceConfigFields) {
+			this.#sendDeviceConfig()
+		}
+	}
+
+	#sendDeviceConfig(): void {
+		const configValues = createSurfaceConfigPayload(this.info.configFields, this.#config)
+		const encoded = Buffer.from(JSON.stringify(configValues)).toString('base64')
+		this.socket.sendMessage('DEVICE-CONFIG', null, this.deviceId, { CONFIG: encoded })
+	}
+
+	updateFirmwareUpdateInfo(firmwareUpdateUrl: string | null): void {
+		this.info.hasFirmwareUpdates = firmwareUpdateUrl ? { updaterDownloadUrl: firmwareUpdateUrl } : undefined
+		this.emit('firmwareUpdateInfo')
 	}
 
 	/**

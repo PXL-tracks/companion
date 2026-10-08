@@ -1,16 +1,21 @@
+import { faClone, faPlus } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import classNames from 'classnames'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GetStepIds } from '@companion-app/shared/Controls.js'
 import type { ActionStepOptions } from '@companion-app/shared/Model/ActionModel.js'
 import type { NormalButtonSteps } from '@companion-app/shared/Model/ButtonModel.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { CNav, CNavItem, CNavLink, CButton } from '@coreui/react'
-import { faPlus, faClone } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react'
+import { Button } from '~/Components/Button'
 import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { useControlActionStepsAndSetsService } from '~/Services/Controls/ControlActionStepsAndSetsService.js'
-import { ControlActionStepTab } from './ControlActionStepTab.js'
-import type { LocalVariablesStore } from '../../Controls/LocalVariablesStore.js'
+import { TabArea } from '~/Components/TabArea.js'
+import { TextInputFieldSimple } from '~/Components/TextInputField.js'
+import useElementClientSize from '~/Hooks/useElementClientSize.js'
+import { useLocalStorage } from '~/Hooks/useLocalStorage.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { useControlActionStepsAndSetsService } from '~/Services/Controls/ControlActionStepsAndSetsService.js'
+import type { LocalVariablesStore } from '../../Controls/LocalVariablesStore.js'
+import { ControlActionStepTab } from './ControlActionStepTab.js'
 
 export interface ButtonEditorExtraTabs {
 	id: string
@@ -41,6 +46,7 @@ export function ButtonEditorTabs({
 	children,
 }: ButtonEditorTabsProps): React.JSX.Element {
 	const confirmRef = useRef<GenericConfirmModalRef>(null)
+	const [tabBarRef, tabBarSize] = useElementClientSize<HTMLDivElement>()
 
 	const stepKeys = useMemo(() => GetStepIds(steps), [steps])
 
@@ -48,24 +54,20 @@ export function ButtonEditorTabs({
 		const tabKeys: string[] = [...stepKeys.map((s) => `step:${s}`)]
 
 		if (extraTabs) {
-			for (const tab of extraTabs) {
-				if (tab.position === 'start') {
-					tabKeys.unshift(tab.id)
-				} else {
-					tabKeys.push(tab.id)
-				}
-			}
+			tabKeys.unshift(...extraTabs.filter((t) => t.position === 'start').map((t) => t.id))
+			tabKeys.push(...extraTabs.filter((t) => t.position === 'end').map((t) => t.id))
 		}
 
 		return tabKeys
 	}, [stepKeys, extraTabs])
 
-	const [selectedStep, setSelectedStep] = useState(tabKeys[0] ?? '')
+	const defaultStep = stepKeys[0] ? `step:${stepKeys[0]}` : (tabKeys[0] ?? '')
+	const [selectedStep, setSelectedStep] = useLocalStorage('buttonEditor.activeTab', defaultStep)
 	useEffect(() => {
 		if (!tabKeys.includes(selectedStep)) {
-			setSelectedStep(tabKeys[0])
+			setSelectedStep(stepKeys[0] ? `step:${stepKeys[0]}` : (tabKeys[0] ?? ''))
 		}
-	}, [tabKeys, selectedStep])
+	}, [tabKeys, selectedStep, stepKeys, setSelectedStep])
 
 	const service = useControlActionStepsAndSetsService(controlId, confirmRef, setSelectedStep)
 
@@ -77,61 +79,54 @@ export function ButtonEditorTabs({
 		<>
 			<GenericConfirmModal ref={confirmRef} />
 
-			<div className={'row-heading'}>
-				<CNav variant="tabs">
-					{extraTabs?.map(
-						(tab) =>
-							tab.position === 'start' && (
-								<CNavItem key={tab.id} className="nav-steps-special">
-									<CNavLink active={selectedStep === tab.id} onClick={() => setSelectedStep(tab.id)}>
+			<div ref={tabBarRef} className="sticky-tabs">
+				<TabArea.Root value={selectedStep} onValueChange={setSelectedStep}>
+					<TabArea.List>
+						{extraTabs?.map(
+							(tab) =>
+								tab.position === 'start' && (
+									<TabArea.Tab key={tab.id} className="nav-steps-special" value={tab.id} title={tab.name}>
 										{tab.name}
-									</CNavLink>
-								</CNavItem>
-							)
-					)}
+									</TabArea.Tab>
+								)
+						)}
 
-					{stepKeys.map((stepId, i) => (
-						<ActionSetTab
-							key={stepId}
-							controlId={controlId}
-							stepId={stepId}
-							stepIndex={i}
-							stepOptions={steps[stepId]?.options}
-							moreThanOneStep={stepKeys.length > 1}
-							isCurrent={runtimeProps.current_step_id === stepId}
-							isActiveAndCurrent={
-								stepId.toString() === selectedIndex.toString() && runtimeProps.current_step_id === stepId
-							}
-							active={selectedStep === `step:${stepId}`}
-							onClick={() => setSelectedStep(`step:${stepId}`)}
-						/>
-					))}
+						{stepKeys.map((stepId, i) => (
+							<ActionSetTab
+								key={stepId}
+								controlId={controlId}
+								stepId={stepId}
+								stepIndex={i}
+								stepOptions={steps[stepId]?.options}
+								moreThanOneStep={stepKeys.length > 1}
+								isCurrent={runtimeProps.current_step_id === stepId}
+							/>
+						))}
 
-					{extraTabs?.map(
-						(tab) =>
-							tab.position === 'end' && (
-								<CNavItem key={tab.id} className="nav-steps-special">
-									<CNavLink active={selectedStep === tab.id} onClick={() => setSelectedStep(tab.id)}>
+						{extraTabs?.map(
+							(tab) =>
+								tab.position === 'end' && (
+									<TabArea.Tab key={tab.id} className="nav-steps-special" value={tab.id} title={tab.name}>
 										{tab.name}
-									</CNavLink>
-								</CNavItem>
-							)
-					)}
+									</TabArea.Tab>
+								)
+						)}
 
-					{stepKeys.length === 1 && (
-						<div className="nav-last align-self-center">
-							<CButton title="Add step" size="sm" onClick={service.appendStep}>
-								<FontAwesomeIcon icon={faPlus} />
-							</CButton>
-							<CButton title="Duplicate step" size="sm" onClick={() => service.duplicateStep(stepKeys[0])}>
-								<FontAwesomeIcon icon={faClone} />
-							</CButton>
-						</div>
-					)}
-				</CNav>
+						{stepKeys.length === 1 && (
+							<div className="tab-end-area align-self-center">
+								<Button title="Add step" size="sm" onClick={service.appendStep}>
+									<FontAwesomeIcon icon={faPlus} />
+								</Button>
+								<Button title="Duplicate step" size="sm" onClick={() => service.duplicateStep(stepKeys[0])}>
+									<FontAwesomeIcon icon={faClone} />
+								</Button>
+							</div>
+						)}
+					</TabArea.List>
+				</TabArea.Root>
 			</div>
 
-			<div className="edit-sticky-body">
+			<div className="edit-sticky-body" style={{ '--tab-bar-height': `${tabBarSize.height}px` } as React.CSSProperties}>
 				{children && children(selectedStep)}
 
 				{selectedKey && selectedStepProps && (
@@ -163,10 +158,6 @@ interface ActionSetTabProps {
 	moreThanOneStep: boolean
 	// the current step is the one that is currently being executed
 	isCurrent: boolean
-	// both selected and the current step
-	isActiveAndCurrent: boolean
-	active: boolean
-	onClick: () => void
 }
 function ActionSetTab({
 	controlId,
@@ -175,25 +166,25 @@ function ActionSetTab({
 	stepOptions,
 	moreThanOneStep,
 	isCurrent,
-	isActiveAndCurrent,
-	active,
-	onClick,
 }: Readonly<ActionSetTabProps>) {
 	let linkClassname: string | undefined = undefined
 
 	const name = stepOptions?.name
-	const displayText = name ? name + ` (${stepIndex + 1})` : stepIndex === 0 ? 'Step ' + (stepIndex + 1) : stepIndex + 1
+	const displayText = name
+		? name + ` (${stepIndex + 1})`
+		: stepIndex === 0
+			? 'Step ' + (stepIndex + 1)
+			: String(stepIndex + 1)
 
 	if (moreThanOneStep) {
-		if (isActiveAndCurrent) linkClassname = 'selected-and-active'
-		else if (isCurrent) linkClassname = 'only-current'
+		if (isCurrent) linkClassname = 'highlight-current'
 	}
 
 	const renameStepMutation = useMutationExt(trpc.controls.steps.rename.mutationOptions())
 
 	const renameStep = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			renameStepMutation.mutateAsync({ controlId, stepId, newName: e.target.value }).catch((e) => {
+		(newName: string) => {
+			renameStepMutation.mutateAsync({ controlId, stepId, newName }).catch((e) => {
 				console.error('Failed to rename step:', e)
 			})
 		},
@@ -205,7 +196,7 @@ function ActionSetTab({
 	const showField = useCallback(() => setShowInputField(true), [setShowInputField])
 	const hideField = useCallback(() => setShowInputField(false), [setShowInputField])
 	const onKeyDown = useCallback(
-		(e: React.KeyboardEvent<HTMLInputElement>) => {
+		(e: React.KeyboardEvent<HTMLElement>) => {
 			if (e.key === 'Enter' || e.key === 'Escape') {
 				setShowInputField(false)
 			}
@@ -214,23 +205,23 @@ function ActionSetTab({
 	)
 
 	return (
-		<CNavItem className="nav-steps-special">
+		<TabArea.Tab
+			className={classNames('nav-steps-special', linkClassname)}
+			value={`step:${stepId}`}
+			title={displayText}
+			onDoubleClick={showField}
+		>
 			{showInputField ? (
-				<CNavLink className={linkClassname}>
-					<input
-						type="text"
-						value={name}
-						onChange={renameStep}
-						onKeyDown={onKeyDown}
-						onBlur={hideField}
-						autoFocus
-					></input>
-				</CNavLink>
+				<TextInputFieldSimple
+					id={undefined}
+					value={name ?? ''}
+					setValue={renameStep}
+					onBlur={hideField}
+					onKeyDown={onKeyDown}
+				/>
 			) : (
-				<CNavLink onDoubleClick={showField} active={active} onClick={onClick} className={linkClassname}>
-					{displayText}
-				</CNavLink>
+				displayText
 			)}
-		</CNavItem>
+		</TabArea.Tab>
 	)
 }

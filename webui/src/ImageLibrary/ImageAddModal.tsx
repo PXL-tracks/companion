@@ -1,0 +1,149 @@
+import { observer } from 'mobx-react-lite'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
+import { isLabelValid } from '@companion-app/shared/Label.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { Button } from '~/Components/Button.js'
+import { Form } from '~/Components/Form.js'
+import { Modal } from '~/Components/Modal'
+import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { ImageNameInput } from './ImageNameInput'
+
+interface ImageAddModalProps {
+	onImageCreated?: (imageName: string) => void
+}
+
+export interface ImageAddModalRef {
+	show(): void
+}
+
+export const ImageAddModal = observer(
+	forwardRef<ImageAddModalRef, ImageAddModalProps>(function ImageAddModal({ onImageCreated }, ref) {
+		const [visible, setVisible] = useState(false)
+		const [localValue, setLocalValue] = useState('')
+		const [isCreating, setIsCreating] = useState(false)
+		const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+		useImperativeHandle(
+			ref,
+			() => ({
+				show() {
+					setVisible(true)
+				},
+			}),
+			[]
+		)
+
+		// Reset state when modal opens
+		useEffect(() => {
+			if (visible) {
+				setLocalValue('')
+				setErrorMessage(null)
+			}
+		}, [visible])
+
+		const createMutation = useMutationExt(trpc.imageLibrary.create.mutationOptions())
+
+		const handleCreate = useCallback(() => {
+			if (!localValue.trim()) {
+				setErrorMessage('Image name is required')
+				return
+			}
+
+			if (!isLabelValid(localValue)) {
+				// The label is already shown as invalid, no need to tell them again
+				return
+			}
+
+			setIsCreating(true)
+			setErrorMessage(null)
+
+			// Use the name as both the name and the description
+			createMutation
+				.mutateAsync({ name: localValue.trim(), description: localValue.trim() })
+				.then((result) => {
+					// Server returns the sanitized name on success
+					if (typeof result === 'string') {
+						const newName = result
+						// Notify parent of the new image
+						if (onImageCreated) {
+							onImageCreated(newName)
+						}
+						setVisible(false)
+					}
+				})
+				.catch((err) => {
+					console.error('Failed to create image:', err)
+					// Provide more specific error messages
+					if (err) {
+						setErrorMessage(stringifyError(err))
+					} else {
+						setErrorMessage('Failed to create image. Check the name is valid and try again.')
+					}
+				})
+				.finally(() => {
+					setIsCreating(false)
+				})
+		}, [createMutation, localValue, onImageCreated])
+
+		const onOpenChangeComplete = useCallback((open: boolean) => {
+			if (!open) {
+				setLocalValue('')
+				setErrorMessage(null)
+				setVisible(false)
+			}
+		}, [])
+
+		const handleValueChange = useCallback((newValue: string) => {
+			setLocalValue(newValue)
+			setErrorMessage(null)
+		}, [])
+
+		const canCreate = isLabelValid(localValue) && localValue.trim() !== ''
+
+		const helpText = (
+			<>
+				The image name will be used to reference this image in button configurations and other places.
+				<br />
+				It must contain only letters, numbers, hyphens, and underscores.
+			</>
+		)
+
+		return (
+			<Modal.Root open={visible} onOpenChange={setVisible} onOpenChangeComplete={onOpenChangeComplete}>
+				<Modal.Portal>
+					<Modal.Backdrop />
+					<Modal.Viewport>
+						<Modal.Popup>
+							<Modal.Header closeButton>
+								<Modal.Title>Add New Image</Modal.Title>
+							</Modal.Header>
+							<Form
+								onSubmit={(e) => {
+									e.preventDefault()
+									e.stopPropagation()
+									handleCreate()
+								}}
+							>
+								<Modal.Body>
+									<ImageNameInput
+										value={localValue}
+										onChange={handleValueChange}
+										disabled={isCreating}
+										errorMessage={errorMessage}
+										helpText={helpText}
+									/>
+								</Modal.Body>
+								<Modal.Footer>
+									<Modal.Close disabled={isCreating}>Cancel</Modal.Close>
+									<Button color="primary" type="submit" disabled={!canCreate || isCreating}>
+										{isCreating ? 'Creating...' : 'Create'}
+									</Button>
+								</Modal.Footer>
+							</Form>
+						</Modal.Popup>
+					</Modal.Viewport>
+				</Modal.Portal>
+			</Modal.Root>
+		)
+	})
+)

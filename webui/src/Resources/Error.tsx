@@ -1,20 +1,17 @@
-import { CAlert, CButton } from '@coreui/react'
-import React from 'react'
-import { ErrorBoundary } from 'react-error-boundary'
+import { ErrorBoundary, type FallbackProps } from 'react-error-boundary'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { StaticAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
 
-interface ErrorFallbackProps {
-	error: Error | undefined
-	resetErrorBoundary: () => void
-}
-export function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps): React.JSX.Element {
+export function ErrorFallback({ error, resetErrorBoundary }: FallbackProps): React.JSX.Element {
 	return (
-		<CAlert color="danger">
+		<StaticAlert color="danger">
 			<p>Something went wrong:</p>
-			<pre>{error?.message ?? ''}</pre>
-			<CButton color="primary" size="sm" onClick={resetErrorBoundary}>
+			<pre>{stringifyError(error, true)}</pre>
+			<Button color="primary" size="sm" onClick={resetErrorBoundary}>
 				Try again
-			</CButton>
-		</CAlert>
+			</Button>
+		</StaticAlert>
 	)
 }
 

@@ -4,13 +4,16 @@ on:
   workflow_dispatch:
   # Run every week
   schedule:
-    - cron: '43 5 * * 0'
+    - cron: "43 5 * * 0"
   push:
     tags:
-      - '**'
+      - "**"
 
 permissions:
   contents: read
+
+env:
+  API_PRODUCT: companion-offline-module-bundle
 
 jobs:
   build:
@@ -18,18 +21,18 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          submodules: true
+          submodules: false
           persist-credentials: false
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: ".node-version"
 
       - name: Cache build sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache
           key: linux-x64-build-cache-${{ hashFiles('assets/nodejs-versions.json') }}
@@ -60,21 +63,37 @@ jobs:
           echo "targetname=companion-offline-module-bundle-${VERSION}.tar.gz" >> $GITHUB_OUTPUT
           echo "longversion=${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Upload build
-        id: upload
-        uses: bitfocus/actions/upload-and-notify@main
+      - name: Upload build (beta)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && github.ref == 'refs/heads/main' }}
         with:
-          long-version: ${{ steps.filenames.outputs.longversion }}
-          beta-branch: main
-          dev-branch: develop
-
           source-filename: ${{ steps.filenames.outputs.sourcename }}
           destination-filename: ${{ steps.filenames.outputs.targetname }}
           s3-host: ${{ vars.S3_HOST }}
-          s3-bucket: ${{ vars.S3_BUCKET_OFFLINE_MODULES }}
+          s3-bucket: ${{ vars.S3_BUCKET }}
           s3-access-key: ${{ secrets.S3_KEY }}
           s3-secret-key: ${{ secrets.S3_SECRET }}
 
-          api-product: companion-offline-module-bundle
-          api-target: 'generic'
+          api-version: ${{ steps.filenames.outputs.longversion }}
+          api-branch: "beta"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "generic"
+          api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}
+      - name: Upload build (stable)
+        uses: bitfocus/actions/upload-and-notify-for-branch@main
+        if: ${{ github.repository_owner == 'bitfocus' && startsWith(github.ref, 'refs/tags/') }}
+        with:
+          source-filename: ${{ steps.filenames.outputs.sourcename }}
+          destination-filename: ${{ steps.filenames.outputs.targetname }}
+          s3-host: ${{ vars.RELEASE_S3_HOST }}
+          s3-bucket: ${{ vars.RELEASE_S3_BUCKET }}/${{ env.API_PRODUCT }}
+          s3-access-key: ${{ secrets.RELEASE_S3_KEY }}
+          s3-secret-key: ${{ secrets.RELEASE_S3_SECRET }}
+
+          public-bucket-url: ${{ vars.RELEASE_S3_URL }}/${{ env.API_PRODUCT }}
+
+          api-version: ${{ github.ref_name }}
+          api-branch: "stable"
+          api-product: ${{ env.API_PRODUCT }}
+          api-target: "generic"
           api-secret: ${{ secrets.BITFOCUS_API_PROJECT_SECRET }}

@@ -1,60 +1,77 @@
+import { EventEmitter } from 'node:events'
+import jsonPatch from 'fast-json-patch'
 import { nanoid } from 'nanoid'
-import { EventDefinitions } from '../Resources/EventDefinitions.js'
-import { ControlEntityListPoolButton } from '../Controls/Entities/EntityListPoolButton.js'
+import type { JsonValue } from 'type-fest'
 import { diffObjects } from '@companion-app/shared/Diff.js'
-import { replaceAllVariables } from '../Variables/Util.js'
+import type { LayeredButtonModel, PresetButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
 import type {
-	PresetDefinition,
-	PresetDefinitionButton,
-	UIPresetDefinition,
-	UIPresetDefinitionUpdate,
-} from '@companion-app/shared/Model/Presets.js'
-import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
-import type {
-	NormalButtonModel,
-	NormalButtonSteps,
-	PresetButtonModel,
-} from '@companion-app/shared/Model/ButtonModel.js'
-import type {
-	CompanionButtonPresetDefinition,
-	CompanionButtonStyleProps,
-	CompanionPresetAction,
-	CompanionPresetFeedback,
-	CompanionTextPresetDefinition,
-} from '@companion-module/base'
-import LogController from '../Log/Controller.js'
-import { validateActionSetId } from '@companion-app/shared/ControlId.js'
+	ClientEntityDefinition,
+	CompositeElementDefinitionUpdate,
+	EntityDefinitionUpdate,
+	UICompositeElementDefinition,
+} from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import {
 	EntityModelType,
 	FeedbackEntitySubType,
-	type FeedbackEntityModel,
 	type ActionEntityModel,
 	type EntityModelBase,
+	type FeedbackEntityModel,
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import type {
-	ClientEntityDefinition,
-	EntityDefinitionUpdate,
-} from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import { assertNever } from '@companion-app/shared/Util.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import { EventEmitter } from 'node:events'
-import type { InstanceConfigStore } from './ConfigStore.js'
-import type { ButtonStyleProperties } from '@companion-app/shared/Model/StyleModel.js'
+import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
 import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import {
+	exprVal,
+	isExpressionOrValue,
+	type ExpressionableOptionsObject,
+	type ExpressionOrValue,
+	type SomeCompanionInputField,
+} from '@companion-app/shared/Model/Options.js'
+import type {
+	PresetDefinition,
+	UIPresetDefinitionUpdate,
+	UIPresetSection,
+} from '@companion-app/shared/Model/Presets.js'
+import type { SomeButtonGraphicsElement } from '@companion-app/shared/Model/StyleLayersModel.js'
+import { ButtonGraphicsElementUsage } from '@companion-app/shared/Model/StyleModel.js'
+import type { VariableValues } from '@companion-app/shared/Model/Variables.js'
+import { assertNever } from '@companion-app/shared/Util.js'
+import type { Complete } from '@companion-module/base'
+import LogController from '../Log/Controller.js'
+import {
+	ConvertBooleanFeedbackStyleToOverrides,
+	CreateAdvancedFeedbackStyleOverrides,
+	ParseLegacyStyle,
+} from '../Resources/ConvertLegacyStyleToElements.js'
+import { EventDefinitions } from '../Resources/EventDefinitions.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import {
+	injectOverriddenLocalVariableValues,
+	replaceAllVariables,
+	visitEntityOptionsForVariables,
+} from '../Variables/Util.js'
+import type { InstanceConfigStore } from './ConfigStore.js'
+
+export interface CompositeElementDefinition {
+	id: string
+	name: string
+	description: string | undefined
+	options: SomeCompanionInputField[]
+	elements: SomeButtonGraphicsElement[]
+}
 
 type InstanceDefinitionsEvents = {
 	readonly updatePresets: [connectionId: string]
+	readonly updateCompositeElements: [elementIds: ReadonlySet<CompositeElementIdString>]
 }
+
+export type CompositeElementIdString = `${string}:${string}`
 
 type DefinitionsEvents = {
 	presets: [update: UIPresetDefinitionUpdate]
 	actions: [update: EntityDefinitionUpdate]
 	feedbacks: [update: EntityDefinitionUpdate]
-}
-
-type RawPresetDefinition = (CompanionButtonPresetDefinition | CompanionTextPresetDefinition) & {
-	id: string
+	compositeElements: [update: CompositeElementDefinitionUpdate]
 }
 
 /**
@@ -86,9 +103,18 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	 */
 	#feedbackDefinitions: Record<string, Record<string, ClientEntityDefinition>> = {}
 	/**
-	 * The preset definitions
+	 * The preset definitions, to convert into real controls
 	 */
-	#presetDefinitions: Record<string, Record<string, PresetDefinition>> = {}
+	#presetDefinitions: Record<string, ReadonlyMap<string, PresetDefinition>> = {}
+	/**
+	 * The preset definitions, as viewed by the ui
+	 */
+	#uiPresetDefinitions: Record<string, Record<string, UIPresetSection>> = {}
+
+	/**
+	 * The composite element definitions
+	 */
+	#compositeElementDefinitions: Record<string, Record<string, CompositeElementDefinition>> = {}
 
 	#events = new EventEmitter<DefinitionsEvents>()
 
@@ -111,14 +137,7 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 			presets: publicProcedure.subscription(async function* ({ signal }) {
 				const changes = toIterable(self.#events, 'presets', signal)
 
-				const result: Record<string, Record<string, UIPresetDefinition>> = {}
-				for (const [id, presets] of Object.entries(self.#presetDefinitions)) {
-					if (Object.keys(presets).length > 0) {
-						result[id] = self.#simplifyPresetsForUi(presets)
-					}
-				}
-
-				yield { type: 'init', definitions: result } satisfies UIPresetDefinitionUpdate
+				yield { type: 'init', definitions: self.#uiPresetDefinitions } satisfies UIPresetDefinitionUpdate
 
 				for await (const [update] of changes) {
 					yield update
@@ -144,6 +163,24 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 					yield update
 				}
 			}),
+
+			compositeElements: publicProcedure.subscription(async function* ({ signal }) {
+				const changes = toIterable(self.#events, 'compositeElements', signal)
+
+				const fullDefinitions: Record<string, Record<string, UICompositeElementDefinition>> = {}
+				for (const [connectionId, definitions] of Object.entries(self.#compositeElementDefinitions)) {
+					fullDefinitions[connectionId] = self.#simplifyCompositeElementsForUi(definitions)
+				}
+
+				yield {
+					type: 'init',
+					definitions: fullDefinitions,
+				} satisfies CompositeElementDefinitionUpdate
+
+				for await (const [update] of changes) {
+					yield update
+				}
+			}),
 		})
 	}
 
@@ -152,8 +189,14 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	 * @param connectionId - the id of the instance
 	 * @param entityType - the type of the entity
 	 * @param definitionId - the id of the definition
+	 * @param layeredStyleSelectedElementIds - selected element ids for layered style controls
 	 */
-	createEntityItem(connectionId: string, entityType: EntityModelType, definitionId: string): SomeEntityModel | null {
+	createEntityItem(
+		connectionId: string,
+		entityType: EntityModelType,
+		definitionId: string,
+		layeredStyleSelectedElementIds: { [usage in ButtonGraphicsElementUsage]: string | undefined } | null
+	): SomeEntityModel | null {
 		const definition = this.getEntityDefinition(entityType, connectionId, definitionId)
 		if (!definition) return null
 
@@ -169,7 +212,13 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 
 		if (definition.options !== undefined && definition.options.length > 0) {
 			for (const opt of definition.options) {
-				entity.options[opt.id] = structuredClone((opt as any).default)
+				if (opt.type === 'static-text') continue
+
+				const defaultValue = 'default' in opt ? structuredClone<JsonValue | undefined>(opt.default) : undefined
+				entity.options[opt.id] = {
+					isExpression: false,
+					value: defaultValue,
+				} satisfies ExpressionOrValue<JsonValue | undefined>
 			}
 		}
 
@@ -184,12 +233,24 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 				const feedback: FeedbackEntityModel = {
 					...entity,
 					type: EntityModelType.Feedback,
-					style: {},
-					isInverted: false,
+					isInverted: exprVal(false),
+					styleOverrides: [],
 				}
 
-				if (/*!booleanOnly &&*/ definition.feedbackType === FeedbackEntitySubType.Boolean && definition.feedbackStyle) {
-					feedback.style = structuredClone(definition.feedbackStyle)
+				if (layeredStyleSelectedElementIds) {
+					if (definition.feedbackType === FeedbackEntitySubType.Boolean && definition.feedbackStyle) {
+						const parsedStyle = ParseLegacyStyle(definition.feedbackStyle)
+						feedback.styleOverrides = ConvertBooleanFeedbackStyleToOverrides(
+							parsedStyle,
+							layeredStyleSelectedElementIds
+						)
+					} else if (definition.feedbackType === FeedbackEntitySubType.Advanced) {
+						feedback.styleOverrides = CreateAdvancedFeedbackStyleOverrides(
+							layeredStyleSelectedElementIds,
+							layeredStyleSelectedElementIds[ButtonGraphicsElementUsage.Image],
+							definition.feedbackAffectedProperties
+						)
+					}
 				}
 
 				return feedback
@@ -212,8 +273,7 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 			}
 
 			for (const opt of definition.options) {
-				// @ts-expect-error mismatch in key type
-				event.options[opt.id] = structuredClone(opt.default)
+				event.options[opt.id] = structuredClone((opt as any).default)
 			}
 
 			return event
@@ -227,6 +287,7 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	 */
 	forgetConnection(connectionId: string): void {
 		delete this.#presetDefinitions[connectionId]
+		delete this.#uiPresetDefinitions[connectionId]
 		if (this.#events.listenerCount('presets') > 0) {
 			this.#events.emit('presets', {
 				type: 'remove',
@@ -251,6 +312,23 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 				connectionId,
 			})
 		}
+
+		const oldElements = this.#compositeElementDefinitions[connectionId]
+		delete this.#compositeElementDefinitions[connectionId]
+		if (this.#events.listenerCount('compositeElements') > 0) {
+			this.#events.emit('compositeElements', {
+				type: 'forget-connection',
+				connectionId,
+			})
+		}
+
+		// Trigger invalidation of any drawn controls using these elements
+		const forgottenIds = oldElements
+			? new Set<CompositeElementIdString>(Object.keys(oldElements).map((id) => `${connectionId}:${id}` as const))
+			: null
+		if (forgottenIds && forgottenIds.size > 0) {
+			this.emit('updateCompositeElements', forgottenIds)
+		}
 	}
 
 	/**
@@ -272,36 +350,29 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 		}
 	}
 
+	/**
+	 * Get a composite element definition
+	 */
+	getCompositeElementDefinition(connectionId: string, elementId: string): CompositeElementDefinition | undefined {
+		return this.#compositeElementDefinitions[connectionId]?.[elementId]
+	}
+
+	/**
+	 * Get all composite element definitions
+	 */
+	getAllCompositeElementDefinitions(): Record<string, Record<string, CompositeElementDefinition>> {
+		return this.#compositeElementDefinitions
+	}
+
 	convertPresetToPreviewControlModel(connectionId: string, presetId: string): PresetButtonModel | null {
-		const definition = this.#presetDefinitions[connectionId]?.[presetId]
+		const definition = this.#presetDefinitions[connectionId]?.get(presetId)
 		if (!definition || definition.type !== 'button') return null
 
 		const result: PresetButtonModel = {
 			...definition.model,
 			type: 'preset:button',
-			style: definition.previewStyle
-				? convertPresetStyleToDrawStyle(Object.assign({}, definition.model.style, definition.previewStyle))
-				: definition.model.style,
 			steps: {},
-		}
-
-		// make sure that feedbacks don't override previewStyle:
-		if ('previewStyle' in definition && definition.previewStyle !== undefined) {
-			const newExpressionFeedback: FeedbackEntityModel = {
-				type: EntityModelType.Feedback,
-				id: nanoid(),
-				connectionId: 'internal',
-				definitionId: 'check_expression',
-				options: {
-					expression: 'true',
-				},
-				isInverted: false,
-				style: definition.previewStyle,
-				upgradeIndex: undefined,
-			}
-
-			// copy all objects so they don't alter the regular button def. (Shallow should be enough.)
-			result.feedbacks = [...result.feedbacks, newExpressionFeedback]
+			feedbacks: [...definition.model.feedbacks, ...definition.presetExtraFeedbacks],
 		}
 
 		// Omit actions, as they can't be executed in the preview. By doing this we avoid bothering the module with lifecycle methods for them
@@ -323,11 +394,24 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	/**
 	 * Import a preset to a location
 	 */
-	convertPresetToControlModel(connectionId: string, presetId: string): NormalButtonModel | null {
-		const definition = this.#presetDefinitions[connectionId]?.[presetId]
+	convertPresetToControlModel(
+		connectionId: string,
+		presetId: string,
+		variableValues: VariableValues | null
+	): LayeredButtonModel | null {
+		const definition = this.#presetDefinitions[connectionId]?.get(presetId)
 		if (!definition || definition.type !== 'button') return null
 
-		return definition.model
+		if (!variableValues) return definition.model
+
+		const model: LayeredButtonModel = {
+			...definition.model,
+			localVariables: structuredClone(definition.model.localVariables),
+		}
+
+		injectOverriddenLocalVariableValues(model.localVariables, variableValues)
+
+		return model
 	}
 
 	/**
@@ -335,7 +419,7 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	 */
 	setActionDefinitions(connectionId: string, actionDefinitions: Record<string, ClientEntityDefinition>): void {
 		const lastActionDefinitions = this.#actionDefinitions[connectionId]
-		this.#actionDefinitions[connectionId] = structuredClone(actionDefinitions)
+		this.#actionDefinitions[connectionId] = actionDefinitions
 
 		if (this.#events.listenerCount('actions') > 0) {
 			if (!lastActionDefinitions) {
@@ -364,7 +448,7 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	 */
 	setFeedbackDefinitions(connectionId: string, feedbackDefinitions: Record<string, ClientEntityDefinition>): void {
 		const lastFeedbackDefinitions = this.#feedbackDefinitions[connectionId]
-		this.#feedbackDefinitions[connectionId] = structuredClone(feedbackDefinitions)
+		this.#feedbackDefinitions[connectionId] = feedbackDefinitions
 
 		if (this.#events.listenerCount('feedbacks') > 0) {
 			if (!lastFeedbackDefinitions) {
@@ -391,132 +475,46 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	/**
 	 * Set the preset definitions for a connection
 	 */
-	setPresetDefinitions(connectionId: string, label: string, rawPresets: RawPresetDefinition[]): void {
-		const newPresets: Record<string, PresetDefinition> = {}
+	setPresetDefinitions(
+		connectionId: string,
+		newPresets: ReadonlyMap<string, PresetDefinition>,
+		uiDefinitions: Record<string, UIPresetSection>
+	): void {
+		const config = this.#configStore.getConfigOfTypeForId(connectionId, ModuleInstanceType.Connection)
+		if (!config) return
 
-		const connectionUpgradeIndex = this.#configStore.getConfigOfTypeForId(
-			connectionId,
-			ModuleInstanceType.Connection
-		)?.lastUpgradeIndex
+		this.#updateVariablePrefixesAndStoreDefinitions(connectionId, config.label, newPresets, uiDefinitions)
+	}
 
-		for (const rawPreset of rawPresets) {
-			try {
-				if (rawPreset.type === 'button') {
-					const presetDefinition: PresetDefinitionButton = {
-						id: rawPreset.id,
-						category: rawPreset.category,
-						name: rawPreset.name,
-						type: rawPreset.type,
-						previewStyle: rawPreset.previewStyle,
-						model: {
-							type: 'button',
-							options: {
-								rotaryActions: rawPreset.options?.rotaryActions ?? false,
-								stepProgression: (rawPreset.options?.stepAutoProgress ?? true) ? 'auto' : 'manual',
-							},
-							style: convertPresetStyleToDrawStyle(rawPreset.style),
-							feedbacks: convertPresetFeedbacksToEntities(rawPreset.feedbacks, connectionId, connectionUpgradeIndex),
-							steps: {},
-							localVariables: [],
-						},
-					}
+	setCompositeElementDefinitions(connectionId: string, rawDefinitions: CompositeElementDefinition[]): void {
+		const config = this.#configStore.getConfigOfTypeForId(connectionId, ModuleInstanceType.Connection)
+		if (!config) return
 
-					if (rawPreset.steps) {
-						for (let i = 0; i < rawPreset.steps.length; i++) {
-							const newStep: NormalButtonSteps[0] = {
-								action_sets: {
-									down: [],
-									up: [],
-									rotate_left: undefined,
-									rotate_right: undefined,
-								},
-								options: structuredClone(ControlEntityListPoolButton.DefaultStepOptions),
-							}
-							presetDefinition.model.steps[i] = newStep
-
-							const rawStep = rawPreset.steps[i]
-							if (!rawStep) continue
-
-							if (rawStep.name) newStep.options.name = rawStep.name
-
-							for (const [setId, set] of Object.entries(rawStep)) {
-								if (setId === 'name') continue
-
-								const setIdSafe = validateActionSetId(setId as any)
-								if (setIdSafe === undefined) {
-									this.#logger.warn(`Invalid set id: ${setId}`)
-									continue
-								}
-
-								const setActions: CompanionPresetAction[] = Array.isArray(set) ? set : set.actions
-								if (!isNaN(Number(setId)) && set.options?.runWhileHeld) newStep.options.runWhileHeld.push(Number(setId))
-
-								if (setActions) {
-									newStep.action_sets[setIdSafe] = convertActionsDelay(
-										setActions,
-										connectionId,
-										rawPreset.options?.relativeDelay,
-										connectionUpgradeIndex
-									)
-								}
-							}
-						}
-					}
-
-					// Ensure that there is at least one step
-					if (Object.keys(presetDefinition.model.steps).length === 0) {
-						presetDefinition.model.steps[0] = {
-							action_sets: { down: [], up: [], rotate_left: undefined, rotate_right: undefined },
-							options: structuredClone(ControlEntityListPoolButton.DefaultStepOptions),
-						}
-					}
-
-					newPresets[rawPreset.id] = presetDefinition
-				} else if (rawPreset.type === 'text') {
-					newPresets[rawPreset.id] = {
-						id: rawPreset.id,
-						category: rawPreset.category,
-						name: rawPreset.name,
-						type: rawPreset.type,
-						text: rawPreset.text,
-					}
-				}
-			} catch (e) {
-				this.#logger.warn(`${label} gave invalid preset "${rawPreset?.id}": ${e}`)
-			}
+		const newDefinitions: Record<string, CompositeElementDefinition> = {}
+		for (const rawDefinition of rawDefinitions) {
+			newDefinitions[rawDefinition.id] = rawDefinition
 		}
 
-		this.#updateVariablePrefixesAndStoreDefinitions(connectionId, label, newPresets)
+		this.#updateVariablePrefixesAndStoreCompositeElements(connectionId, config.label, newDefinitions)
 	}
 
 	/**
-	 * The ui doesnt need many of the preset properties. Simplify an array of them in preparation for sending to the ui
+	 * Simplify composite element definitions for UI by removing the element property
 	 */
-	#simplifyPresetsForUi(presets: Record<string, PresetDefinition>): Record<string, UIPresetDefinition> {
-		const res: Record<string, UIPresetDefinition> = {}
+	#simplifyCompositeElementsForUi(
+		definitions: Record<string, CompositeElementDefinition>
+	): Record<string, UICompositeElementDefinition> {
+		const result: Record<string, UICompositeElementDefinition> = {}
 
-		Object.entries(presets).forEach(([id, preset], index) => {
-			if (preset.type === 'button') {
-				res[id] = {
-					id: preset.id,
-					order: index,
-					label: preset.name,
-					category: preset.category,
-					type: 'button',
-				}
-			} else if (preset.type === 'text') {
-				res[id] = {
-					id: preset.id,
-					order: index,
-					label: preset.name,
-					category: preset.category,
-					type: 'text',
-					text: preset.text,
-				}
-			}
-		})
+		for (const [elementId, definition] of Object.entries(definitions)) {
+			result[elementId] = {
+				name: definition.name,
+				description: definition.description,
+				options: definition.options.map((opt) => ({ ...opt, id: `opt:${opt.id}` })),
+			} satisfies Complete<UICompositeElementDefinition>
+		}
 
-		return res
+		return result
 	}
 
 	/**
@@ -527,7 +525,20 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	updateVariablePrefixesForLabel(connectionId: string, labelTo: string): void {
 		if (this.#presetDefinitions[connectionId] !== undefined) {
 			this.#logger.silly('Updating presets for connection ' + labelTo)
-			this.#updateVariablePrefixesAndStoreDefinitions(connectionId, labelTo, this.#presetDefinitions[connectionId])
+			this.#updateVariablePrefixesAndStoreDefinitions(
+				connectionId,
+				labelTo,
+				this.#presetDefinitions[connectionId],
+				this.#uiPresetDefinitions[connectionId]
+			)
+		}
+		if (this.#compositeElementDefinitions[connectionId] !== undefined) {
+			this.#logger.silly('Updating composite elements for connection ' + labelTo)
+			this.#updateVariablePrefixesAndStoreCompositeElements(
+				connectionId,
+				labelTo,
+				this.#compositeElementDefinitions[connectionId]
+			)
 		}
 	}
 
@@ -537,183 +548,210 @@ export class InstanceDefinitions extends EventEmitter<InstanceDefinitionsEvents>
 	#updateVariablePrefixesAndStoreDefinitions(
 		connectionId: string,
 		label: string,
-		presets: Record<string, PresetDefinition>
+		presets: ReadonlyMap<string, PresetDefinition>,
+		uiDefinitions: Record<string, UIPresetSection>
 	): void {
+		const missingReferencedFeedbackDefinitions = new Set<string>()
+		const missingReferencedActionDefinitions = new Set<string>()
+
+		const allowedSet = new Set<string>(['local', 'this'])
+
+		const replaceVariablesInEntityOptions = (
+			definition: ClientEntityDefinition,
+			options: ExpressionableOptionsObject
+		): ExpressionableOptionsObject =>
+			visitEntityOptionsForVariables<ExpressionOrValue<JsonValue | undefined> | undefined>(
+				definition,
+				options,
+				(_field, optionValue, fieldType) => {
+					if (!optionValue || !fieldType) return optionValue
+
+					// Only replace variables in fields that support them
+					if (
+						(fieldType.parseVariables ||
+							fieldType.forceExpression ||
+							(fieldType.allowExpression && optionValue.isExpression)) &&
+						typeof optionValue.value === 'string'
+					) {
+						return {
+							value: replaceAllVariables(optionValue.value, label, allowedSet),
+							isExpression: optionValue.isExpression,
+						}
+					}
+
+					return optionValue
+				}
+			)
+
+		// Fix up the variable references in a single entity and any children it may have.
+		// The definition is looked up using the entity's own connectionId, so that internal
+		// entities (eg building blocks, `user_value` local variables) resolve too.
+		const fixupEntity = (entity: SomeEntityModel): void => {
+			if (entity.type === EntityModelType.Feedback && entity.styleOverrides) {
+				for (const styleOverride of entity.styleOverrides) {
+					if (styleOverride.override && isExpressionOrValue(styleOverride.override)) {
+						if (styleOverride.override.isExpression) {
+							styleOverride.override.value = replaceAllVariables(styleOverride.override.value, label, allowedSet)
+						} else if (styleOverride.elementProperty === 'text' && typeof styleOverride.override.value === 'string') {
+							// TODO - this may be too strict/loose
+							styleOverride.override.value = replaceAllVariables(styleOverride.override.value, label, allowedSet)
+						}
+					}
+				}
+			}
+
+			const definition = this.getEntityDefinition(entity.type, entity.connectionId, entity.definitionId)
+			if (!definition) {
+				if (entity.type === EntityModelType.Action) {
+					missingReferencedActionDefinitions.add(entity.definitionId)
+				} else {
+					missingReferencedFeedbackDefinitions.add(entity.definitionId)
+				}
+			} else {
+				entity.options = replaceVariablesInEntityOptions(definition, entity.options)
+			}
+
+			if (entity.connectionId === 'internal' && entity.children) {
+				for (const childGroup of Object.values(entity.children)) {
+					if (!childGroup) continue
+					for (const child of childGroup) fixupEntity(child)
+				}
+			}
+		}
+
 		/*
 		 * Clean up variable references: $(label:variable)
 		 * since the name of the connection is dynamic. We don't want to
 		 * demand that your presets MUST be dynamically generated.
 		 */
-		for (const preset of Object.values(presets)) {
-			if (preset.type !== 'text') {
-				if (preset.model.style) {
-					preset.model.style.text = replaceAllVariables(preset.model.style.text, label)
-				}
+		for (const preset of presets.values()) {
+			// Update variable references in style layers
+			replaceAllVariablesInElements(preset.model.style.layers, label, allowedSet)
 
-				if (preset.model.feedbacks) {
-					for (const feedback of preset.model.feedbacks) {
-						if (feedback.type === EntityModelType.Feedback && feedback.style && feedback.style.text) {
-							feedback.style.text = replaceAllVariables(feedback.style.text, label)
-						}
+			for (const feedback of preset.model.feedbacks ?? []) {
+				fixupEntity(feedback)
+			}
+
+			for (const localVariable of preset.model.localVariables ?? []) {
+				fixupEntity(localVariable)
+			}
+
+			for (const extraFeedback of preset.presetExtraFeedbacks ?? []) {
+				fixupEntity(extraFeedback)
+			}
+
+			for (const step of Object.values(preset.model.steps)) {
+				if (!step.action_sets || typeof step.action_sets !== 'object') continue
+				for (const set of Object.values(step.action_sets)) {
+					if (!set || !Array.isArray(set)) continue
+
+					for (const action of set) {
+						fixupEntity(action)
 					}
 				}
 			}
 		}
 
-		const lastPresetDefinitions = this.#presetDefinitions[connectionId]
+		if (missingReferencedActionDefinitions.size > 0) {
+			this.#logger.warn(
+				`Presets for connection ${label} reference action definitions that do not exist: ${[...missingReferencedActionDefinitions].join(', ')}`
+			)
+		}
+		if (missingReferencedFeedbackDefinitions.size > 0) {
+			this.#logger.warn(
+				`Presets for connection ${label} reference feedback definitions that do not exist: ${[...missingReferencedFeedbackDefinitions].join(', ')}`
+			)
+		}
+
 		this.#presetDefinitions[connectionId] = structuredClone(presets)
+		const lastPresetDefinitions = this.#uiPresetDefinitions[connectionId]
+		this.#uiPresetDefinitions[connectionId] = structuredClone(uiDefinitions)
 
 		this.emit('updatePresets', connectionId)
 
 		if (this.#events.listenerCount('presets') > 0) {
-			const newSimplifiedPresets = this.#simplifyPresetsForUi(presets)
 			if (!lastPresetDefinitions) {
 				this.#events.emit('presets', {
 					type: 'add',
 					connectionId,
-					definitions: newSimplifiedPresets,
+					definitions: uiDefinitions,
 				})
 			} else {
-				const lastSimplifiedPresets = this.#simplifyPresetsForUi(lastPresetDefinitions)
-				const diff = diffObjects(lastSimplifiedPresets, newSimplifiedPresets)
+				const diff = jsonPatch.compare(lastPresetDefinitions, uiDefinitions)
+				if (diff && diff.length > 0) {
+					this.#events.emit('presets', { type: 'patch', connectionId, patch: diff })
+				}
+			}
+		}
+	}
+
+	/**
+	 * Update all the variables in the composite elements to reference the supplied label, and store them
+	 */
+	#updateVariablePrefixesAndStoreCompositeElements(
+		connectionId: string,
+		label: string,
+		compositeElements: Record<string, CompositeElementDefinition>
+	): void {
+		const replaceSet = new Set(['options'])
+
+		/*
+		 * Clean up variable references: $(label:variable)
+		 * since the name of the connection is dynamic. We don't want to
+		 * demand that your presets MUST be dynamically generated.
+		 */
+		for (const compositeElement of Object.values(compositeElements)) {
+			// Update variable references in style layers
+			replaceAllVariablesInElements(compositeElement.elements, label, replaceSet)
+		}
+
+		const lastCompositeElementDefinitions = this.#compositeElementDefinitions[connectionId]
+		this.#compositeElementDefinitions[connectionId] = structuredClone(compositeElements)
+
+		// Report the changes
+		// Future: This could be better if it performed some diffing and only reported changed element ids
+		const changedElementIds = new Set<CompositeElementIdString>([
+			...Object.keys(compositeElements).map((id) => `${connectionId}:${id}` as const),
+			...Object.keys(lastCompositeElementDefinitions ?? {}).map((id) => `${connectionId}:${id}` as const),
+		])
+		if (changedElementIds.size > 0) this.emit('updateCompositeElements', changedElementIds)
+
+		if (this.#events.listenerCount('compositeElements') > 0) {
+			const newSimplifiedElements = this.#simplifyCompositeElementsForUi(compositeElements)
+			if (!lastCompositeElementDefinitions) {
+				this.#events.emit('compositeElements', {
+					type: 'add-connection',
+					connectionId,
+					definitions: newSimplifiedElements,
+				})
+			} else {
+				const lastSimplifiedElements = this.#simplifyCompositeElementsForUi(lastCompositeElementDefinitions)
+				const diff = diffObjects(lastSimplifiedElements, newSimplifiedElements)
 				if (diff) {
-					this.#events.emit('presets', { type: 'patch', connectionId, ...diff })
+					this.#events.emit('compositeElements', { type: 'update-connection', connectionId, ...diff })
 				}
 			}
 		}
 	}
 }
 
-function toActionInstance(
-	action: CompanionPresetAction,
-	connectionId: string,
-	connectionUpgradeIndex: number | undefined
-): ActionEntityModel {
-	return {
-		type: EntityModelType.Action,
-		id: nanoid(),
-		connectionId: connectionId,
-		definitionId: action.actionId,
-		options: structuredClone(action.options ?? {}),
-		headline: action.headline,
-		upgradeIndex: connectionUpgradeIndex,
-	}
-}
+function replaceAllVariablesInElements(
+	elements: SomeButtonGraphicsElement[],
+	label: string,
+	preserveLabels: Set<string>
+): void {
+	for (const element of elements) {
+		if (element.type === 'group') replaceAllVariablesInElements(element.children, label, preserveLabels)
 
-function convertActionsDelay(
-	actions: CompanionPresetAction[],
-	connectionId: string,
-	relativeDelays: boolean | undefined,
-	connectionUpgradeIndex: number | undefined
-): ActionEntityModel[] {
-	if (relativeDelays) {
-		const newActions: ActionEntityModel[] = []
-
-		for (const action of actions) {
-			const delay = Number(action.delay)
-
-			// Add the wait action
-			if (!isNaN(delay) && delay > 0) {
-				newActions.push(createWaitAction(delay))
-			}
-
-			newActions.push(toActionInstance(action, connectionId, connectionUpgradeIndex))
-		}
-
-		return newActions
-	} else {
-		let currentDelay = 0
-		let currentDelayGroupChildren: ActionEntityModel[] = []
-
-		const delayGroups: ActionEntityModel[] = [wrapActionsInGroup(currentDelayGroupChildren)]
-
-		for (const action of actions) {
-			const delay = Number(action.delay)
-
-			if (!isNaN(delay) && delay >= 0 && delay !== currentDelay) {
-				// action has different delay to the last one
-				if (delay > currentDelay) {
-					// delay is greater than the last one, translate it to a relative delay
-					currentDelayGroupChildren.push(createWaitAction(delay - currentDelay))
-				} else {
-					// delay is less than the last one, preserve the weird order
-					currentDelayGroupChildren = []
-					if (delay > 0) currentDelayGroupChildren.push(createWaitAction(delay))
-					delayGroups.push(wrapActionsInGroup(currentDelayGroupChildren))
+		// Future: This should be refactored to handle things more generically, based on the schemas
+		for (const [key, value] of Object.entries(element)) {
+			if (value && isExpressionOrValue(value)) {
+				if (value.isExpression) {
+					value.value = replaceAllVariables(value.value, label, preserveLabels)
+				} else if (element.type === 'text' && key === 'text') {
+					value.value = replaceAllVariables(value.value as string, label, preserveLabels)
 				}
-
-				currentDelay = delay
 			}
-
-			currentDelayGroupChildren.push(toActionInstance(action, connectionId, connectionUpgradeIndex))
 		}
-
-		if (delayGroups.length > 1) {
-			// Weird delay ordering was found, preserve it
-			return delayGroups
-		} else {
-			// Order was incrementing, don't add the extra group layer
-			return currentDelayGroupChildren
-		}
-	}
-}
-
-function wrapActionsInGroup(actions: ActionEntityModel[]): ActionEntityModel {
-	return {
-		type: EntityModelType.Action,
-		id: nanoid(),
-		connectionId: 'internal',
-		definitionId: 'action_group',
-		options: {
-			execution_mode: 'concurrent',
-		},
-		children: {
-			default: actions,
-		},
-		upgradeIndex: undefined,
-	}
-}
-function createWaitAction(delay: number): ActionEntityModel {
-	return {
-		type: EntityModelType.Action,
-		id: nanoid(),
-		connectionId: 'internal',
-		definitionId: 'wait',
-		options: {
-			time: delay,
-		},
-		upgradeIndex: undefined,
-	}
-}
-
-function convertPresetFeedbacksToEntities(
-	rawFeedbacks: CompanionPresetFeedback[] | undefined,
-	connectionId: string,
-	connectionUpgradeIndex: number | undefined
-): FeedbackEntityModel[] {
-	if (!rawFeedbacks) return []
-
-	return rawFeedbacks.map((feedback) => ({
-		type: EntityModelType.Feedback,
-		id: nanoid(),
-		connectionId: connectionId,
-		definitionId: feedback.feedbackId,
-		options: structuredClone(feedback.options ?? {}),
-		isInverted: !!feedback.isInverted,
-		style: structuredClone(feedback.style),
-		headline: feedback.headline,
-		upgradeIndex: connectionUpgradeIndex,
-	}))
-}
-
-function convertPresetStyleToDrawStyle(rawStyle: CompanionButtonStyleProps): ButtonStyleProperties {
-	return {
-		textExpression: false,
-		...structuredClone(rawStyle),
-		// TODO - avoid defaults..
-		alignment: rawStyle.alignment ?? 'center:center',
-		pngalignment: rawStyle.pngalignment ?? 'center:center',
-		png64: rawStyle.png64 ?? null,
-		show_topbar: rawStyle.show_topbar ?? 'default',
 	}
 }

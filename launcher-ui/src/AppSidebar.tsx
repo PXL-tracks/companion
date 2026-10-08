@@ -1,5 +1,4 @@
 import { CogIcon } from 'lucide-react'
-import React from 'react'
 import {
 	Sidebar,
 	SidebarContent,
@@ -10,8 +9,8 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 } from '~/components/ui/sidebar.js'
-import { SectionDefinitions } from './Sections'
 import { useSectionVisibility } from './contexts/SectionVisibilityContext'
+import { SectionDefinitions } from './Sections'
 
 export function AppSidebar(): JSX.Element {
 	const { activeSectionId } = useSectionVisibility()
@@ -31,8 +30,13 @@ export function AppSidebar(): JSX.Element {
 						<SidebarMenu>
 							{SectionDefinitions.map((item) => (
 								<SidebarMenuItem key={item.id}>
-									<SidebarMenuButton asChild isActive={activeSectionId === item.id}>
-										<a href={`#${item.id}`}>{item.title}</a>
+									<SidebarMenuButton
+										isActive={activeSectionId === item.id}
+										onClick={() => {
+											window.location.hash = `#${item.id}`
+										}}
+									>
+										{item.title}
 									</SidebarMenuButton>
 								</SidebarMenuItem>
 							))}

@@ -1,38 +1,46 @@
-import React, { useMemo, useRef } from 'react'
-import { NotificationsManager, type NotificationsManagerRef } from '~/Components/Notifications.js'
-import { useUserConfigSubscription } from './Hooks/useUserConfigSubscription.js'
-import { usePagesInfoSubscription } from './Hooks/usePagesInfoSubscription.js'
-import { useActiveLearnRequests } from './Hooks/useActiveLearnRequests.js'
-import { RootAppStoreContext, type RootAppStore } from '~/Stores/RootAppStore.js'
 import { observable } from 'mobx'
-import { PagesStore } from '~/Stores/PagesStore.js'
-import { EventDefinitionsStore } from '~/Stores/EventDefinitionsStore.js'
+import { useMemo, useRef } from 'react'
+import { NotificationsManager, type NotificationsManagerRef } from '~/Components/Notifications.js'
+import { CompositeElementDefinitionsStore } from '~/Stores/CompositeElementDefinitionsStore.js'
+import { ConnectionsStore } from '~/Stores/ConnectionsStore.js'
 import { EntityDefinitionsStore } from '~/Stores/EntityDefinitionsStore.js'
-import { useEntityDefinitionsSubscription } from './Hooks/useEntityDefinitionsSubscription.js'
+import { EventDefinitionsStore } from '~/Stores/EventDefinitionsStore.js'
+import { ImageLibraryStore } from '~/Stores/ImageLibraryStore.js'
 import { ModuleInfoStore } from '~/Stores/ModuleInfoStore.js'
-import { useModuleInfoSubscription } from './Hooks/useModuleInfoSubscription.js'
-import { TriggersListStore } from '~/Stores/TriggersListStore.js'
-import { useTriggersListSubscription } from './Hooks/useTriggersListSubscription.js'
-import { useSurfacesSubscription } from './Hooks/useSurfacesSubscription.js'
+import { PagesStore } from '~/Stores/PagesStore.js'
+import { RootAppStoreContext, type RootAppStore } from '~/Stores/RootAppStore.js'
 import { SurfacesStore } from '~/Stores/SurfacesStore.js'
+import { TriggersListStore } from '~/Stores/TriggersListStore.js'
 import { UserConfigStore } from '~/Stores/UserConfigStore.js'
 import { VariablesStore } from '~/Stores/VariablesStore.js'
-import { useCustomVariablesSubscription } from './Hooks/useCustomVariablesSubscription.js'
-import { useVariablesSubscription } from './Hooks/useVariablesSubscription.js'
-import { useOutboundSurfacesSubscription } from './Hooks/useOutboundSurfacesSubscription.js'
-import { ConnectionsStore } from '~/Stores/ConnectionsStore.js'
-import { useConnectionsConfigSubscription } from './Hooks/useConnectionsConfigSubscription.js'
-import { useModuleStoreRefreshProgressSubscription } from './Hooks/useModuleStoreRefreshProgress.js'
-import { useModuleStoreListSubscription } from './Hooks/useModuleStoreListSubscription.js'
-import { HelpModal, type HelpModalRef } from './Instances/HelpModal.js'
 import { ViewControlStore } from '~/Stores/ViewControlStore.js'
-import { WhatsNewModal, type WhatsNewModalRef } from './WhatsNewModal/WhatsNew.js'
+import { useActiveLearnRequests } from './Hooks/useActiveLearnRequests.js'
 import { useGenericCollectionsSubscription } from './Hooks/useCollectionsSubscription.js'
+import { useCompositeElementDefinitionsSubscription } from './Hooks/useCompositeElementDefinitionsSubscription.js'
+import { useConnectionsConfigSubscription } from './Hooks/useConnectionsConfigSubscription.js'
 import { useCustomVariableCollectionsSubscription } from './Hooks/useCustomVariableCollectionsSubscription.js'
-import { trpc } from './Resources/TRPC.js'
+import { useCustomVariablesSubscription } from './Hooks/useCustomVariablesSubscription.js'
+import { useEntityDefinitionsSubscription } from './Hooks/useEntityDefinitionsSubscription.js'
 import { useEventDefinitions } from './Hooks/useEventDefinitions.js'
 import { useExpressionVariablesListSubscription } from './Hooks/useExpressionVariablesListSubscription.js'
+import { useImageLibrarySubscription } from './Hooks/useImageLibrarySubscription.js'
+import { useInstanceStatusesSubscription } from './Hooks/useInstanceStatusesSubscription.js'
+import { useModuleInfoSubscription } from './Hooks/useModuleInfoSubscription.js'
+import { useModuleStoreListSubscription } from './Hooks/useModuleStoreListSubscription.js'
+import { useModuleStoreRefreshProgressSubscription } from './Hooks/useModuleStoreRefreshProgress.js'
+import { useOutboundSurfacesSubscription } from './Hooks/useOutboundSurfacesSubscription.js'
+import { usePagesInfoSubscription } from './Hooks/usePagesInfoSubscription.js'
+import { useSurfaceInstancesSubscription } from './Hooks/useSurfaceInstancesSubscription.js'
+import { useSurfacesSubscription } from './Hooks/useSurfacesSubscription.js'
+import { useTriggersListSubscription } from './Hooks/useTriggersListSubscription.js'
+import { useUserConfigSubscription } from './Hooks/useUserConfigSubscription.js'
+import { useVariablesSubscription } from './Hooks/useVariablesSubscription.js'
+import { HelpModal, type HelpModalRef } from './Instances/HelpModal.js'
+import { trpc } from './Resources/TRPC.js'
 import { ExpressionVariablesListStore } from './Stores/ExpressionVariablesListStore.js'
+import { InstanceStatusesStore } from './Stores/InstanceStatusesStore.js'
+import { SurfaceInstancesStore } from './Stores/SurfaceInstancesStore.js'
+import { WhatsNewModal, type WhatsNewModalRef } from './WhatsNewModal/WhatsNew.js'
 
 interface ContextDataProps {
 	children: (progressPercent: number, loadingComplete: boolean) => React.JSX.Element | React.JSX.Element[]
@@ -56,9 +64,9 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 	)
 
 	const rootStore = useMemo(() => {
-		const showWizardEvent = new EventTarget()
-
 		const expressionVariablesList = new ExpressionVariablesListStore()
+
+		const connections = new ConnectionsStore()
 
 		return {
 			notifier: notifierObj,
@@ -66,12 +74,16 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 			whatsNewModal: whatsNewModalRef,
 
 			modules: new ModuleInfoStore(),
-			connections: new ConnectionsStore(),
+
+			connections,
+			surfaceInstances: new SurfaceInstancesStore(),
+			instanceStatuses: new InstanceStatusesStore(),
 
 			activeLearns: observable.set(),
 
-			entityDefinitions: new EntityDefinitionsStore(),
+			entityDefinitions: new EntityDefinitionsStore(connections),
 			eventDefinitions: new EventDefinitionsStore(),
+			compositeElementDefinitions: new CompositeElementDefinitionsStore(),
 
 			pages: new PagesStore(),
 			surfaces: new SurfacesStore(),
@@ -82,10 +94,11 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 
 			userConfig: new UserConfigStore(),
 
+			imageLibrary: new ImageLibraryStore(),
+
 			moduleStoreRefreshProgress: observable.map(),
 
-			showWizardEvent,
-			showWizard: () => showWizardEvent.dispatchEvent(new Event('show')),
+			wizardOpen: observable.box(false),
 
 			viewControl: new ViewControlStore(),
 		} satisfies RootAppStore
@@ -95,18 +108,33 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 		rootStore.entityDefinitions.actions,
 		trpc.instances.definitions.actions
 	)
+	const imageLibraryReady = useImageLibrarySubscription(rootStore.imageLibrary)
+	const imageLibraryCollectionsReady = useGenericCollectionsSubscription(
+		rootStore.imageLibrary,
+		trpc.imageLibrary.collections.watchQuery,
+		undefined
+	)
+
 	const feedbackDefinitionsReady = useEntityDefinitionsSubscription(
 		rootStore.entityDefinitions.feedbacks,
 		trpc.instances.definitions.feedbacks
 	)
 	const moduleInfoReady = useModuleInfoSubscription(rootStore.modules)
 	const moduleStoreReady = useModuleStoreListSubscription(rootStore.modules)
+	const moduleStoreProgressReady = useModuleStoreRefreshProgressSubscription(rootStore.modules.storeRefreshProgress)
 	const connectionsReady = useConnectionsConfigSubscription(rootStore.connections)
 	const connectionGroupsReady = useGenericCollectionsSubscription(
 		rootStore.connections,
 		trpc.instances.connections.collections.watchQuery,
 		undefined
 	)
+	const surfaceInstancesReady = useSurfaceInstancesSubscription(rootStore.surfaceInstances)
+	const surfaceInstanceCollectionsReady = useGenericCollectionsSubscription(
+		rootStore.surfaceInstances,
+		trpc.instances.surfaces.collections.watchQuery,
+		undefined
+	)
+	const instanceStatusesReady = useInstanceStatusesSubscription(rootStore.instanceStatuses)
 	const triggersListReady = useTriggersListSubscription(rootStore.triggersList)
 	const triggerGroupsReady = useGenericCollectionsSubscription(
 		rootStore.triggersList,
@@ -134,15 +162,21 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 		trpc.controls.expressionVariables.collections.watchQuery,
 		undefined
 	)
-	const moduleStoreProgressReady = useModuleStoreRefreshProgressSubscription(rootStore.moduleStoreRefreshProgress)
 	const entityDefinitionsReady = useEventDefinitions(rootStore.eventDefinitions)
+	const compositeElementDefinitionsReady = useCompositeElementDefinitionsSubscription(
+		rootStore.compositeElementDefinitions
+	)
 	const activeLearnRequestsReady = useActiveLearnRequests(rootStore.activeLearns)
 
 	const steps: boolean[] = [
 		moduleInfoReady,
 		moduleStoreReady,
+		moduleStoreProgressReady,
 		connectionsReady,
 		connectionGroupsReady,
+		surfaceInstancesReady,
+		surfaceInstanceCollectionsReady,
+		instanceStatusesReady,
 		variablesReady,
 		actionDefinitionsReady,
 		feedbackDefinitionsReady,
@@ -158,8 +192,10 @@ export function ContextData({ children }: Readonly<ContextDataProps>): React.JSX
 		triggersListReady,
 		triggerGroupsReady,
 		entityDefinitionsReady,
+		compositeElementDefinitionsReady,
 		activeLearnRequestsReady,
-		moduleStoreProgressReady,
+		imageLibraryReady,
+		imageLibraryCollectionsReady,
 	]
 	const completedSteps = steps.filter((s) => !!s)
 

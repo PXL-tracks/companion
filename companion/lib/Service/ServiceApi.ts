@@ -1,21 +1,30 @@
-import type { AppInfo } from '../Registry.js'
+import EventEmitter from 'node:events'
+import type { RecordSessionInfo } from '@companion-app/shared/Model/ActionRecorderModel.js'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
+import type { CustomVariablesModel } from '@companion-app/shared/Model/CustomVariableModel.js'
+import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
+import type { ButtonStyleProperties } from '@companion-app/shared/Model/StyleModel.js'
+import type { ModuleVariableDefinitions, VariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { ControlCommonEvents } from '../Controls/ControlDependencies.js'
+import type { IControlStore } from '../Controls/IControlStore.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import type { ImageResult } from '../Graphics/ImageResult.js'
+import type { ActionRecorder, ActionRecorderEvents } from '../Instance/ActionRecorder.js'
+import type { InstanceController } from '../Instance/Controller.js'
 import type { IPageStore } from '../Page/Store.js'
-import type { ControlsController } from '../Controls/Controller.js'
+import type { AppInfo } from '../Registry.js'
 import type { SurfaceController } from '../Surface/Controller.js'
 import type { VariablesController } from '../Variables/Controller.js'
-import type { VariablesValuesEvents } from '../Variables/Values.js'
 import type { VariablesCustomVariableEvents } from '../Variables/CustomVariable.js'
-import type { CompanionVariableValue } from '@companion-module/base'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
-import type { CustomVariablesModel } from '@companion-app/shared/Model/CustomVariableModel.js'
-import type { ImageResult } from '../Graphics/ImageResult.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { ActionRecorderEvents } from '../Controls/ActionRecorder.js'
-import type { RecordSessionInfo } from '@companion-app/shared/Model/ActionRecorderModel.js'
-import type { ControlCommonEvents } from '../Controls/ControlDependencies.js'
-import EventEmitter from 'events'
-import type { ModuleVariableDefinitions } from '@companion-app/shared/Model/Variables.js'
+import type { VariablesValuesEvents } from '../Variables/Values.js'
+
+interface ServiceApiEvents {
+	variables_changed: VariablesValuesEvents['variables_changed']
+	custom_variable_definition_changed: VariablesCustomVariableEvents['custom_variable_definition_changed']
+	action_recorder_is_running: ActionRecorderEvents['action_recorder_is_running']
+	updateButtonState: ControlCommonEvents['updateButtonState']
+}
 
 /**
  * Class providing an abstract api for consumption by services.
@@ -32,20 +41,15 @@ import type { ModuleVariableDefinitions } from '@companion-app/shared/Model/Vari
  * Individual Contributor License Agreement for Companion along with
  * this program.
  */
-
-type ServiceApiEvents =
-	| Pick<VariablesValuesEvents, 'variables_changed'>
-	| Pick<ActionRecorderEvents, 'action_recorder_is_running'>
-	| Pick<VariablesCustomVariableEvents, 'custom_variable_definition_changed'>
-	| Pick<ControlCommonEvents, 'updateButtonState'>
-
 export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	readonly #appInfo: AppInfo
 	readonly #pageStore: IPageStore
-	readonly #controlController: ControlsController
+	readonly #controlStore: IControlStore
+	readonly #actionRecorder: ActionRecorder
 	readonly #surfaceController: SurfaceController
 	readonly #variablesController: VariablesController
 	readonly #graphicsController: GraphicsController
+	readonly #instanceController: InstanceController
 
 	get appInfo(): AppInfo {
 		return this.#appInfo
@@ -54,21 +58,25 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	constructor(
 		appInfo: AppInfo,
 		pageStore: IPageStore,
-		controlController: ControlsController,
+		controlStore: IControlStore,
+		actionRecorder: ActionRecorder,
 		surfaceController: SurfaceController,
 		variablesController: VariablesController,
 		graphicsController: GraphicsController,
-		controlEvents: EventEmitter<ControlCommonEvents>
+		controlEvents: EventEmitter<ControlCommonEvents>,
+		instanceController: InstanceController
 	) {
 		super()
 		this.#appInfo = appInfo
 		this.#pageStore = pageStore
-		this.#controlController = controlController
+		this.#controlStore = controlStore
+		this.#actionRecorder = actionRecorder
 		this.#surfaceController = surfaceController
 		this.#variablesController = variablesController
 		this.#graphicsController = graphicsController
+		this.#instanceController = instanceController
 
-		this.#controlController.actionRecorder.on('action_recorder_is_running', (...args) => {
+		this.#actionRecorder.on('action_recorder_is_running', (...args) => {
 			this.emit('action_recorder_is_running', ...args)
 		})
 
@@ -90,7 +98,7 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	 * @param value
 	 * @returns Failure reason, if any
 	 */
-	setCustomVariableValue(name: string, value: CompanionVariableValue): string | null {
+	setCustomVariableValue(name: string, value: VariableValue): string | null {
 		return this.#variablesController.custom.setValue(name, value)
 	}
 
@@ -99,7 +107,7 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	 * @param name
 	 * @returns The value of the variable
 	 */
-	getCustomVariableValue(name: string): CompanionVariableValue | undefined {
+	getCustomVariableValue(name: string): VariableValue | undefined {
 		return this.#variablesController.custom.getValue(name)
 	}
 
@@ -119,7 +127,7 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	 * @param variableName
 	 * @returns The value of the variable
 	 */
-	getConnectionVariableValue(connectionLabel: string, variableName: string): CompanionVariableValue | undefined {
+	getConnectionVariableValue(connectionLabel: string, variableName: string): VariableValue | undefined {
 		return this.#variablesController.values.getVariableValue(connectionLabel, variableName)
 	}
 
@@ -131,7 +139,7 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	 */
 
 	getConnectionVariableDescription(connectionLabel: string, variableName: string): string | undefined {
-		return this.#variablesController.definitions.getVariableLabel(connectionLabel, variableName)
+		return this.#variablesController.definitions.getVariableDescription(connectionLabel, variableName)
 	}
 
 	/**
@@ -170,15 +178,15 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 	}
 
 	pressControl(controlId: string, pressed: boolean, surfaceId: string): boolean {
-		return this.#controlController.pressControl(controlId, pressed, surfaceId)
+		return this.#controlStore.pressControl(controlId, pressed, surfaceId)
 	}
 
 	rotateControl(controlId: string, direction: boolean, surfaceId: string): boolean {
-		return this.#controlController.rotateControl(controlId, direction, surfaceId)
+		return this.#controlStore.rotateControl(controlId, direction, surfaceId)
 	}
 
 	getControl(controlId: string): ServiceApiControl | null {
-		const control = this.#controlController.getControl(controlId)
+		const control = this.#controlStore.getControl(controlId)
 		if (!control) return null
 
 		return {
@@ -186,8 +194,9 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 
 			setCurrentStep: control.supportsActionSets ? (step) => control.actionSets.stepMakeCurrent(step) : undefined,
 
-			getDrawStyle: control.supportsStyle ? () => control.getDrawStyle() : undefined,
-			setStyleFields: control.supportsStyle ? (diff) => control.styleSetFields(diff) : undefined,
+			setStyleFields: control.supportsLayeredStyle
+				? (diff) => control.layeredStyleUpdateFromLegacyProperties(diff)
+				: undefined,
 		}
 	}
 
@@ -221,16 +230,49 @@ export class ServiceApi extends EventEmitter<ServiceApiEvents> {
 		return this.#graphicsController.getCachedRenderOrGeneratePlaceholder(location)
 	}
 
+	getCachedRender(location: ControlLocation): ImageResult | undefined {
+		return this.#graphicsController.getCachedRender(location)
+	}
+
 	actionRecorderDiscardActions(): void {
-		this.#controlController.actionRecorder.discardActions()
+		this.#actionRecorder.discardActions()
 	}
 
 	actionRecorderSetRecording(isRunning: boolean): void {
-		this.#controlController.actionRecorder.setRecording(isRunning)
+		this.#actionRecorder.setRecording(isRunning)
 	}
 
 	actionRecorderGetSession(): RecordSessionInfo {
-		return this.#controlController.actionRecorder.getSession()
+		return this.#actionRecorder.getSession()
+	}
+
+	/**
+	 * Get all connections as a client-facing JSON map
+	 */
+	getConnectionsList(): Record<string, ClientConnectionConfig> {
+		return this.#instanceController.getConnectionClientJson(true)
+	}
+
+	/**
+	 * Get the status of a specific connection
+	 */
+	getConnectionStatus(connectionId: string): InstanceStatusEntry | undefined {
+		return this.#instanceController.getInstanceStatus(connectionId)
+	}
+
+	/**
+	 * Restart a connection process
+	 * @returns true if the restart was triggered, false if the connection is inactive
+	 */
+	restartConnection(connectionId: string): boolean {
+		return this.#instanceController.restartConnection(connectionId)
+	}
+
+	/**
+	 * Enable or disable a connection
+	 */
+	enableDisableConnection(connectionId: string, enabled: boolean): void {
+		this.#instanceController.enableDisableConnection(connectionId, enabled)
 	}
 }
 
@@ -239,6 +281,5 @@ export interface ServiceApiControl {
 
 	setCurrentStep: ((step: number) => boolean) | undefined
 
-	getDrawStyle: (() => DrawStyleModel | null) | undefined
-	setStyleFields: ((diff: Record<string, any>) => void) | undefined
+	setStyleFields: ((diff: Partial<ButtonStyleProperties>) => void) | undefined
 }

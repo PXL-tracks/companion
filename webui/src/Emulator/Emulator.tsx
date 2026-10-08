@@ -1,22 +1,24 @@
-import React, { useCallback, useState } from 'react'
-import { useMountEffect, PreventDefaultHandler } from '~/Resources/util.js'
-import { LoadingRetryOrError } from '~/Resources/Loading.js'
-import { CButton, CCol, CForm, CRow } from '@coreui/react'
+import { faCancel, faExpand, faGamepad } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCancel, faGamepad, faExpand } from '@fortawesome/free-solid-svg-icons'
-import type { EmulatorConfig } from '@companion-app/shared/Model/Common.js'
-import { observer } from 'mobx-react-lite'
-import { useParams, useNavigate } from '@tanstack/react-router'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { trpc } from '~/Resources/TRPC.js'
-import { useWakeLock } from '~/Hooks/useScreenWakeLock.js'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useState } from 'react'
+import type { EmulatorConfig } from '@companion-app/shared/Model/Common.js'
+import { Button } from '~/Components/Button.js'
+import { Form } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
 import { NonIdealState } from '~/Components/NonIdealState.js'
-import { useEmulatorImageCache } from './ImageCache.js'
+import { StandalonePageError } from '~/Components/StandalonePageError.js'
+import { useWakeLock } from '~/Hooks/useScreenWakeLock.js'
+import { trpc } from '~/Resources/TRPC.js'
+import { PreventDefaultHandler, useMountEffect } from '~/Resources/util.js'
 import { EmulatorButtons } from './Buttons.js'
+import { useEmulatorImageCache } from './ImageCache.js'
 import { EmulatorLockedPage } from './LockedState.js'
 
 export const Emulator = observer(function Emulator() {
-	const { emulatorId } = useParams({ from: '/emulator/$emulatorId' })
+	const { emulatorId } = useParams({ from: '/_standalone/emulator/$emulatorId' })
 
 	const config = useSubscription(trpc.surfaces.emulatorConfig.subscriptionOptions({ id: emulatorId }))
 	const lockedState = useSubscription(trpc.surfaces.emulatorLocked.subscriptionOptions({ id: emulatorId }))
@@ -46,18 +48,15 @@ export const Emulator = observer(function Emulator() {
 					)}
 				</>
 			) : config.data === null ? (
-				<CRow className={'loading'}>
+				<Grid.Row className={'loading'}>
 					<EmulatorNotFound emulatorId={emulatorId} />
-				</CRow>
+				</Grid.Row>
 			) : (
-				<CRow className={'loading'}>
-					<LoadingRetryOrError
-						dataReady={false}
-						error={config.error || imagesSub.error || lockedState.error}
-						doRetry={doRetryLoad}
-						design="pulse-xl"
-					/>
-				</CRow>
+				<StandalonePageError
+					dataReady={false}
+					error={config.error || imagesSub.error || lockedState.error}
+					doRetry={doRetryLoad}
+				/>
 			)}
 		</div>
 	)
@@ -93,26 +92,26 @@ function ConfigurePanel({ config }: ConfigurePanelProps): JSX.Element | null {
 	}, [])
 
 	return show && config.emulator_prompt_fullscreen && !fullscreen ? (
-		<CRow className="configure">
-			<CCol sm={12}>
-				<CForm onSubmit={PreventDefaultHandler}>
-					<CRow>
-						<CCol xs={12}>
-							<CButton
+		<Grid.Row className="configure">
+			<Grid.Col sm={12}>
+				<Form onSubmit={PreventDefaultHandler}>
+					<Grid.Row>
+						<Grid.Col xs={12}>
+							<Button
 								onClick={doRequestFullscreen}
 								title="Fullscreen"
 								disabled={!document.documentElement.requestFullscreen}
 							>
 								<FontAwesomeIcon icon={faExpand} /> Fullscreen
-							</CButton>
-							<CButton onClick={doDismiss} title="Dismiss">
+							</Button>
+							<Button onClick={doDismiss} title="Dismiss">
 								<FontAwesomeIcon icon={faCancel} /> Dismiss
-							</CButton>
-						</CCol>
-					</CRow>
-				</CForm>
-			</CCol>
-		</CRow>
+							</Button>
+						</Grid.Col>
+					</Grid.Row>
+				</Form>
+			</Grid.Col>
+		</Grid.Row>
 	) : null
 }
 
@@ -126,14 +125,14 @@ function EmulatorNotFound({ emulatorId }: { emulatorId: string }) {
 					The emulator with ID <code>{emulatorId}</code> was not found.
 				</div>
 				<div>
-					<CButton
+					<Button
 						color="warning"
 						className="emulator-back-button"
 						onClick={() => void navigate({ to: '/emulators' })}
 						title="Back to emulator list"
 					>
 						Back
-					</CButton>
+					</Button>
 				</div>
 			</NonIdealState>
 		</div>

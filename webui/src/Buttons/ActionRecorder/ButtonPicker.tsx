@@ -1,20 +1,22 @@
-import React, { useCallback, useContext, useEffect, useState, useRef, useMemo } from 'react'
-import { PreventDefaultHandler } from '~/Resources/util.js'
-import { CButton, CButtonGroup, CCol, CRow, CForm, CFormLabel } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faHome } from '@fortawesome/free-solid-svg-icons'
-import { DropdownInputField } from '~/Components/index.js'
-import { ButtonGridHeader } from '../ButtonGridHeader.js'
-import { usePagePicker } from '~/Hooks/usePagePicker.js'
-import { ButtonGridIcon, ButtonInfiniteGrid, type ButtonInfiniteGridRef } from '../ButtonInfiniteGrid.js'
-import { useHasBeenRendered } from '~/Hooks/useHasBeenRendered.js'
-import type { DropdownChoice, DropdownChoiceId } from '@companion-module/base'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { NormalButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ActionSetId } from '@companion-app/shared/Model/ActionModel.js'
+import type { LayeredButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import type { ControlLocation, DropdownChoice, DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { SimpleDropdownInputField } from '~/Components/DropdownInputFieldSimple.js'
+import { FormLabel } from '~/Components/Form'
+import { Form } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
 import { useControlConfig } from '~/Hooks/useControlConfig.js'
+import { useHasBeenRendered } from '~/Hooks/useHasBeenRendered.js'
+import { usePagePicker } from '~/Hooks/usePagePicker.js'
+import { PreventDefaultHandler } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ButtonGridHeader } from '../ButtonGridHeader.js'
+import { ButtonGridIcon, ButtonInfiniteGrid, type ButtonInfiniteGridRef } from '../ButtonInfiniteGrid.js'
 
 interface ButtonPickerProps {
 	selectButton: (
@@ -54,12 +56,12 @@ export const ButtonPicker = observer(function ButtonPicker({ selectButton }: But
 	}, [selectedControl, selectedStep, selectedSet, selectButton])
 
 	const { controlConfig: rawControlConfig } = useControlConfig(selectedControl)
-	const controlInfo: NormalButtonModel | null =
-		rawControlConfig?.config.type === 'button' ? rawControlConfig.config : null
+	const controlInfo: LayeredButtonModel | null =
+		rawControlConfig?.config.type === 'button-layered' ? rawControlConfig.config : null
 
 	const actionStepOptions = useMemo(() => {
 		switch (controlInfo?.type) {
-			case 'button':
+			case 'button-layered':
 				return Object.keys(controlInfo.steps || {}).map((stepId) => ({
 					id: stepId,
 					label: `Step ${Number(stepId) + 1}`,
@@ -72,7 +74,7 @@ export const ButtonPicker = observer(function ButtonPicker({ selectButton }: But
 	const selectedStepInfo = selectedStep ? controlInfo?.steps?.[selectedStep] : null
 	const actionSetOptions = useMemo(() => {
 		switch (controlInfo?.type) {
-			case 'button': {
+			case 'button-layered': {
 				const sets: DropdownChoice[] = [
 					{
 						id: 'down',
@@ -145,22 +147,16 @@ export const ButtonPicker = observer(function ButtonPicker({ selectButton }: But
 		gridRef.current?.resetPosition()
 	}, [gridRef])
 
+	const stepInputId = useId()
+	const setInputId = useId()
+
 	return (
 		<>
-			<div>
-				<CButton
-					color="light"
-					style={{
-						float: 'right',
-						marginTop: 10,
-					}}
-					onClick={resetPosition}
-				>
+			<ButtonGridHeader pageNumber={pageNumber} changePage={changePage} setPage={setPageNumber}>
+				<Button color="light" onClick={resetPosition}>
 					<FontAwesomeIcon icon={faHome} /> Home Position
-				</CButton>
-
-				<ButtonGridHeader pageNumber={pageNumber} changePage={changePage} setPage={setPageNumber} />
-			</div>
+				</Button>
+			</ButtonGridHeader>
 			<div className="buttongrid" ref={isInViewRef}>
 				{hasBeenInView && gridSize && (
 					<ButtonInfiniteGrid
@@ -169,56 +165,58 @@ export const ButtonPicker = observer(function ButtonPicker({ selectButton }: But
 						pageNumber={pageNumber}
 						selectedButton={selectedLocation}
 						gridSize={gridSize}
-						buttonIconFactory={ButtonGridIcon}
+						ButtonIconFactory={ButtonGridIcon}
 						drawScale={1} // TODO
 					/>
 				)}
 			</div>
 			<div>
-				<CForm className="flex-form" onSubmit={PreventDefaultHandler}>
-					<CRow>
-						<CCol sm={10} xs={9} hidden={actionStepOptions.length <= 1}>
-							<CFormLabel>Step</CFormLabel>
+				<Form className="flex-form" onSubmit={PreventDefaultHandler}>
+					<Grid.Row>
+						<Grid.Col sm={10} xs={9} hidden={actionStepOptions.length <= 1}>
+							<FormLabel htmlFor={stepInputId}>Step</FormLabel>
 
-							<DropdownInputField
+							<SimpleDropdownInputField
+								id={stepInputId}
 								choices={actionStepOptions}
 								value={selectedStep ?? ''}
 								setValue={setSelectedStep as (val: DropdownChoiceId) => void}
 								disabled={!controlInfo}
 							/>
-						</CCol>
-						<CCol sm={10} xs={9} hidden={actionSetOptions.length === 0}>
-							<CFormLabel>Action Group</CFormLabel>
+						</Grid.Col>
+						<Grid.Col sm={10} xs={9} hidden={actionSetOptions.length === 0}>
+							<FormLabel htmlFor={setInputId}>Action Group</FormLabel>
 
-							<DropdownInputField
+							<SimpleDropdownInputField
+								id={setInputId}
 								choices={actionSetOptions}
 								value={selectedSet ?? ''}
 								setValue={setSelectedSet as (val: DropdownChoiceId) => void}
 								disabled={!controlInfo}
 							/>
-						</CCol>
-						<CCol className="py-1" sm={10} xs={9}>
-							<CButtonGroup>
-								<CButton
+						</Grid.Col>
+						<Grid.Col className="py-1" sm={10} xs={9}>
+							<ButtonGroup>
+								<Button
 									color="primary"
 									title="Replace all the actions on the trigger"
 									disabled={!selectedControl || !selectedSet}
 									onClick={replaceActions}
 								>
 									Replace
-								</CButton>
-								<CButton
+								</Button>
+								<Button
 									color="info"
 									title="Append to the existing actions"
 									disabled={!selectedControl || !selectedSet}
 									onClick={appendActions}
 								>
 									Append
-								</CButton>
-							</CButtonGroup>
-						</CCol>
-					</CRow>
-				</CForm>
+								</Button>
+							</ButtonGroup>
+						</Grid.Col>
+					</Grid.Row>
+				</Form>
 			</div>
 		</>
 	)

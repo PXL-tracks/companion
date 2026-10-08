@@ -9,15 +9,18 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
-import type { AppInfo } from '../Registry.js'
-import type { AppUpdateInfo } from '@companion-app/shared/Model/Common.js'
-import { compileUpdatePayload } from './UpdatePayload.js'
-import { publicProcedure, router, toIterable } from './TRPC.js'
-import { EventEmitter } from 'events'
-import type { paths as CompanionUpdatesApiPaths } from '@companion-app/shared/OpenApi/CompanionUpdates.js'
+import { EventEmitter } from 'node:events'
+import os from 'node:os'
 import createClient, { type Client } from 'openapi-fetch'
 import pRetry, { AbortError } from 'p-retry'
+import z from 'zod'
+import type { AppUpdateInfo } from '@companion-app/shared/Model/Common.js'
+import type { paths as CompanionUpdatesApiPaths } from '@companion-app/shared/OpenApi/CompanionUpdates.js'
+import LogController from '../Log/Controller.js'
+import type { AppInfo } from '../Registry.js'
+import { isRunningUnderLauncher } from '../Resources/Util.js'
+import { publicProcedure, router, toIterable } from './TRPC.js'
+import { compileUpdatePayload } from './UpdatePayload.js'
 
 type UpdateEvents = {
 	info: [info: AppUpdateInfo]
@@ -82,6 +85,13 @@ export class UIUpdate {
 				}
 
 				this.#logger.debug(`fresh update data received ${JSON.stringify(res.data)}`)
+				if (!this.#appInfo.options.notifications) {
+					this.#logger.debug(
+						'Notification display has been disabled by the command-line: not showing the update message.'
+					)
+					return
+				}
+
 				this.#latestUpdateData = {
 					link: res.data.link,
 					message2: undefined,
@@ -109,12 +119,35 @@ export class UIUpdate {
 	createTrpcRouter() {
 		const self = this
 		return router({
-			version: publicProcedure.query(() => {
-				return {
-					appVersion: this.#appInfo.appVersion,
-					appBuild: this.#appInfo.appBuild,
-				}
-			}),
+			version: publicProcedure
+				.input(
+					z
+						.object({
+							all: z.boolean(),
+						})
+						.optional()
+				)
+				.query(({ input, ctx }) => {
+					let osName = os.type()
+					if (/windows/i.test(osName)) {
+						osName = os.version()
+					}
+					return {
+						appVersion: this.#appInfo.appVersion,
+						appBuild: this.#appInfo.appBuild,
+						os: input?.all ? `${osName} (v${os.release()}; ${os.arch()})` : undefined,
+
+						// The on-disk logs folder, when available (only when running under the launcher)
+						logsDir: this.#appInfo.logsDir,
+
+						// Dangerous features (read-only - these can only be changed via launcher/CLI/env)
+						shellCommandSupportEnabled: this.#appInfo.options.enableShellCommandSupport,
+						// Computed per requesting client: local clients are always allowed
+						customModuleImportAllowed: this.#appInfo.options.enableRestrictedModules || ctx.isLocalClient(),
+						// So the UI can tailor "how to enable" hints to how Companion is being run
+						runningUnderLauncher: isRunningUnderLauncher(),
+					}
+				}),
 
 			updateInfo: publicProcedure.subscription(async function* (opts) {
 				const changes = toIterable(self.#updateEvents, 'info', opts.signal)

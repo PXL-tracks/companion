@@ -1,16 +1,19 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CButton, CButtonGroup, CCol, CRow } from '@coreui/react'
-import { assertNever, makeAbsolutePath } from '~/Resources/util.js'
-import { nanoid } from 'nanoid'
-import dayjs from 'dayjs'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faFileExport } from '@fortawesome/free-solid-svg-icons'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { VariableSizeList as List, type ListOnScrollProps } from 'react-window'
-import AutoSizer from 'react-virtualized-auto-sizer'
-import type { ClientLogLine } from '@companion-app/shared/Model/LogLine.js'
-import { trpc, useMutationExt } from './Resources/TRPC'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useQuery } from '@tanstack/react-query'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useSubscription } from '@trpc/tanstack-react-query'
+import dayjs from 'dayjs'
+import { nanoid } from 'nanoid'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ClientLogLine } from '@companion-app/shared/Model/LogLine.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { safeSetLocalStorage } from '~/Helpers/SafeStorage.js'
+import { useStickyScroll } from '~/Hooks/useStickyScroll.js'
+import { assertNever, makeAbsolutePath } from '~/Resources/util.js'
+import { Button, ButtonGroup, LinkButtonExternal } from './Components/Button'
+import { trpc, useMutationExt } from './Resources/TRPC'
 
 interface LogConfig {
 	debug: boolean | undefined
@@ -22,20 +25,13 @@ interface ClientLogLineExt extends Omit<ClientLogLine, 'time'> {
 	time: number | null
 }
 
-const LogsOnDiskInfoLine: ClientLogLineExt = {
-	time: null,
-	level: 'debug',
-	source: 'log',
-	message: 'You can view older logs in the configuration folder',
-}
-
 export const LogPanel = memo(function LogPanel() {
 	const [config, setConfig] = useState<LogConfig>(() => loadConfig())
 	const exportRef = useRef<GenericConfirmModalRef>(null)
 
 	// Save the config when it changes
 	useEffect(() => {
-		window.localStorage.setItem('debug_config', JSON.stringify(config))
+		safeSetLocalStorage('debug_config', JSON.stringify(config))
 	}, [config])
 
 	const clearLogMutation = useMutationExt(trpc.logs.clear.mutationOptions())
@@ -74,61 +70,50 @@ export const LogPanel = memo(function LogPanel() {
 		<>
 			<GenericConfirmModal ref={exportRef} />
 			<div className="log-page">
-				<CRow>
-					<CCol lg={12} className="log-buttons">
-						<CButtonGroup>
-							<CButton color="warning" size="sm" onClick={doToggleWarn} style={{ opacity: config.warn ? 1 : 0.2 }}>
+				<Grid.Row>
+					<Grid.Col lg={12} className="px-3">
+						<ButtonGroup>
+							<Button color="warning" size="sm" onClick={doToggleWarn} variant={config.warn ? undefined : 'outline'}>
 								Warning
-							</CButton>
-							<CButton color="info" size="sm" onClick={doToggleInfo} style={{ opacity: config.info ? 1 : 0.2 }}>
+							</Button>
+							<Button color="info" size="sm" onClick={doToggleInfo} variant={config.info ? undefined : 'outline'}>
 								Info
-							</CButton>
-							<CButton color="secondary" size="sm" onClick={doToggleDebug} style={{ opacity: config.debug ? 1 : 0.2 }}>
+							</Button>
+							<Button
+								color="secondary"
+								size="sm"
+								onClick={doToggleDebug}
+								variant={config.debug ? undefined : 'outline'}
+							>
 								Debug
-							</CButton>
-						</CButtonGroup>
+							</Button>
+						</ButtonGroup>
 
 						<div className="float-right">
-							<CButton color="danger" size="sm" onClick={doClearLog}>
+							<Button color="primary" size="sm" onClick={doClearLog}>
 								Clear log
-							</CButton>
-							<CButton
-								color="light"
-								style={{
-									marginLeft: 10,
-								}}
-								size="sm"
-								href={makeAbsolutePath(`/int/export/log`)}
-								target="_blank"
-							>
+							</Button>
+							<LinkButtonExternal color="light" className="ms-2" size="sm" href={makeAbsolutePath(`/int/export/log`)}>
 								<FontAwesomeIcon icon={faFileExport} /> Export log
-							</CButton>
-							<CButton
-								color="light"
-								style={{
-									marginLeft: 10,
-								}}
-								onClick={exportSupportModal}
-								size="sm"
-							>
+							</LinkButtonExternal>
+							<Button color="light" className="ms-2" onClick={exportSupportModal} size="sm">
 								<FontAwesomeIcon icon={faFileExport} /> Export support bundle
-							</CButton>
+							</Button>
 						</div>
-					</CCol>
-				</CRow>
+					</Grid.Col>
+				</Grid.Row>
 
-				<CRow className="log-panel">
-					<CCol lg={12} style={{ overflow: 'hidden', height: '100%', width: '100%' }}>
+				<Grid.Row className="log-panel">
+					<Grid.Col lg={12} style={{ overflow: 'hidden', height: '100%', width: '100%' }}>
 						<LogPanelContents config={config} />
-					</CCol>
-				</CRow>
+					</Grid.Col>
+				</Grid.Row>
 			</div>
 		</>
 	)
 })
 
 function useLogHistory() {
-	const [listChunkClearedToken, setListChunkClearedToken] = useState(nanoid())
 	const [history, setHistory] = useState<ClientLogLineExt[]>([])
 
 	useSubscription(
@@ -151,7 +136,6 @@ function useLogHistory() {
 							const newArray = [...history, ...newItems]
 
 							if (newArray.length > 5000) {
-								setListChunkClearedToken(nanoid())
 								return newArray.slice(-4500)
 							} else {
 								return newArray
@@ -171,134 +155,90 @@ function useLogHistory() {
 		})
 	)
 
-	return { history, listChunkClearedToken }
+	return { history }
 }
 
 interface LogPanelContentsProps {
 	config: LogConfig
 }
 function LogPanelContents({ config }: LogPanelContentsProps) {
-	const { history, listChunkClearedToken } = useLogHistory()
+	const { history } = useLogHistory()
 
-	const listRef = useRef<List>(null)
-	const rowHeights = useRef<Record<string, number | undefined>>({})
+	const parentRef = useRef<HTMLDivElement>(null)
 
-	const [follow, setFollow] = useState(true)
-
-	useEffect(() => {
-		// Invalidate everything when the visibility selection changes, or the parent forces a reset
-		if (listRef.current) {
-			listRef.current.resetAfterIndex(0)
-		}
-	}, [config, listRef, listChunkClearedToken])
+	const { data: appInfo } = useQuery(trpc.appInfo.version.queryOptions())
+	const infoLine = useMemo<ClientLogLineExt>(
+		() => ({
+			time: null,
+			level: 'debug',
+			source: 'log',
+			message: appInfo?.logsDir
+				? `You can view older logs on disk at: ${appInfo.logsDir}`
+				: 'For older logs check the console output or system logs where Companion was started (e.g. `docker logs`, `journalctl`).',
+		}),
+		[appInfo?.logsDir]
+	)
 
 	const messages = useMemo(() => {
 		return history.filter((msg) => msg.level === 'error' || !!config[msg.level as keyof LogConfig])
 	}, [history, config])
 
-	useEffect(() => {
-		if (follow && listRef.current && messages.length > 0) {
-			// scroll to bottom
-			listRef.current.scrollToItem(messages.length - 1, 'end')
-		}
-	}, [messages, follow])
+	const count = messages.length + 1
 
-	const hasMountedRef = useRef(false)
-	const userScroll = useCallback(
-		(event: ListOnScrollProps) => {
-			// Ignore scroll event on mount
-			if (!hasMountedRef.current) {
-				hasMountedRef.current = true
+	// eslint-disable-next-line react-hooks/incompatible-library
+	const virtualizer = useVirtualizer({
+		count: count,
+		getScrollElement: () => parentRef.current,
+		estimateSize: () => 18,
+		overscan: 5,
+	})
 
-				setTimeout(() => {
-					if (listRef.current && messages.length > 0) {
-						// scroll to bottom
-						listRef.current.scrollToItem(messages.length - 1, 'end')
-					}
-				}, 100)
-				return
-			}
+	const onScroll = useStickyScroll(parentRef, virtualizer, count)
 
-			// if it was the user, then disable following
-			if (event.scrollUpdateWasRequested === false) {
-				setFollow(false)
-			}
-
-			if (!outerRef.current) {
-				return
-			}
-
-			// if scrolling is at the bottom, reenable following
-			if (event.scrollOffset + outerRef.current.offsetHeight === outerRef.current.scrollHeight) {
-				setFollow(true)
-			}
-		},
-		[messages.length]
-	)
-
-	const getRowHeight = useCallback(
-		(index: number) => {
-			return rowHeights.current[index] || 18
-		},
-		[rowHeights]
-	)
-
-	function setRowHeight(index: number, size: number) {
-		if (listRef.current) {
-			listRef.current.resetAfterIndex(0)
-		}
-		rowHeights.current = { ...rowHeights.current, [index]: size }
-	}
-
-	function Row({ style, index }: { style: React.CSSProperties; index: number }) {
-		const rowRef = useRef<HTMLDivElement>(null)
-
-		const h = index === 0 ? LogsOnDiskInfoLine : messages[index - 1]
-
-		useEffect(() => {
-			if (rowRef.current) {
-				setRowHeight(index, rowRef.current.clientHeight)
-			}
-			// eslint-disable-next-line
-		}, [rowRef])
-
-		return (
-			<div style={style}>
-				<LogLineInner h={h} innerRef={rowRef} />
-			</div>
-		)
-	}
-
-	const outerRef = useRef<HTMLElement>(null)
+	const items = virtualizer.getVirtualItems()
 
 	return (
-		<AutoSizer style={{ width: '100%', height: '100%' }}>
-			{({ height, width }) => (
-				<List
-					height={height}
-					itemCount={messages.length + 1}
-					onScroll={userScroll}
-					itemSize={getRowHeight}
-					ref={listRef}
-					outerRef={outerRef}
-					width={width}
+		<div ref={parentRef} style={{ width: '100%', height: '100%', overflow: 'auto' }} onScroll={onScroll}>
+			<div
+				style={{
+					height: virtualizer.getTotalSize(),
+					width: '100%',
+					position: 'relative',
+				}}
+			>
+				<div
+					style={{
+						position: 'absolute',
+						top: 0,
+						left: 0,
+						width: '100%',
+						transform: `translateY(${items[0]?.start ?? 0}px)`,
+					}}
 				>
-					{Row}
-				</List>
-			)}
-		</AutoSizer>
+					{items.map((virtualRow) => (
+						<div
+							key={virtualRow.key}
+							data-index={virtualRow.index}
+							ref={virtualizer.measureElement}
+							className={virtualRow.index % 2 ? 'ListItemOdd' : 'ListItemEven'}
+						>
+							<LogLineInner line={virtualRow.index === 0 ? infoLine : messages[virtualRow.index - 1]} />
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
 	)
 }
 
 interface LogLineInnerProps {
-	h: ClientLogLineExt
-	innerRef: React.RefObject<HTMLDivElement>
+	line: ClientLogLineExt
 }
-const LogLineInner = memo(({ h, innerRef }: LogLineInnerProps) => {
-	const time_format = h.time === null ? '                 ' : dayjs(h.time).format('YY.MM.DD HH:mm:ss')
+const LogLineInner = memo(({ line }: LogLineInnerProps) => {
+	const time_format = line.time === null ? '                 ' : dayjs(line.time).format('YY.MM.DD HH:mm:ss')
 	return (
-		<div ref={innerRef} className={`log-line log-type-${h.level}`}>
-			{time_format} <strong>{h.source}</strong>: <span className="log-message">{h.message}</span>
+		<div className={`log-line log-type-${line.level}`}>
+			{time_format} <strong>{line.source}</strong>: <span className="log-message">{line.message}</span>
 		</div>
 	)
 })
@@ -318,7 +258,7 @@ function loadConfig(): LogConfig {
 			warn: true,
 		}
 
-		window.localStorage.setItem('debug_config', JSON.stringify(config))
+		safeSetLocalStorage('debug_config', JSON.stringify(config))
 
 		return config
 	}

@@ -1,19 +1,30 @@
-import React, { useCallback, useContext, useState } from 'react'
-import { CAlert, CButton, CButtonGroup } from '@coreui/react'
+import {
+	faEyeSlash,
+	faGamepad,
+	faPlug,
+	faQuestionCircle,
+	faWarning,
+	type IconDefinition,
+} from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faEyeSlash, faPlug, faQuestionCircle, faWarning } from '@fortawesome/free-solid-svg-icons'
 import classNames from 'classnames'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useState } from 'react'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { InlineHelpCustom } from '~/Components/InlineHelp.js'
 import { NonIdealState } from '~/Components/NonIdealState.js'
 import { SearchBox } from '~/Components/SearchBox.js'
-import { useAllModuleProducts, filterProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
-import { ImportModules } from './ImportCustomModule.js'
+import { TabArea } from '~/Components/TabArea.js'
 import { useTableVisibilityHelper, VisibilityButton } from '~/Components/TableVisibility.js'
-import { RefreshModulesList } from './RefreshModulesList.js'
+import { filterProducts, useAllModuleProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons.js'
+import { assertNever, makeAbsolutePath } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ImportModules } from './ImportCustomModule.js'
 import { LastUpdatedTimestamp } from './LastUpdatedTimestamp.js'
-import { makeAbsolutePath } from '~/Resources/util.js'
-import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { RefreshModulesList } from './RefreshModulesList.js'
 
 interface VisibleModulesState {
 	installed: boolean
@@ -40,14 +51,30 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 		availableDeprecated: false,
 	})
 
+	const [filterType, setFilterType] = useState<ModuleInstanceType | null>(null)
 	const [filter, setFilter] = useState('')
+	const filterName = (() => {
+		if (filterType === null) return ' '
+		switch (filterType) {
+			case ModuleInstanceType.Connection:
+				return ' Connection '
+			case ModuleInstanceType.Surface:
+				return ' Surface '
+			default:
+				assertNever(filterType)
+				return ' '
+		}
+	})()
 
-	const allProducts = useAllModuleProducts(null, true, true)
+	//  A module can support several devices: useAllModuleProducts returns the list of devices, so some modules are represented by several entries here.
+	const allProducts = useAllModuleProducts(null, true, true).filter((p) => !filterType || filterType === p.moduleType)
 	const typeProducts = allProducts.filter((p) => {
 		let isVisible = false
 		if (p.installedInfo) {
 			if (
-				(p.installedInfo.installedVersions.length > 0 || p.installedInfo.devVersion) &&
+				(p.installedInfo.installedVersions.length > 0 ||
+					p.installedInfo.devVersion ||
+					p.installedInfo.builtinVersion) &&
 				visibleModules.visibility.installed
 			)
 				isVisible = true
@@ -72,7 +99,7 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 
 	let components: JSX.Element[] = []
 	try {
-		const searchResults = filterProducts(typeProducts, filter)
+		const searchResults = filterProducts(typeProducts, filter, true)
 
 		const candidatesObj: Record<string, JSX.Element> = {}
 		for (const moduleInfo of searchResults) {
@@ -108,31 +135,44 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 
 		components = []
 		components.push(
-			<CAlert color="warning" role="alert">
-				Failed to build list of modules:
-				<br />
-				{e?.toString()}
-			</CAlert>
+			<tr key="module-list-build-error">
+				<td colSpan={4}>
+					<StaticAlert color="warning" role="alert">
+						Failed to build list of modules:
+						<br />
+						{e?.toString()}
+					</StaticAlert>
+				</td>
+			</tr>
 		)
 	}
 
-	const hiddenCount =
-		new Set(allProducts.map((p) => p.moduleId)).size - new Set(typeProducts.map((p) => p.moduleId)).size
+	const moduleKey = (p: FuzzyProduct) => `${p.moduleType}:${p.moduleId}`
+	const modulesCount = new Set(allProducts.map(moduleKey)).size
+	const hiddenCount = modulesCount - new Set(typeProducts.map(moduleKey)).size
 
 	return (
 		<div className="flex-column-layout">
 			<div className="fixed-header">
-				<h4>Manage Modules</h4>
-
+				<h4 className="button-inline">
+					Manage Modules
+					<ContextHelpButton action="/user-guide/config/modules" />
+				</h4>
+				<p className="mb-2">
+					<strong>
+						Companion can work with over {modulesCount} different{filterName}modules
+					</strong>{' '}
+					and the list grows every day.
+				</p>
 				<p>
 					View and manage your installed modules, or search for new ones to support additional devices. Can't find your
 					device?{' '}
-					<a target="_blank" href={makeAbsolutePath('/user-guide/modules')} className="text-decoration-none">
+					<a target="_blank" href={makeAbsolutePath('/user-guide/config/modules')} className="text-decoration-none">
 						Check our guidance for getting device support
 					</a>
 					.<br />
 					For offline systems, download module bundles from the{' '}
-					<a href="https://user.bitfocus.io/download" target="_blank" className="text-decoration-none">
+					<a href="https://l.companion.free/q/lp68nsiV4" target="_blank" className="text-decoration-none">
 						Bitfocus website
 					</a>
 					.
@@ -145,16 +185,18 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 					<LastUpdatedTimestamp timestamp={modules.storeUpdateInfo.lastUpdated} />
 				</div>
 
-				<SearchBox filter={filter} setFilter={setFilter} />
+				<SearchBox filter={filter} setFilter={setFilter} className="mb-2" />
 			</div>
+
+			<FilterTypeTabs filterType={filterType} setFilterType={setFilterType} />
 
 			<div className="scrollable-content">
 				<table className="table-tight table-responsive-sm">
 					<thead>
 						<tr>
-							<th colSpan={2}>
+							<th colSpan={3}>
 								Module
-								<CButtonGroup className="table-header-buttons">
+								<ButtonGroup className="table-header-buttons">
 									<VisibilityButton {...visibleModules} keyId="installed" color="success" label="Installed" />
 									<VisibilityButton {...visibleModules} keyId="available" color="warning" label="Available" />
 									<VisibilityButton
@@ -163,7 +205,7 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 										color="primary"
 										label="Deprecated"
 									/>
-								</CButtonGroup>
+								</ButtonGroup>
 							</th>
 						</tr>
 					</thead>
@@ -173,7 +215,11 @@ export const ModulesList = observer(function ModulesList({ doManageModule, selec
 							<tr>
 								<td colSpan={4} style={{ padding: '10px 5px' }}>
 									<FontAwesomeIcon icon={faEyeSlash} style={{ marginRight: '0.5em', color: 'red' }} />
-									<strong>{hiddenCount} Modules are ignored</strong>
+									<strong>{hiddenCount} Modules are ignored</strong>. <br /> Enable{' '}
+									{(visibleModules.visibility.installed ? '' : '"Installed" ') +
+										(visibleModules.visibility.available ? '' : '"Available" ') +
+										(visibleModules.visibility.availableDeprecated ? '' : '"Deprecated"') +
+										' to include them in the search'}
 								</td>
 							</tr>
 						)}
@@ -247,39 +293,75 @@ const ModulesListRow = observer(function ModulesListRow({
 
 	// const moduleVersion = getModuleVersionInfoForConnection(moduleInfo, connection)
 
+	let icon: IconDefinition | null = null
+	let iconTitle: string | null = null
+	switch (moduleInfo.moduleType) {
+		case ModuleInstanceType.Connection:
+			icon = faPlug
+			iconTitle = 'Connection Module'
+			break
+		case ModuleInstanceType.Surface:
+			icon = faGamepad
+			iconTitle = 'Surface Module'
+			break
+		default:
+			assertNever(moduleInfo.moduleType)
+			break
+	}
+
 	return (
 		<tr
 			className={classNames({
 				'connectionlist-selected': isSelected,
 			})}
 		>
-			<td onClick={doEdit} className="hand">
-				{!!moduleInfo.storeInfo?.deprecationReason && <FontAwesomeIcon icon={faWarning} title="Deprecated" />}
-
-				{moduleInfo.name}
-
-				{/* {moduleInfo.installedVersions.?.isLegacy && (
-					<>
-						<FontAwesomeIcon
-							icon={faExclamationTriangle}
-							color="#f80"
-							title="This module has not been updated for Companion 3.0, and may not work fully"
-						/>{' '}
-					</>
+			<td onClick={doEdit} className="hand compact">
+				{icon && (
+					<span title={iconTitle ?? ''}>
+						<FontAwesomeIcon icon={icon} />
+					</span>
 				)}
-				{moduleVersion?.displayName} */}
+			</td>
+			<td onClick={doEdit} className="hand">
+				{!!moduleInfo.storeInfo?.deprecationReason && (
+					<InlineHelpCustom help="Deprecated" className="me-1">
+						<FontAwesomeIcon icon={faWarning} aria-label="Deprecated" />
+					</InlineHelpCustom>
+				)}
+				{moduleInfo.name}
 			</td>
 			<td className="compact">
-				<CButton
-					onMouseDown={doShowHelp}
-					color="white"
-					title="Show Help"
-					disabled={!moduleInfo.helpUrl}
-					style={{ textAlign: 'left' }}
-				>
+				<Button onMouseDown={doShowHelp} title="Show Help" disabled={!moduleInfo.helpUrl}>
 					<FontAwesomeIcon icon={faQuestionCircle} />
-				</CButton>
+				</Button>
 			</td>
 		</tr>
 	)
 })
+
+interface FilterTypeTabsProps {
+	filterType: ModuleInstanceType | null
+	setFilterType: (type: ModuleInstanceType | null) => void
+}
+
+function FilterTypeTabs({ filterType, setFilterType }: FilterTypeTabsProps) {
+	return (
+		<TabArea.Root
+			value={filterType}
+			onValueChange={(v) => setFilterType(v as ModuleInstanceType | null)}
+			className="remote-control-tabs"
+		>
+			<TabArea.List>
+				<TabArea.Tab value={null} title="Show all module types">
+					All Modules
+				</TabArea.Tab>
+				<TabArea.Tab value={ModuleInstanceType.Connection} title="Show only connection modules">
+					Connection Modules
+				</TabArea.Tab>
+				<TabArea.Tab value={ModuleInstanceType.Surface} title="Show only surface modules">
+					Surface Modules
+				</TabArea.Tab>
+			</TabArea.List>
+		</TabArea.Root>
+	)
+}

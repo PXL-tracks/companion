@@ -1,29 +1,33 @@
-import { ControlBase } from '../../ControlBase.js'
-import jsonPatch from 'fast-json-patch'
 import debounceFn from 'debounce-fn'
-import { TriggersEventTimer } from './Events/Timer.js'
-import { TriggersEventMisc } from './Events/Misc.js'
-import { clamp } from '../../../Resources/Util.js'
-import { TriggersEventVariables } from './Events/Variable.js'
+import jsonPatch from 'fast-json-patch'
 import { nanoid } from 'nanoid'
-import { VisitorReferencesUpdater } from '../../../Resources/Visitors/ReferencesUpdater.js'
+import type { JsonValue } from 'type-fest'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
+import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
+import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
+import type { ClientTriggerData, TriggerModel, TriggerOptions } from '@companion-app/shared/Model/TriggerModel.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { clamp } from '../../../Resources/Util.js'
 import { VisitorReferencesCollector } from '../../../Resources/Visitors/ReferencesCollector.js'
-import type { TriggerEvents } from '../../TriggerEvents.js'
+import { VisitorReferencesUpdater } from '../../../Resources/Visitors/ReferencesUpdater.js'
+import { ControlActionRunner } from '../../ActionRunner.js'
+import { ControlBase } from '../../ControlBase.js'
+import type { ControlDependencies } from '../../ControlDependencies.js'
+import type { ControlEntityListChangeProps } from '../../Entities/EntityListPoolBase.js'
+import { ControlEntityListPoolTrigger } from '../../Entities/EntityListPoolTrigger.js'
 import type {
 	ControlWithActions,
 	ControlWithEntities,
 	ControlWithEvents,
 	ControlWithOptions,
 	ControlWithoutActionSets,
+	ControlWithoutLayeredStyle,
 	ControlWithoutPushed,
-	ControlWithoutStyle,
 } from '../../IControlFragments.js'
-import type { ClientTriggerData, TriggerModel, TriggerOptions } from '@companion-app/shared/Model/TriggerModel.js'
-import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
-import type { ControlDependencies } from '../../ControlDependencies.js'
-import { ControlActionRunner } from '../../ActionRunner.js'
-import { ControlEntityListPoolTrigger } from '../../Entities/EntityListPoolTrigger.js'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
+import type { TriggerEvents } from '../../TriggerEvents.js'
+import { TriggersEventMisc } from './Events/Misc.js'
+import { TriggersEventTimer } from './Events/Timer.js'
+import { TriggersEventVariables } from './Events/Variable.js'
 import { TriggerExecutionSource } from './TriggerExecutionSource.js'
 
 /**
@@ -47,7 +51,7 @@ export class ControlTrigger
 		ControlWithActions,
 		ControlWithEvents,
 		ControlWithEntities,
-		ControlWithoutStyle,
+		ControlWithoutLayeredStyle,
 		ControlWithoutActionSets,
 		ControlWithOptions,
 		ControlWithoutPushed
@@ -55,9 +59,11 @@ export class ControlTrigger
 	readonly type = 'trigger'
 
 	readonly supportsActions = true
+	readonly supportsConvert = false
 	readonly supportsEvents = true
 	readonly supportsEntities = true
 	readonly supportsStyle = false
+	readonly supportsLayeredStyle = false
 	readonly supportsActionSets = false
 	readonly supportsOptions = true
 	readonly supportsPushed = false
@@ -69,6 +75,7 @@ export class ControlTrigger
 		name: 'New Trigger',
 		enabled: false,
 		sortOrder: 0,
+		notes: '',
 	}
 
 	/**
@@ -125,11 +132,20 @@ export class ControlTrigger
 
 	readonly entities: ControlEntityListPoolTrigger
 
+	get drawing(): null {
+		return null // Triggers don't draw
+	}
+
 	/**
 	 * Whether this trigger and its parent collection is enabled or not
 	 */
 	#enabled: boolean = false
 	#collectionEnabled: boolean = false
+
+	/**
+	 * Whether this trigger is currently being rate-limited due to rapid variable-driven firing
+	 */
+	#isRateLimited: boolean = false
 
 	/**
 	 * @param registry - the application core
@@ -147,22 +163,24 @@ export class ControlTrigger
 	) {
 		super(deps, controlId, `Controls/ControlTypes/Triggers/${controlId}`)
 
-		this.#actionRunner = new ControlActionRunner(deps.actionRunner, this.controlId, this.triggerRedraw.bind(this))
+		this.#actionRunner = new ControlActionRunner(deps.actionRunner, this.controlId, this.triggerInvalidation.bind(this))
 
 		this.entities = new ControlEntityListPoolTrigger({
 			controlId,
-			commitChange: this.commitChange.bind(this),
-			invalidateControl: this.triggerRedraw.bind(this),
+			reportChange: this.#entityListReportChange.bind(this),
 			instanceDefinitions: deps.instance.definitions,
 			internalModule: deps.internalModule,
 			processManager: deps.instance.processManager,
-			variableValues: deps.variables.values,
+			variableValues: deps.variableValues,
+			pageStore: deps.pageStore,
 		})
 
 		this.#eventBus = eventBus
-		this.#timerEvents = new TriggersEventTimer(eventBus, controlId, this.executeActions.bind(this))
+		this.#timerEvents = new TriggersEventTimer(deps.userconfig, eventBus, controlId, this.executeActions.bind(this))
 		this.#miscEvents = new TriggersEventMisc(eventBus, controlId, this.executeActions.bind(this))
-		this.#variablesEvents = new TriggersEventVariables(eventBus, controlId, this.executeActions.bind(this))
+		this.#variablesEvents = new TriggersEventVariables(eventBus, controlId, this.executeActions.bind(this), (limited) =>
+			this.#setVariableRateLimited(limited)
+		)
 
 		this.options = structuredClone(ControlTrigger.DefaultOptions)
 		this.events = []
@@ -189,6 +207,18 @@ export class ControlTrigger
 		setImmediate(() => {
 			this.#setupEvents()
 		})
+	}
+
+	#entityListReportChange(options: ControlEntityListChangeProps): void {
+		if (!options.noSave) {
+			this.commitChange(false)
+		}
+
+		// Elements are not relevant for triggers
+
+		if (options.redraw) {
+			this.triggerInvalidation()
+		}
 	}
 
 	abortDelayedActions(_skip_up: boolean, exceptSignal: AbortSignal | null): void {
@@ -224,7 +254,7 @@ export class ControlTrigger
 		if (source === TriggerExecutionSource.Test) {
 			this.logger.debug(`Test Execute ${this.options.name}`)
 		} else {
-			if (!this.options.enabled) return
+			if (!this.#enabled) return // covers both options.enabled and `#collectionEnabled`
 
 			// Ensure the condition passes when it is not part of the event
 			if (source !== TriggerExecutionSource.ConditionChange) {
@@ -262,7 +292,13 @@ export class ControlTrigger
 		foundConnectionLabels: Set<string>,
 		foundVariables: Set<string>
 	): void {
-		new VisitorReferencesCollector(this.deps.internalModule, foundConnectionIds, foundConnectionLabels, foundVariables)
+		new VisitorReferencesCollector(
+			this.deps.internalModule,
+			foundConnectionIds,
+			foundConnectionLabels,
+			foundVariables,
+			undefined
+		)
 			.visitEntities(this.entities.getAllEntities(), [])
 			.visitEvents(this.events)
 	}
@@ -299,6 +335,9 @@ export class ControlTrigger
 					case 'interval':
 						eventStrings.push(this.#timerEvents.getIntervalDescription(event))
 						break
+					case 'intervalRandom':
+						eventStrings.push(this.#timerEvents.getRandomIntervalDescription(event))
+						break
 					case 'timeofday':
 						eventStrings.push(this.#timerEvents.getTimeOfDayDescription(event))
 						break
@@ -317,8 +356,8 @@ export class ControlTrigger
 					case 'button_press':
 						eventStrings.push('On any button press')
 						break
-					case 'button_depress':
-						eventStrings.push('On any button depress')
+					case 'button_release':
+						eventStrings.push('On any button release')
 						break
 					case 'condition_true':
 						eventStrings.push('On condition becoming true')
@@ -347,7 +386,19 @@ export class ControlTrigger
 			...this.options,
 			lastExecuted: this.#lastExecuted,
 			description: eventStrings.join('<br />'),
+			collectionEnabled: this.#collectionEnabled,
+			isRateLimited: this.#isRateLimited,
 		}
+	}
+
+	/**
+	 * Update whether this trigger is currently being rate-limited, and notify the client if it changed
+	 */
+	#setVariableRateLimited(limited: boolean): void {
+		if (this.#isRateLimited === limited) return
+
+		this.#isRateLimited = limited
+		this.#sendTriggerJsonChange()
 	}
 
 	/**
@@ -375,7 +426,12 @@ export class ControlTrigger
 	 */
 	renameVariables(labelFrom: string, labelTo: string): void {
 		// Fix up references
-		const changed = new VisitorReferencesUpdater(this.deps.internalModule, { [labelFrom]: labelTo }, undefined)
+		const changed = new VisitorReferencesUpdater(
+			this.deps.internalModule,
+			{ [labelFrom]: labelTo },
+			undefined,
+			undefined
+		)
 			.visitEntities(this.entities.getAllEntities(), [])
 			.visitEvents(this.events)
 			.recheckChangedFeedbacks()
@@ -391,6 +447,12 @@ export class ControlTrigger
 				case 'interval':
 					this.#timerEvents.setInterval(event.id, Number(event.options.seconds))
 					break
+				case 'intervalRandom': {
+					const iMin = Number(event.options.minimum)
+					const iMax = Number(event.options.maximum)
+					this.#timerEvents.setInterval(event.id, iMin, iMax)
+					break
+				}
 				case 'timeofday':
 					this.#timerEvents.setTimeOfDay(event.id, event.options)
 					break
@@ -409,19 +471,21 @@ export class ControlTrigger
 				case 'button_press':
 					this.#miscEvents.setControlPress(event.id, true)
 					break
-				case 'button_depress':
+				case 'button_release':
 					this.#miscEvents.setControlPress(event.id, false)
 					break
 				case 'condition_true':
+					this.#conditionCheckLastValue = this.entities.checkConditionValue()
 					this.#conditionCheckEvents.add(event.id)
-					this.triggerRedraw() // Recheck the condition
+					this.triggerInvalidation() // Recheck the condition
 					break
 				case 'condition_false':
+					this.#conditionCheckLastValue = this.entities.checkConditionValue()
 					this.#conditionCheckEvents.add(event.id)
-					this.triggerRedraw() // Recheck the condition
+					this.triggerInvalidation() // Recheck the condition
 					break
 				case 'variable_changed':
-					this.#variablesEvents.setVariableChanged(event.id, String(event.options.variableId))
+					this.#variablesEvents.setVariableChanged(event.id, stringifyVariableValue(event.options.variableId) ?? '')
 					break
 				case 'computer_locked':
 					this.#miscEvents.setComputerLocked(event.id, true)
@@ -441,6 +505,7 @@ export class ControlTrigger
 	#stopEvent(event: EventInstance): void {
 		switch (event.type) {
 			case 'interval':
+			case 'intervalRandom':
 				this.#timerEvents.clearInterval(event.id)
 				break
 			case 'timeofday':
@@ -459,7 +524,7 @@ export class ControlTrigger
 				this.#miscEvents.clearClientConnect(event.id)
 				break
 			case 'button_press':
-			case 'button_depress':
+			case 'button_release':
 				this.#miscEvents.clearControlPress(event.id)
 				break
 			case 'condition_true':
@@ -484,10 +549,10 @@ export class ControlTrigger
 	/**
 	 * Update an option field of this control
 	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	optionsSetField(key: string, value: any, forceSet?: boolean): boolean {
+	optionsSetField(key: string, value: JsonValue | undefined, forceSet?: boolean): boolean {
 		if (!forceSet && (key === 'sortOrder' || key === 'collectionId'))
 			throw new Error('sortOrder cannot be set by the client')
+		if (BANNED_PROPS.has(key)) throw new Error(`Setting option "${key}" is not allowed`)
 
 		// @ts-expect-error mismatch in types
 		this.options[key] = value
@@ -547,11 +612,17 @@ export class ControlTrigger
 		const newEnabled = this.#collectionEnabled && this.options.enabled
 		if (this.#enabled !== newEnabled) {
 			this.#enabled = newEnabled
+			if (newEnabled && this.#conditionCheckEvents.size > 0) {
+				// Refresh the last-known condition value so the first triggerInvalidation
+				// after re-enabling does not mistake a stale transition for a new edge.
+				this.#conditionCheckLastValue = this.entities.checkConditionValue()
+			}
 			this.#setupEvents(false)
 		} else {
 			// Report the change, for internal feedbacks
 			this.#eventBus.emit('trigger_enabled', this.controlId, this.#enabled)
 		}
+		this.#sendTriggerJsonChange()
 	}
 
 	commitChange(redraw = true): void {
@@ -580,22 +651,29 @@ export class ControlTrigger
 	}
 
 	/**
-	 * Trigger a recheck of the condition, as something has changed and it might be the 'condition'
-	 * @access protected
+	 * Trigger a recheck of the condition, as something has changed and it might be the 'condition'.
 	 */
-	triggerRedraw = debounceFn(
+	triggerInvalidation = debounceFn(
 		() => {
+			if (!this.#enabled || this.#conditionCheckEvents.size === 0) {
+				// the condition, above, implies !(this.options.enabled && this.#collectionEnabled)
+				// explanation: "condition_true/_false" events don't have a separate place to
+				// disable them, when the collection is disabled (i.e. unlike `event.enabled`), so disable here.
+				// Do this test first so we don't waste resources checking a disabled triggers/events...
+				return
+			}
 			try {
 				const newStatus = this.entities.checkConditionValue()
+
 				const runOnTrue = this.events.some((event) => event.enabled && event.type === 'condition_true')
 				const runOnFalse = this.events.some((event) => event.enabled && event.type === 'condition_false')
+
 				if (
-					this.options.enabled &&
-					this.#conditionCheckEvents.size > 0 &&
-					((runOnTrue && newStatus && !this.#conditionCheckLastValue) ||
-						(runOnFalse && !newStatus && this.#conditionCheckLastValue))
+					(runOnTrue && newStatus && !this.#conditionCheckLastValue) ||
+					(runOnFalse && !newStatus && this.#conditionCheckLastValue)
 				) {
 					setImmediate(() => {
+						if (!this.#enabled || this.#conditionCheckEvents.size === 0) return // avoid TOCTOU
 						this.executeActions(Date.now(), TriggerExecutionSource.ConditionChange)
 					})
 				}
@@ -723,11 +801,11 @@ export class ControlTrigger
 	/**
 	 * Update an option for an event
 	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	eventSetOptions(id: string, key: string, value: any): boolean {
+	eventSetOptions(id: string, key: string, value: JsonValue): boolean {
 		for (const event of this.events) {
 			if (event && event.id === id) {
 				if (!event.options) event.options = {}
+				if (BANNED_PROPS.has(key)) throw new Error(`Setting option "${key}" is not allowed`)
 
 				event.options[key] = value
 
@@ -748,8 +826,5 @@ export class ControlTrigger
 	 */
 	pressControl(_pressed: boolean, _surfaceId: string | undefined): void {
 		// Nothing to do
-	}
-	getBitmapSize(): { width: number; height: number } | null {
-		return null
 	}
 }

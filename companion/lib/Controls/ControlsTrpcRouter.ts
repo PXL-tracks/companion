@@ -1,24 +1,33 @@
-import { publicProcedure } from '../UI/TRPC.js'
-import type { SomeControl } from './IControlFragments.js'
-import z from 'zod'
-import { zodLocation } from '../Preview/Graphics.js'
-import type { InstanceDefinitions } from '../Instance/Definitions.js'
-import type { ControlsController } from './Controller.js'
-import type { PageController } from '../Page/Controller.js'
-import { CreateBankControlId, formatLocation } from '@companion-app/shared/ControlId.js'
-import { nanoid } from 'nanoid'
-import type { Logger } from '../Log/Controller.js'
-import type { ControlCommonEvents } from './ControlDependencies.js'
 import type EventEmitter from 'node:events'
-import { EntityModelType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandler.js'
+import { nanoid } from 'nanoid'
+import z from 'zod'
+import { CreateBankControlId, formatLocation } from '@companion-app/shared/ControlId.js'
+import {
+	EntityModelType,
+	type ActionEntityModel,
+	type FeedbackEntityModel,
+} from '@companion-app/shared/Model/EntityModel.js'
+import {
+	convertExpressionOptionsWithoutParsing,
+	JsonValueSchema,
+	optionsObjectToExpressionOptions,
+} from '@companion-app/shared/Model/Options.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import type { InstanceDefinitions } from '../Instance/Definitions.js'
 import type { InstanceProcessManager } from '../Instance/ProcessManager.js'
+import type { Logger } from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import { zodLocation } from '../Preview/Graphics.js'
+import { publicProcedure } from '../UI/TRPC.js'
+import type { ControlCommonEvents } from './ControlDependencies.js'
+import type { ControlsController } from './Controller.js'
+import type { SomeControl } from './IControlFragments.js'
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function createControlsTrpcRouter(
 	logger: Logger,
 	controlsMap: Map<string, SomeControl<any>>,
-	pageController: PageController,
+	pageStore: IPageStore,
 	instanceDefinitions: InstanceDefinitions,
 	controlEvents: EventEmitter<ControlCommonEvents>,
 	controlsController: ControlsController,
@@ -31,13 +40,35 @@ export function createControlsTrpcRouter(
 					connectionId: z.string(),
 					presetId: z.string(),
 					location: zodLocation,
+					variableValues: z.record(z.string(), JsonValueSchema.optional()).nullable(),
 				})
 			)
 			.mutation(async ({ input }) => {
-				const model = instanceDefinitions.convertPresetToControlModel(input.connectionId, input.presetId)
+				const model = instanceDefinitions.convertPresetToControlModel(
+					input.connectionId,
+					input.presetId,
+					input.variableValues
+				)
 				if (!model) return null
 
 				return controlsController.importControl(input.location, model)
+			}),
+
+		convertControl: publicProcedure
+			.input(
+				z.object({
+					location: zodLocation,
+				})
+			)
+			.mutation(async ({ input }) => {
+				const controlId = pageStore.getControlIdAt(input.location)
+				if (!controlId) return null
+
+				const control = controlsMap.get(controlId)
+				if (!control || !control.supportsConvert) return null
+
+				const newModel = control.convertControl()
+				return controlsController.importControl(input.location, newModel)
 			}),
 
 		resetControl: publicProcedure
@@ -50,7 +81,7 @@ export function createControlsTrpcRouter(
 			.mutation(async ({ input }) => {
 				const { location, newType } = input
 
-				const controlId = pageController.store.getControlIdAt(location)
+				const controlId = pageStore.getControlIdAt(location)
 
 				if (controlId) {
 					controlsController.deleteControl(controlId)
@@ -80,21 +111,21 @@ export function createControlsTrpcRouter(
 					return false
 
 				// Make sure target page number is valid
-				if (!pageController.store.isPageValid(toLocation.pageNumber)) return false
+				if (!pageStore.isPageValid(toLocation.pageNumber)) return false
 
 				// Make sure there is something to move
-				const fromControlId = pageController.store.getControlIdAt(fromLocation)
+				const fromControlId = pageStore.getControlIdAt(fromLocation)
 				if (!fromControlId) return false
 
 				// Delete the control at the destination
-				const toControlId = pageController.store.getControlIdAt(toLocation)
+				const toControlId = pageStore.getControlIdAt(toLocation)
 				if (toControlId) {
 					controlsController.deleteControl(toControlId)
 				}
 
 				// Perform the move
-				pageController.setControlIdAt(fromLocation, null)
-				pageController.setControlIdAt(toLocation, fromControlId)
+				controlEvents.emit('controlRemovedFrom', fromLocation)
+				controlEvents.emit('controlPlacedAt', toLocation, fromControlId)
 
 				// Inform the control it was moved
 				const control = controlsMap.get(fromControlId)
@@ -104,7 +135,7 @@ export function createControlsTrpcRouter(
 				controlEvents.emit('invalidateLocationRender', fromLocation)
 				controlEvents.emit('invalidateLocationRender', toLocation)
 
-				return false
+				return true
 			}),
 
 		copyControl: publicProcedure
@@ -126,10 +157,10 @@ export function createControlsTrpcRouter(
 					return false
 
 				// Make sure target page number is valid
-				if (!pageController.store.isPageValid(toLocation.pageNumber)) return false
+				if (!pageStore.isPageValid(toLocation.pageNumber)) return false
 
 				// Make sure there is something to copy
-				const fromControlId = pageController.store.getControlIdAt(fromLocation)
+				const fromControlId = pageStore.getControlIdAt(fromLocation)
 				if (!fromControlId) return false
 
 				const fromControl = controlsMap.get(fromControlId)
@@ -137,7 +168,7 @@ export function createControlsTrpcRouter(
 				const controlJson = fromControl.toJSON(true)
 
 				// Delete the control at the destination
-				const toControlId = pageController.store.getControlIdAt(toLocation)
+				const toControlId = pageStore.getControlIdAt(toLocation)
 				if (toControlId) {
 					controlsController.deleteControl(toControlId)
 				}
@@ -147,9 +178,10 @@ export function createControlsTrpcRouter(
 				if (newControl) {
 					controlsMap.set(newControlId, newControl)
 
-					pageController.setControlIdAt(toLocation, newControlId)
+					controlEvents.emit('controlPlacedAt', toLocation, newControlId)
 
-					newControl.triggerRedraw()
+					// Ensure it is redrawn
+					newControl.commitChange(true)
 
 					return true
 				}
@@ -176,20 +208,23 @@ export function createControlsTrpcRouter(
 					return false
 
 				// Make sure both page numbers are valid
-				if (
-					!pageController.store.isPageValid(toLocation.pageNumber) ||
-					!pageController.store.isPageValid(fromLocation.pageNumber)
-				)
+				if (!pageStore.isPageValid(toLocation.pageNumber) || !pageStore.isPageValid(fromLocation.pageNumber))
 					return false
 
 				// Find the ids to move
-				const fromControlId = pageController.store.getControlIdAt(fromLocation)
-				const toControlId = pageController.store.getControlIdAt(toLocation)
+				const fromControlId = pageStore.getControlIdAt(fromLocation)
+				const toControlId = pageStore.getControlIdAt(toLocation)
 
 				// Perform the swap
-				pageController.setControlIdAt(toLocation, null)
-				pageController.setControlIdAt(fromLocation, toControlId)
-				pageController.setControlIdAt(toLocation, fromControlId)
+				controlEvents.emit('controlRemovedFrom', toLocation)
+				if (toControlId) {
+					controlEvents.emit('controlPlacedAt', fromLocation, toControlId)
+				} else {
+					controlEvents.emit('controlRemovedFrom', fromLocation)
+				}
+				if (fromControlId) {
+					controlEvents.emit('controlPlacedAt', toLocation, fromControlId)
+				}
 
 				// Inform the controls they were moved
 				const controlA = fromControlId && controlsMap.get(fromControlId)
@@ -218,7 +253,7 @@ export function createControlsTrpcRouter(
 				)
 				if (!input.surfaceId) throw new Error('Missing surfaceId')
 
-				const controlId = pageController.store.getControlIdAt(input.location)
+				const controlId = pageStore.getControlIdAt(input.location)
 				if (!controlId) return
 
 				controlsController.pressControl(controlId, input.direction, `hot:${input.surfaceId}`)
@@ -237,7 +272,7 @@ export function createControlsTrpcRouter(
 					`being told from gui to hot rotate ${formatLocation(input.location)} ${input.direction} ${input.surfaceId}`
 				)
 
-				const controlId = pageController.store.getControlIdAt(input.location)
+				const controlId = pageStore.getControlIdAt(input.location)
 				if (!controlId) return
 
 				controlsController.rotateControl(
@@ -256,28 +291,10 @@ export function createControlsTrpcRouter(
 			.mutation(async ({ input }) => {
 				logger.silly(`being told from gui to abort actions on ${formatLocation(input.location)}`)
 
-				const controlId = pageController.store.getControlIdAt(input.location)
+				const controlId = pageStore.getControlIdAt(input.location)
 				if (!controlId) return
 
 				controlsController.abortAllDelayedActions(null)
-			}),
-
-		setStyleFields: publicProcedure
-			.input(
-				z.object({
-					controlId: z.string(),
-					styleFields: z.record(z.string(), z.any()),
-				})
-			)
-			.mutation(async ({ input }) => {
-				const control = controlsMap.get(input.controlId)
-				if (!control) return false
-
-				if (control.supportsStyle) {
-					return control.styleSetFields(input.styleFields)
-				} else {
-					throw new Error(`Control "${input.controlId}" does not support config`)
-				}
 			}),
 
 		setOptionsField: publicProcedure
@@ -285,7 +302,7 @@ export function createControlsTrpcRouter(
 				z.object({
 					controlId: z.string(),
 					key: z.string(),
-					value: z.any(),
+					value: JsonValueSchema.optional(),
 				})
 			)
 			.mutation(async ({ input }) => {
@@ -298,7 +315,6 @@ export function createControlsTrpcRouter(
 					throw new Error(`Control "${input.controlId}" does not support options`)
 				}
 			}),
-
 
 		pxlFire: publicProcedure
 			.input(
@@ -314,35 +330,35 @@ export function createControlsTrpcRouter(
 			)
 			.mutation(async ({ input }) => {
 				logger.silly(`pxlFire: ${input.actions.length} actions`)
-				
+
 				const results = []
-				
+
 				for (const actionInput of input.actions) {
 					const instance = processManager.getConnectionChild(actionInput.connectionId)
 					if (!instance) {
 						results.push({ success: false, error: `Connection "${actionInput.connectionId}" not found` })
 						continue
 					}
-					
+
 					const action: ActionEntityModel = {
 						type: EntityModelType.Action,
 						id: nanoid(),
 						connectionId: actionInput.connectionId,
 						definitionId: actionInput.actionId,
-						options: actionInput.options,
+						options: optionsObjectToExpressionOptions(actionInput.options, false),
 						disabled: false,
 						upgradeIndex: undefined,
 					}
-					
+
 					const controller = new AbortController()
 					const extras: RunActionExtras = {
-						controlId: "timeline-direct",
-						surfaceId: "timeline",
+						controlId: 'timeline-direct',
+						surfaceId: 'timeline',
 						location: undefined,
 						abortDelayed: controller.signal,
-						executionMode: "concurrent",
+						executionMode: 'concurrent',
 					}
-					
+
 					try {
 						await instance.actionRun(action, extras)
 						results.push({ success: true })
@@ -350,7 +366,7 @@ export function createControlsTrpcRouter(
 						results.push({ success: false, error: error.message })
 					}
 				}
-				
+
 				return results
 			}),
 
@@ -368,36 +384,82 @@ export function createControlsTrpcRouter(
 			)
 			.query(async ({ input }) => {
 				logger.silly(`pxlSniff: ${input.queries.length} queries`)
-				
+
 				const results = []
-				
+
 				for (const query of input.queries) {
 					const instance = processManager.getConnectionChild(query.connectionId)
 					if (!instance) {
 						results.push({ success: false, error: `Connection "${query.connectionId}" not found` })
 						continue
 					}
-					
-					const feedbackEntity = {
-						type: EntityModelType.Feedback,
+
+					const feedbackEntity: FeedbackEntityModel = {
+						type: EntityModelType.Feedback as const,
 						id: nanoid(),
 						connectionId: query.connectionId,
 						definitionId: query.feedbackId,
-						options: query.options || {},
+						options: optionsObjectToExpressionOptions(query.options || {}, false),
 						disabled: false,
 						upgradeIndex: undefined,
-						isInverted: false,
+						isInverted: { value: false, isExpression: false },
 					}
-					
+
 					try {
-						const learnedOptions = await instance.entityLearnValues(feedbackEntity, "timeline-learn")
-						results.push({ success: true, value: learnedOptions })
+						const learnedOptions = await instance.entityLearnValues(feedbackEntity, 'timeline-learn')
+						results.push({
+							success: true,
+							value: learnedOptions ? convertExpressionOptionsWithoutParsing(learnedOptions) : learnedOptions,
+						})
 					} catch (error: any) {
 						results.push({ success: false, error: error.message })
 					}
 				}
-				
+
 				return results
+			}),
+
+		pxlLearn: publicProcedure
+			.input(
+				z.object({
+					queries: z.array(
+						z.object({
+							connectionId: z.string(),
+							actionId: z.string(),
+							options: z.record(z.string(), z.any()).optional(),
+						})
+					),
+				})
+			)
+			.query(async ({ input }) => {
+				logger.silly(`pxlLearn: ${input.queries.length} queries`)
+
+				return Promise.all(
+					input.queries.map(async (query) => {
+						const instance = processManager.getConnectionChild(query.connectionId)
+						if (!instance) return { success: false, error: `Connection "${query.connectionId}" not found` }
+
+						const actionEntity: ActionEntityModel = {
+							type: EntityModelType.Action,
+							id: nanoid(),
+							connectionId: query.connectionId,
+							definitionId: query.actionId,
+							options: optionsObjectToExpressionOptions(query.options || {}, false),
+							disabled: false,
+							upgradeIndex: undefined,
+						}
+
+						try {
+							const learnedOptions = await instance.entityLearnValues(actionEntity, 'timeline-learn')
+							return {
+								success: true,
+								value: learnedOptions ? convertExpressionOptionsWithoutParsing(learnedOptions) : learnedOptions,
+							}
+						} catch (error: any) {
+							return { success: false, error: error.message }
+						}
+					})
+				)
 			}),
 
 		pxlPeek: publicProcedure
@@ -413,24 +475,24 @@ export function createControlsTrpcRouter(
 			)
 			.query(async ({ input }) => {
 				logger.silly(`pxlPeek: ${input.queries.length} queries`)
-				
+
 				const results = []
-				
+
 				for (const query of input.queries) {
 					const actionDef = instanceDefinitions.getEntityDefinition(
 						EntityModelType.Action,
 						query.connectionId,
 						query.actionId
 					)
-					
+
 					if (!actionDef) {
-						results.push({ 
-							success: false, 
-							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"` 
+						results.push({
+							success: false,
+							error: `Action "${query.actionId}" not found for connection "${query.connectionId}"`,
 						})
 						continue
 					}
-					
+
 					results.push({
 						success: true,
 						actionId: query.actionId,
@@ -451,7 +513,7 @@ export function createControlsTrpcRouter(
 						})),
 					})
 				}
-				
+
 				return results
 			}),
 	}

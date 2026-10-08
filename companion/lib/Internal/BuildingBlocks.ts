@@ -9,41 +9,40 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
-import type {
-	FeedbackForVisitor,
-	InternalModuleFragment,
-	InternalVisitor,
-	InternalFeedbackDefinition,
-	InternalActionDefinition,
-	ActionForVisitor,
-	InternalModuleFragmentEvents,
-} from './Types.js'
-import type { ActionRunner } from '../Controls/ActionRunner.js'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandler.js'
+import { EventEmitter } from 'node:events'
+import { setTimeout } from 'node:timers/promises'
+import { formatLocation } from '@companion-app/shared/ControlId.js'
 import {
 	EntityModelType,
 	FeedbackEntitySubType,
 	type FeedbackEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import type { InternalModuleUtils } from './Util.js'
-import { EventEmitter } from 'events'
-import { setTimeout } from 'node:timers/promises'
-import { formatLocation } from '@companion-app/shared/ControlId.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { ActionRunner } from '../Controls/ActionRunner.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import LogController from '../Log/Controller.js'
+import type {
+	ActionForInternalExecution,
+	ActionForVisitor,
+	FeedbackForVisitor,
+	InternalActionDefinition,
+	InternalActionResult,
+	InternalFeedbackDefinition,
+	InternalModuleFragment,
+	InternalModuleFragmentEvents,
+	InternalVisitor,
+} from './Types.js'
 
 export class InternalBuildingBlocks
 	extends EventEmitter<InternalModuleFragmentEvents>
 	implements InternalModuleFragment
 {
 	readonly #logger = LogController.createLogger('Internal/BuildingBlocks')
+	readonly #actionRunner: ActionRunner
 
-	readonly #internalUtils: InternalModuleUtils
-
-	constructor(internalUtils: InternalModuleUtils) {
+	constructor(actionRunner: ActionRunner) {
 		super()
-
-		this.#internalUtils = internalUtils
+		this.#actionRunner = actionRunner
 	}
 
 	getFeedbackDefinitions(): Record<string, InternalFeedbackDefinition> {
@@ -68,6 +67,7 @@ export class InternalBuildingBlocks
 							{ id: 'or', label: 'OR' },
 							{ id: 'xor', label: 'XOR' },
 						],
+						disableAutoExpression: true,
 					},
 				],
 				hasLearn: false,
@@ -81,6 +81,7 @@ export class InternalBuildingBlocks
 						label: '',
 					},
 				],
+				optionsSupportExpressions: true,
 			},
 
 			logic_conditionalise_advanced: {
@@ -92,6 +93,7 @@ export class InternalBuildingBlocks
 				options: [],
 				hasLearn: false,
 				learnTimeout: undefined,
+				feedbackDisableStyleOverrides: true,
 				supportsChildGroups: [
 					{
 						type: EntityModelType.Feedback,
@@ -103,11 +105,13 @@ export class InternalBuildingBlocks
 					},
 					{
 						type: EntityModelType.Feedback,
+						feedbackListType: FeedbackEntitySubType.StyleOverride, // Allow these to do their own styleOverrides
 						groupId: 'feedbacks',
 						entityTypeLabel: 'feedback',
 						label: 'Feedbacks',
 					},
 				],
+				optionsSupportExpressions: true,
 			},
 		}
 	}
@@ -131,6 +135,7 @@ export class InternalBuildingBlocks
 						tooltip:
 							`Using "Sequential" will run the actions one after the other, waiting for each to complete before starting the next.\n` +
 							`If the module doesn't support it for a particular action, the following action will start immediately.`,
+						disableAutoExpression: true,
 					},
 				],
 				hasLearn: false,
@@ -143,22 +148,24 @@ export class InternalBuildingBlocks
 						label: '',
 					},
 				],
+				optionsSupportExpressions: true,
 			},
 			wait: {
 				label: 'Wait',
 				description: 'Wait for a specified amount of time',
 				options: [
 					{
-						type: 'textinput',
+						type: 'expression',
 						label: 'Time expression (ms)',
 						id: 'time',
 						default: '1000',
-						useVariables: { local: true },
-						isExpression: true,
+						disableAutoExpression: true,
+						allowInvalidValues: true,
 					},
 				],
 				hasLearn: false,
 				learnTimeout: undefined,
+				optionsSupportExpressions: true,
 			},
 			logic_if: {
 				label: 'Logic: If statement',
@@ -187,6 +194,7 @@ export class InternalBuildingBlocks
 						entityTypeLabel: 'action',
 					},
 				],
+				optionsSupportExpressions: true,
 			},
 			logic_while: {
 				label: 'Logic: While loop',
@@ -209,49 +217,35 @@ export class InternalBuildingBlocks
 						entityTypeLabel: 'action',
 					},
 				],
+				optionsSupportExpressions: true,
 			},
-		}
-	}
-
-	feedbackUpgrade(feedback: FeedbackEntityModel, _controlId: string): FeedbackEntityModel | void {
-		if (feedback.definitionId === 'logic_and') {
-			feedback.definitionId = 'logic_operator'
-			feedback.options = { operation: 'and' }
-
-			return feedback
-		} else if (feedback.definitionId === 'logic_or') {
-			feedback.definitionId = 'logic_operator'
-			feedback.options = { operation: 'or' }
-
-			return feedback
-		} else if (feedback.definitionId === 'logic_xor') {
-			feedback.definitionId = 'logic_operator'
-			feedback.options = { operation: 'xor' }
-
-			return feedback
 		}
 	}
 
 	/**
 	 * Execute a logic feedback
 	 */
-	executeLogicFeedback(feedback: FeedbackEntityModel, childValues: boolean[]): boolean {
+	executeLogicFeedback(feedback: FeedbackEntityModel, isInverted: boolean, childValues: boolean[]): boolean {
 		if (feedback.definitionId === 'logic_operator') {
-			switch (feedback.options.operation) {
+			switch (
+				feedback.options.operation?.value // This can't be an expression
+			) {
 				case 'and':
-					return booleanAnd(!!feedback.isInverted, childValues)
-				case 'or':
-					return childValues.reduce((acc, val) => acc || val, false)
+					return booleanAnd(isInverted, childValues)
+				case 'or': {
+					const isAnyTrue = childValues.reduce((acc, val) => acc || val, false)
+					return isAnyTrue === !isInverted
+				}
 				case 'xor': {
 					const isSingleTrue = childValues.reduce((acc, val) => acc + (val ? 1 : 0), 0) === 1
-					return isSingleTrue === !feedback.isInverted
+					return isSingleTrue === !isInverted
 				}
 				default:
-					this.#logger.warn(`Unexpected operation: ${feedback.options.operation}`)
+					this.#logger.warn(`Unexpected operation: ${stringifyVariableValue(feedback.options.operation?.value)}`)
 					return false
 			}
 		} else if (feedback.definitionId === 'logic_conditionalise_advanced') {
-			return booleanAnd(!!feedback.isInverted, childValues)
+			return booleanAnd(isInverted, childValues)
 		} else {
 			this.#logger.warn(`Unexpected logic feedback type "${feedback.type}"`)
 			return false
@@ -259,107 +253,102 @@ export class InternalBuildingBlocks
 	}
 
 	executeAction(
-		action: ControlEntityInstance,
-		extras: RunActionExtras,
-		actionRunner: ActionRunner
-	): Promise<boolean> | boolean {
-		if (action.definitionId === 'wait') {
-			if (extras.abortDelayed.aborted) return true
+		action: ActionForInternalExecution,
+		extras: RunActionExtras
+	): Promise<InternalActionResult> | InternalActionResult {
+		switch (action.definitionId) {
+			case 'wait': {
+				if (extras.abortDelayed.aborted) break
 
-			const expressionResult = this.#internalUtils.executeExpressionForInternalActionOrFeedback(
-				action.rawOptions.time,
-				extras,
-				'number'
-			)
-			if (!expressionResult.ok) {
-				this.#logger.error(`Failed to parse delay: ${expressionResult.error}`)
-			}
+				const delay = Number(action.options.time)
+				if (isNaN(delay) || delay <= 0) {
+					// No wait, return immediately
+					break
+				}
 
-			const delay = expressionResult.ok ? Number(expressionResult.value) : 0
-
-			if (!isNaN(delay) && delay > 0) {
-				// Perform the wait
-				return setTimeout(delay, true, { signal: extras.abortDelayed }).catch(() => {
+				return setTimeout(delay, { result: undefined }, { signal: extras.abortDelayed }).catch(() => {
 					this.#logger.debug(`Aborted wait on ${extras.location ? formatLocation(extras.location) : extras.controlId}`)
 
 					// Discard error
-					return true
+					return { result: undefined }
 				})
-			} else {
-				// No wait, return immediately
-				return true
 			}
-		} else if (action.definitionId === 'action_group') {
-			if (extras.abortDelayed.aborted) return true
+			case 'action_group': {
+				if (extras.abortDelayed.aborted) break
 
-			let executeSequential = false
-			switch (action.rawOptions.execution_mode) {
-				case 'sequential':
-					executeSequential = true
-					break
-				case 'concurrent':
-					executeSequential = false
-					break
-				case 'inherit':
-					executeSequential = extras.executionMode === 'sequential'
-					break
-				default:
-					this.#logger.error(`Unknown execution mode: ${action.rawOptions.execution_mode}`)
-			}
+				let executeSequential = false
+				switch (action.options.execution_mode) {
+					case 'sequential':
+						executeSequential = true
+						break
+					case 'concurrent':
+						executeSequential = false
+						break
+					case 'inherit':
+						executeSequential = extras.executionMode === 'sequential'
+						break
+					default:
+						this.#logger.error(`Unknown execution mode: ${stringifyVariableValue(action.options.execution_mode)}`)
+				}
 
-			const newExtras: RunActionExtras = {
-				...extras,
-				executionMode: executeSequential ? 'sequential' : 'concurrent',
-			}
+				const newExtras: RunActionExtras = {
+					...extras,
+					executionMode: executeSequential ? 'sequential' : 'concurrent',
+				}
 
-			const childActions = action.getChildren('default')?.getDirectEntities() ?? []
+				const childActions = action.rawEntity.getChildren('default')?.getDirectEntities() ?? []
 
-			return actionRunner
-				.runMultipleActions(childActions, newExtras, executeSequential)
-				.catch((e) => {
-					this.#logger.error(`Failed to run actions: ${e.message}`)
-				})
-				.then(() => true)
-		} else if (action.definitionId === 'logic_if') {
-			if (extras.abortDelayed.aborted) return true
-
-			const conditionValues = action.getChildren('condition')?.getChildBooleanFeedbackValues() ?? []
-
-			const executeGroup = booleanAnd(false, conditionValues) ? 'actions' : 'else_actions'
-			const childActions = action.getChildren(executeGroup)?.getDirectEntities() ?? []
-			const executeSequential = extras.executionMode === 'sequential'
-
-			return actionRunner
-				.runMultipleActions(childActions, extras, executeSequential)
-				.catch((e) => {
-					this.#logger.error(`Failed to run actions: ${e.message}`)
-				})
-				.then(() => true)
-		} else if (action.definitionId === 'logic_while') {
-			if (extras.abortDelayed.aborted) return true
-
-			return Promise.resolve().then(async () => {
-				while (!extras.abortDelayed.aborted) {
-					const conditionValues = action.getChildren('condition')?.getChildBooleanFeedbackValues() ?? []
-					if (!booleanAnd(false, conditionValues)) break
-
-					const childActions = action.getChildren('actions')?.getDirectEntities() ?? []
-					const executeSequential = extras.executionMode === 'sequential'
-
-					if (extras.abortDelayed.aborted) break
-
-					await actionRunner.runMultipleActions(childActions, extras, executeSequential).catch((e) => {
+				return this.#actionRunner
+					.runMultipleActions(childActions, newExtras, executeSequential)
+					.catch((e) => {
 						this.#logger.error(`Failed to run actions: ${e.message}`)
 					})
+					.then(() => ({ result: undefined }))
+			}
+			case 'logic_if': {
+				if (extras.abortDelayed.aborted) break
 
-					// Yield to event loop to prevent tight loop
-					await setTimeout(1)
-				}
-				return true
-			})
-		} else {
-			return false
+				const conditionValues = action.rawEntity.getChildren('condition')?.getChildBooleanFeedbackValues() ?? []
+
+				const executeGroup = booleanAnd(false, conditionValues) ? 'actions' : 'else_actions'
+				const childActions = action.rawEntity.getChildren(executeGroup)?.getDirectEntities() ?? []
+				const executeSequential = extras.executionMode === 'sequential'
+
+				return this.#actionRunner
+					.runMultipleActions(childActions, extras, executeSequential)
+					.catch((e) => {
+						this.#logger.error(`Failed to run actions: ${e.message}`)
+					})
+					.then(() => ({ result: undefined }))
+			}
+			case 'logic_while': {
+				if (extras.abortDelayed.aborted) break
+
+				return Promise.resolve().then(async () => {
+					while (!extras.abortDelayed.aborted) {
+						const conditionValues = action.rawEntity.getChildren('condition')?.getChildBooleanFeedbackValues() ?? []
+						if (!booleanAnd(false, conditionValues)) break
+
+						const childActions = action.rawEntity.getChildren('actions')?.getDirectEntities() ?? []
+						const executeSequential = extras.executionMode === 'sequential'
+
+						if (extras.abortDelayed.aborted) break
+
+						await this.#actionRunner.runMultipleActions(childActions, extras, executeSequential).catch((e) => {
+							this.#logger.error(`Failed to run actions: ${e.message}`)
+						})
+
+						// Yield to event loop to prevent tight loop
+						await setTimeout(1)
+					}
+					return { result: undefined }
+				})
+			}
+			default:
+				return null
 		}
+
+		return { result: undefined }
 	}
 
 	visitReferences(_visitor: InternalVisitor, _actions: ActionForVisitor[], _feedbacks: FeedbackForVisitor[]): void {

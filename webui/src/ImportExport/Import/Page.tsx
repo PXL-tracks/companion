@@ -1,8 +1,14 @@
-import React, { useCallback, useContext, useMemo, useRef } from 'react'
-import { CButton, CCol, CRow, CFormSelect, CCallout } from '@coreui/react'
-import { MyErrorBoundary } from '~/Resources/Error'
+import { faFileCircleExclamation, faFileCirclePlus, faHome } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useQuery } from '@tanstack/react-query'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useMemo, useRef } from 'react'
+import { compareExportedInstances } from '@companion-app/shared/Import.js'
+import type { DropdownChoice, DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
+import type { ClientImportObject, ClientImportObjectInstance } from '@companion-app/shared/Model/ImportExport.js'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { ButtonGridHeader, PageNumberPicker, type PageNumberOption } from '~/Buttons/ButtonGridHeader.js'
-import { usePagePicker } from '~/Hooks/usePagePicker.js'
+import { ButtonGridZoomControl } from '~/Buttons/ButtonGridZoomControl.js'
 import {
 	ButtonGridIcon,
 	ButtonGridIconBase,
@@ -10,18 +16,17 @@ import {
 	type ButtonInfiniteGridButtonProps,
 	type ButtonInfiniteGridRef,
 } from '~/Buttons/ButtonInfiniteGrid.js'
-import { faFileCircleExclamation, faFileCirclePlus, faHome } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { useHasBeenRendered } from '~/Hooks/useHasBeenRendered.js'
-import type { ClientImportObject, ClientImportObjectInstance } from '@companion-app/shared/Model/ImportExport.js'
-import { compareExportedInstances } from '@companion-app/shared/Import.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
-import { ButtonGridZoomControl } from '~/Buttons/ButtonGridZoomControl.js'
 import { useGridZoom } from '~/Buttons/GridZoom.js'
-import { useQuery } from '@tanstack/react-query'
+import { Button } from '~/Components/Button'
+import { Callout } from '~/Components/Callout'
+import { SimpleDropdownInputField } from '~/Components/DropdownInputFieldSimple'
+import { Grid } from '~/Components/Grid'
+import { useHasBeenRendered } from '~/Hooks/useHasBeenRendered.js'
+import { usePagePicker } from '~/Hooks/usePagePicker.js'
+import { MyErrorBoundary } from '~/Resources/Error'
 import { trpc } from '~/Resources/TRPC'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { useComputed } from '~/Resources/util'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 interface ImportPageWizardProps {
 	snapshot: ClientImportObject
@@ -114,30 +119,30 @@ export const ImportPageWizard = observer(function ImportPageWizard({
 				Choose a source page containing the buttons to import and a destination page where they will be imported. You
 				can either replace an existing page or create a new one.
 			</p>
-			<CRow className="import-page-row">
-				<CCol xs={12} xl={6} className="import-page-grid">
+			<Grid.Row className="import-page-row">
+				<Grid.Col xs={12} xl={6} className="import-page-grid">
 					<h5>Source Page</h5>
 					<MyErrorBoundary>
 						<>
-							<CCol sm={12}>
+							<Grid.Col sm={12}>
 								<PageNumberPicker
 									pageNumber={isSinglePage ? (snapshot.oldPageNumber ?? 1) : importPageNumber}
 									changePage={isSinglePage ? undefined : changeImportPage}
 									setPage={isSinglePage ? undefined : setImportPageNumber}
 									pageOptions={snapshotPageOptions}
 								>
-									<CButton color="light" className="btn-right" title="Home Position" onClick={resetSourcePosition}>
+									<Button color="light" title="Home Position" onClick={resetSourcePosition}>
 										<FontAwesomeIcon icon={faHome} />
-									</CButton>
+									</Button>
 								</PageNumberPicker>
-							</CCol>
+							</Grid.Col>
 							<div className="buttongrid" ref={hasBeenRenderedRef}>
 								{hasBeenRendered && sourceGridSize && (
 									<ButtonInfiniteGrid
 										ref={sourceGridRef}
 										pageNumber={isSinglePage ? (snapshot.oldPageNumber ?? 1) : importPageNumber}
 										gridSize={sourceGridSize}
-										buttonIconFactory={ButtonImportPreview}
+										ButtonIconFactory={ButtonImportPreview}
 										drawScale={gridZoomValue / 100}
 										maxHeightToMatchCanvas
 									/>
@@ -145,13 +150,13 @@ export const ImportPageWizard = observer(function ImportPageWizard({
 							</div>
 						</>
 					</MyErrorBoundary>
-				</CCol>
+				</Grid.Col>
 
-				<CCol xs={12} xl={6} className="import-page-grid">
+				<Grid.Col xs={12} xl={6} className="import-page-grid">
 					<h5>Destination Page</h5>
 					<MyErrorBoundary>
 						<>
-							<CCol sm={12}>
+							<Grid.Col sm={12}>
 								<ButtonGridHeader pageNumber={pageNumber} changePage={changePage} setPage={setPageNumber} newPageAtEnd>
 									<ButtonGridZoomControl
 										useCompactButtons={true}
@@ -159,18 +164,18 @@ export const ImportPageWizard = observer(function ImportPageWizard({
 										gridZoomController={gridZoomController}
 									/>
 
-									<CButton color="light" className="btn-right" title="Home Position" onClick={resetDestinationPosition}>
+									<Button color="light" className="ms-1" title="Home Position" onClick={resetDestinationPosition}>
 										<FontAwesomeIcon icon={faHome} />
-									</CButton>
+									</Button>
 								</ButtonGridHeader>
-							</CCol>
+							</Grid.Col>
 							<div className="buttongrid">
 								{hasBeenRendered && destinationGridSize && pageNumber != -1 && (
 									<ButtonInfiniteGrid
 										ref={destinationGridRef}
 										pageNumber={pageNumber}
 										gridSize={destinationGridSize}
-										buttonIconFactory={ButtonGridIcon}
+										ButtonIconFactory={ButtonGridIcon}
 										drawScale={gridZoomValue / 100}
 										maxHeightToMatchCanvas
 									/>
@@ -190,12 +195,12 @@ export const ImportPageWizard = observer(function ImportPageWizard({
 							</div>
 						</>
 					</MyErrorBoundary>
-				</CCol>
-			</CRow>
+				</Grid.Col>
+			</Grid.Row>
 			<MyErrorBoundary>
 				<ImportRemap snapshot={snapshot} connectionRemap={connectionRemap} setConnectionRemap={setConnectionRemap2} />
 			</MyErrorBoundary>
-			<CCallout color={pageNumber == -1 ? 'success' : 'warning'}>
+			<Callout color={pageNumber == -1 ? 'success' : 'warning'}>
 				<h5>Import Buttons to Page</h5>
 				<p>
 					Clicking the button below will
@@ -204,11 +209,11 @@ export const ImportPageWizard = observer(function ImportPageWizard({
 						: ' completely override the button on the existing destination page with the buttons on the selected source page'}
 					.
 				</p>
-				<CButton color={pageNumber == -1 ? 'success' : 'warning'} onClick={doImport2} disabled={isRunning}>
+				<Button color={pageNumber == -1 ? 'success' : 'warning'} onClick={doImport2} disabled={isRunning}>
 					<FontAwesomeIcon icon={pageNumber == -1 ? faFileCirclePlus : faFileCircleExclamation} />
 					{pageNumber == -1 ? ' Import to new page' : ` Replace page ${pageNumber} with imported page`}
-				</CButton>
-			</CCallout>
+				</Button>
+			</Callout>
 		</>
 	)
 })
@@ -285,25 +290,36 @@ const ImportRemapRow = observer(function ImportRemapRow({
 
 	const moduleManifest = moduleInfo?.display ?? storeInfo
 
-	const currentConnections = connections.getAllOfModuleId(connection.moduleId)
-
 	const onChange = useCallback(
-		(e: React.ChangeEvent<HTMLSelectElement>) => setConnectionRemap(id, e.currentTarget.value),
+		(value: DropdownChoiceId) => setConnectionRemap(id, String(value)),
 		[setConnectionRemap, id]
 	)
+
+	const selectOptions = useComputed(() => {
+		const options: DropdownChoice[] = [
+			{ id: '_blank', label: '[ Create new connection ]' },
+			{ id: '_ignore', label: '[ Ignore ]' },
+		]
+
+		const currentConnections = connections.getAllOfModuleId(connection.moduleId)
+		for (const conn of currentConnections) {
+			options.push({
+				id: conn.id,
+				label: `Link to ${conn.label}`,
+			})
+		}
+		return options
+	}, [connections])
 
 	return (
 		<tr>
 			<td>
-				<CFormSelect value={connectionRemap[id] ?? ''} onChange={onChange}>
-					<option value="_blank">[ Create new connection ]</option>
-					<option value="_ignore">[ Ignore ]</option>
-					{currentConnections.map(([id, conn]) => (
-						<option key={id} value={id}>
-							Link to {conn.label}
-						</option>
-					))}
-				</CFormSelect>
+				<SimpleDropdownInputField
+					id={undefined} // TODO - link up with a label
+					value={connectionRemap[id] ?? ''}
+					setValue={onChange}
+					choices={selectOptions}
+				/>
 			</td>
 			<td>{moduleManifest?.name ?? `Unknown module (${connection.moduleId})`}</td>
 			<td>{connection.label}</td>

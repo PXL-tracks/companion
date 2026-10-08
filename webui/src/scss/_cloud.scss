@@ -12,7 +12,7 @@
 	.super-secret-key {
 		margin-top: 1em;
 
-		.alert {
+		.alert-element {
 			display: inline-block;
 
 			font-family: 'monospace';
@@ -37,12 +37,25 @@
 		}
 	}
 
-	.card-header {
+	.cloud-regions-heading {
 		font-weight: bold;
+		margin-bottom: 0.75rem;
+	}
+
+	.cloud-region-list {
+		margin-bottom: 0.75rem;
 	}
 }
 
 .cloud-region-item {
+	border-top: 1px solid var(--cui-border-color);
+	padding-top: 0.5rem;
+
+	&:first-child {
+		border-top: 0;
+		padding-top: 0;
+	}
+
 	.cloud-region-text {
 		align-content: center;
 		margin-bottom: 0;
@@ -60,7 +73,7 @@
 		}
 	}
 
-	.alert {
+	.alert-element {
 		margin-bottom: 0;
 		margin-top: 0.5rem;
 	}

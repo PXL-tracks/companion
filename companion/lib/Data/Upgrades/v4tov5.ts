@@ -1,7 +1,7 @@
+import type { SomeExportv4 } from '@companion-app/shared/Model/ExportModelv4.js'
+import type { Logger } from '../../Log/Controller.js'
 import { DataLegacyCloudDatabase } from '../Legacy/CloudDatabase.js'
 import type { DataStoreBase } from '../StoreBase.js'
-import type { Logger } from '../../Log/Controller.js'
-import type { SomeExportv4 } from '@companion-app/shared/Model/ExportModelv4.js'
 
 /**
  * do the database upgrades to convert from the v4 to the v5 format
@@ -29,7 +29,7 @@ function convertDatabaseToV5(db: DataStoreBase<any>, _logger: Logger): void {
 			const clouddb = new DataLegacyCloudDatabase(db.cfgDir)
 			const cloud = clouddb.getAll()
 			batchInsert('cloud', cloud)
-		} catch (_e: any) {
+		} catch (_e) {
 			// Ignore errors here, as the cloud DB may not exist
 		}
 

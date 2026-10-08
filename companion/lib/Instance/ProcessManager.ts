@@ -1,23 +1,33 @@
-import LogController, { type Logger } from '../Log/Controller.js'
-import PQueue from 'p-queue'
-import { nanoid } from 'nanoid'
-import path from 'path'
-import { ConnectionChildHandler, type ConnectionChildHandlerDependencies } from './Connection/ChildHandler.js'
+import { EventEmitter } from 'node:events'
+import { createRequire } from 'node:module'
+import os from 'node:os'
+import path from 'node:path'
 import fs from 'fs-extra'
-import os from 'os'
-import { getNodeJsPath, getNodeJsPermissionArguments } from './NodePath.js'
-import { RespawnMonitor } from '@companion-app/shared/Respawn.js'
-import type { InstanceModules } from './Modules.js'
-import type { InstanceConfigStore } from './ConfigStore.js'
-import { isModuleApiVersionCompatible } from '@companion-app/shared/ModuleApiVersionCheck.js'
+import { nanoid } from 'nanoid'
+import PQueue from 'p-queue'
 import type { SomeEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import type { CompanionOptionValues } from '@companion-module/base'
-import { createRequire } from 'module'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
 import { ModuleInstanceType, type InstanceConfig } from '@companion-app/shared/Model/Instance.js'
+import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import {
+	isModuleApiVersionCompatible,
+	isSurfaceApiVersionCompatible,
+} from '@companion-app/shared/ModuleApiVersionCheck.js'
+import { RespawnMonitor } from '@companion-app/shared/Respawn.js'
 import { assertNever } from '@companion-app/shared/Util.js'
-import type { SomeModuleVersionInfo } from './Types.js'
+import type { SurfaceModuleManifest } from '@companion-surface/host'
+import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
+import LogController, { type Logger } from '../Log/Controller.js'
+import { isPackaged } from '../Resources/Util.js'
+import type { InstanceConfigStore } from './ConfigStore.js'
+import { doesModuleUseNewChildHandler } from './Connection/ApiVersions.js'
+import type { ConnectionChildHandlerApi, ConnectionChildHandlerDependencies } from './Connection/ChildHandlerApi.js'
+import { ConnectionChildHandlerLegacy } from './Connection/ChildHandlerLegacy.js'
+import { ConnectionChildHandlerNew } from './Connection/ChildHandlerNew.js'
 import { PreserveEnvVars } from './Environment.js'
+import type { InstanceModules } from './Modules.js'
+import { getNodeJsPath, getNodeJsPermissionArguments, realPathOrSelf } from './NodePath.js'
+import { SurfaceChildHandler, type SurfaceChildHandlerDependencies } from './Surface/ChildHandler.js'
+import type { SomeModuleVersionInfo } from './Types.js'
 
 /**
  * A backoff sleep strategy
@@ -79,10 +89,43 @@ export interface ChildProcessHandlerBase {
 	cleanup(): void
 }
 
-export class InstanceProcessManager {
+export interface InstanceProcessManagerEvents {
+	/**
+	 * Emitted whenever a child's readiness changes in a way that affects what can be requested from it
+	 * (became ready, stopped or crashed). Used to drive UI subscriptions such as the config-fields editor.
+	 */
+	childStateChange: [instanceId: string]
+}
+
+/**
+ * Resolve a module's entrypoint to its real (symlink-free) on-disk path within the module dir. The real
+ * path is required so Node's permission model does not deny reading a symlinked config/module dir at
+ * import time.
+ */
+export async function resolveModuleEntrypoint(
+	basePath: string,
+	rawEntrypoint: string
+): Promise<{ entrypoint: string; error?: 'outside' | 'missing' }> {
+	const jsPath = path.join('companion', rawEntrypoint.replace(/\\/g, '/'))
+	const jsFullPath = path.resolve(path.join(basePath, jsPath))
+
+	const relativeToBase = path.relative(basePath, jsFullPath)
+	if (relativeToBase.startsWith('..') || path.isAbsolute(relativeToBase)) {
+		return { entrypoint: jsFullPath, error: 'outside' }
+	}
+
+	if (!(await fs.pathExists(jsFullPath))) {
+		return { entrypoint: jsFullPath, error: 'missing' }
+	}
+
+	return { entrypoint: realPathOrSelf(jsFullPath) }
+}
+
+export class InstanceProcessManager extends EventEmitter<InstanceProcessManagerEvents> {
 	readonly #logger = LogController.createLogger('Instance/ProcessManager')
 
-	readonly #deps: ConnectionChildHandlerDependencies
+	readonly #connectionDeps: ConnectionChildHandlerDependencies
+	readonly #surfaceDeps: SurfaceChildHandlerDependencies
 	readonly #modules: InstanceModules
 	readonly #instanceConfigStore: InstanceConfigStore
 
@@ -94,11 +137,15 @@ export class InstanceProcessManager {
 	#children: Map<string, ModuleChild>
 
 	constructor(
-		deps: ConnectionChildHandlerDependencies,
+		connectionDeps: ConnectionChildHandlerDependencies,
+		surfaceDeps: SurfaceChildHandlerDependencies,
 		modules: InstanceModules,
 		instanceConfigStore: InstanceConfigStore
 	) {
-		this.#deps = deps
+		super()
+
+		this.#connectionDeps = connectionDeps
+		this.#surfaceDeps = surfaceDeps
 		this.#modules = modules
 		this.#instanceConfigStore = instanceConfigStore
 
@@ -120,9 +167,18 @@ export class InstanceProcessManager {
 		}
 	}
 
-	getConnectionChild(connectionId: string, allowInitialising?: boolean): ConnectionChildHandler | undefined {
+	getConnectionChild(connectionId: string, allowInitialising?: boolean): ConnectionChildHandlerApi | undefined {
 		const child = this.getChild(connectionId, allowInitialising)
-		if (child && child instanceof ConnectionChildHandler) {
+		if (child && isConnectionChild(child)) {
+			return child
+		} else {
+			return undefined
+		}
+	}
+
+	getSurfaceChild(connectionId: string, allowInitialising?: boolean): SurfaceChildHandler | undefined {
+		const child = this.getChild(connectionId, allowInitialising)
+		if (child && child instanceof SurfaceChildHandler) {
 			return child
 		} else {
 			return undefined
@@ -135,7 +191,7 @@ export class InstanceProcessManager {
 	 */
 	resubscribeAllFeedbacks(): void {
 		for (const child of this.#children.values()) {
-			if (child.handler && child.isReady && child.handler instanceof ConnectionChildHandler) {
+			if (child.handler && child.isReady && isConnectionChild(child.handler)) {
 				child.handler.sendAllFeedbackInstances().catch((e) => {
 					this.#logger.warn(`sendAllFeedbackInstances failed for "${child.instanceId}": ${e}`)
 				})
@@ -147,12 +203,12 @@ export class InstanceProcessManager {
 	 * Send a list of changed variables to all active instances.
 	 * This will trigger feedbacks using variables to be rechecked
 	 */
-	onVariablesChanged(all_changed_variables_set: Set<string>): void {
+	onVariablesChanged(all_changed_variables_set: ReadonlySet<string>, fromControlId: string | null): void {
 		const changedVariableIds = Array.from(all_changed_variables_set)
 
 		for (const child of this.#children.values()) {
-			if (child.handler && child.isReady && child.handler instanceof ConnectionChildHandler) {
-				child.handler.sendVariablesChanged(all_changed_variables_set, changedVariableIds).catch((e) => {
+			if (child.handler && child.isReady && isConnectionChild(child.handler)) {
+				child.handler.sendVariablesChanged(all_changed_variables_set, changedVariableIds, fromControlId).catch((e) => {
 					this.#logger.warn(`sendVariablesChanged failed for "${child.instanceId}": ${e}`)
 				})
 			}
@@ -169,7 +225,10 @@ export class InstanceProcessManager {
 
 		// This is not efficient, but this is only used for shutdown, so it doesn't matter
 		for (let i = 0; i < 20; i++) {
-			const runningChildren = Array.from(this.#children.values()).filter((c) => !!c.monitor)
+			const runningChildren = this.#children
+				.values()
+				.filter((c) => !!c.monitor)
+				.toArray()
 			if (runningChildren.length === 0) {
 				// No more children running
 				break
@@ -221,7 +280,7 @@ export class InstanceProcessManager {
 			}
 
 			// mark instance as disabled
-			this.#deps.instanceStatus.updateInstanceStatus(instanceId, null, 'Disabled')
+			this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, null, 'Disabled')
 		}
 	}
 
@@ -264,7 +323,7 @@ export class InstanceProcessManager {
 			}
 			this.#children.set(instanceId, baseChild)
 
-			this.#deps.instanceStatus.updateInstanceStatus(instanceId, null, 'Starting')
+			this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, null, 'Starting')
 
 			forceRestart = true // Force restart if it is a new instance
 		}
@@ -332,21 +391,30 @@ export class InstanceProcessManager {
 					`Configured instance "${baseChild.targetState.moduleId}" could not be loaded, unknown module`
 				)
 				if (this.#modules.hasModule(baseChild.moduleType, baseChild.targetState.moduleId)) {
-					this.#deps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unknown module version')
+					this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unknown module version')
 				} else {
-					this.#deps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unknown module')
+					this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unknown module')
 				}
+				this.emit('childStateChange', instanceId)
 				return
 			}
 
 			const runtimeInfo = await this.#findAndValidateModuleInfo(moduleInfo, instanceId, baseChild.lastLabel)
-			if (!runtimeInfo) return
+			if ('error' in runtimeInfo) {
+				// The module cannot be started (e.g. incompatible api version). Report it as the status so the
+				// instance does not appear stuck at whatever status the previous stop left behind.
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', runtimeInfo.error)
+				this.emit('childStateChange', instanceId)
+				return
+			}
 
 			const nodePath = await getNodeJsPath(moduleInfo.manifest.runtime.type)
 			if (!nodePath) {
 				this.#logger.error(
 					`Runtime "${moduleInfo.manifest.runtime.type}" is not supported in this version of Companion: "${baseChild.lastLabel}"`
 				)
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, 'system', 'Unsupported runtime')
+				this.emit('childStateChange', instanceId)
 				return
 			}
 
@@ -379,7 +447,7 @@ export class InstanceProcessManager {
 
 			const enableInspect = inspectPort !== undefined
 			if (enableInspect) {
-				this.#deps.debugLogLine(
+				this.#connectionDeps.debugLogLine(
 					instanceId,
 					Date.now(),
 					'System',
@@ -396,17 +464,25 @@ export class InstanceProcessManager {
 					moduleInfo.basePath,
 					enableInspect
 				),
+				...runtimeInfo.arguments,
 				enableInspect ? `--inspect=${inspectPort}` : undefined,
 				runtimeInfo.entrypoint,
 			].filter((v): v is string => !!v)
 			this.#logger.debug(`Instance "${baseChild.targetState.label}" command: ${JSON.stringify(cmd)}`)
 
-			this.#deps.debugLogLine(
+			this.#connectionDeps.debugLogLine(
 				instanceId,
 				Date.now(),
 				'System',
 				'system',
-				`** Starting Instance from "${runtimeInfo.entrypoint}" **`
+				`** Starting Instance from "${runtimeInfo.moduleEntrypoint}" **`
+			)
+			this.#connectionDeps.debugLogLine(
+				instanceId,
+				Date.now(),
+				'System',
+				'system',
+				`** API version: ${runtimeInfo.apiVersion} **`
 			)
 
 			const monitor = new RespawnMonitor(cmd, {
@@ -428,27 +504,30 @@ export class InstanceProcessManager {
 				child.handler?.cleanup()
 
 				child.logger.info(`Process started process ${monitor.child?.pid}`)
-				this.#deps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process started **')
+				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process started **')
+				this.emit('childStateChange', instanceId)
 			})
 			monitor.on('stop', () => {
 				child.isReady = false
 				child.handler?.cleanup()
 
-				this.#deps.instanceStatus.updateInstanceStatus(
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(
 					instanceId,
 					child.crashed ? 'crashed' : null,
 					child.crashed ? '' : 'Stopped'
 				)
 				child.logger.debug(`Process stopped`)
-				this.#deps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process stopped **')
+				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process stopped **')
+				this.emit('childStateChange', instanceId)
 			})
 			monitor.on('crash', () => {
 				child.isReady = false
 				child.handler?.cleanup()
 
-				this.#deps.instanceStatus.updateInstanceStatus(instanceId, null, 'Crashed')
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(instanceId, null, 'Crashed')
 				child.logger.debug(`Process crashed`)
-				this.#deps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process crashed **')
+				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'System', 'system', '** Process crashed **')
+				this.emit('childStateChange', instanceId)
 			})
 			monitor.on('stdout', (data) => {
 				if (moduleInfo.versionId === 'dev') {
@@ -456,19 +535,19 @@ export class InstanceProcessManager {
 					child.logger.verbose(`stdout: ${data.toString()}`)
 				}
 
-				this.#deps.debugLogLine(instanceId, Date.now(), 'Console', 'console', data.toString())
+				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'Console', 'console', data.toString())
 			})
 			monitor.on('stderr', (data) => {
 				const str = data.toString()
 				child.logger.verbose(`stderr: ${str}`)
-				this.#deps.debugLogLine(instanceId, Date.now(), 'Console', 'error', str)
+				this.#connectionDeps.debugLogLine(instanceId, Date.now(), 'Console', 'error', str)
 			})
 
 			child.monitor = monitor
 
 			// Create handler and wait for registration + initialization
 			try {
-				await this.#createHandlerAndWaitForInit(child, monitor, runtimeInfo)
+				await this.#createHandlerAndWaitForInit(child, monitor, runtimeInfo, moduleInfo)
 			} catch (error) {
 				this.#logger.error(`Failed to initialize instance "${child.lastLabel}": ${error}`)
 				throw error
@@ -482,7 +561,8 @@ export class InstanceProcessManager {
 	async #createHandlerAndWaitForInit(
 		child: ModuleChild,
 		monitor: RespawnMonitor,
-		runtimeInfo: RuntimeInfo
+		runtimeInfo: RuntimeInfo,
+		moduleInfo: SomeModuleVersionInfo
 	): Promise<void> {
 		if (!child.targetState) {
 			throw new Error('No target state')
@@ -571,7 +651,7 @@ export class InstanceProcessManager {
 				}
 
 				// Init module
-				this.#deps.instanceStatus.updateInstanceStatus(child.instanceId, 'initializing', null)
+				this.#connectionDeps.instanceStatus.updateInstanceStatus(child.instanceId, 'initializing', null)
 
 				child.handler
 					.init(config)
@@ -580,6 +660,7 @@ export class InstanceProcessManager {
 
 						// mark child as ready to receive
 						child.isReady = true
+						this.emit('childStateChange', child.instanceId)
 
 						// Call ready hook
 						await child.handler?.ready?.()
@@ -588,7 +669,13 @@ export class InstanceProcessManager {
 					})
 					.catch((e) => {
 						this.#logger.warn(`Instance "${config.label || child.instanceId}" failed to init: ${e} ${e?.stack}`)
-						this.#deps.debugLogLine(child.instanceId, Date.now(), 'System', 'error', `Failed to init: ${e} ${e?.stack}`)
+						this.#connectionDeps.debugLogLine(
+							child.instanceId,
+							Date.now(),
+							'System',
+							'error',
+							`Failed to init: ${e} ${e?.stack}`
+						)
 
 						forceRestart()
 					})
@@ -598,11 +685,31 @@ export class InstanceProcessManager {
 		// Bind the event listeners
 		switch (child.targetState.moduleType) {
 			case ModuleInstanceType.Connection:
-				child.handler = new ConnectionChildHandler(
-					this.#deps,
+				if (doesModuleUseNewChildHandler(runtimeInfo.apiVersion)) {
+					child.handler = new ConnectionChildHandlerNew(
+						this.#connectionDeps,
+						monitor,
+						child.instanceId,
+						runtimeInfo.apiVersion,
+						onRegisterReceived
+					)
+				} else {
+					child.handler = new ConnectionChildHandlerLegacy(
+						this.#connectionDeps,
+						monitor,
+						child.instanceId,
+						runtimeInfo.apiVersion,
+						onRegisterReceived
+					)
+				}
+				break
+			case ModuleInstanceType.Surface:
+				child.handler = new SurfaceChildHandler(
+					this.#surfaceDeps,
 					monitor,
+					child.targetState.moduleId,
 					child.instanceId,
-					runtimeInfo.apiVersion,
+					moduleInfo.manifest as SurfaceModuleManifest,
 					onRegisterReceived
 				)
 				break
@@ -626,12 +733,27 @@ export class InstanceProcessManager {
 		moduleInfo: SomeModuleVersionInfo,
 		instanceId: string,
 		lastLabel: string
-	): Promise<RuntimeInfo | null> {
-		const jsPath = path.join('companion', moduleInfo.manifest.runtime.entrypoint.replace(/\\/g, '/'))
-		const jsFullPath = path.normalize(path.join(moduleInfo.basePath, jsPath))
-		if (!(await fs.pathExists(jsFullPath))) {
-			this.#logger.error(`Module entrypoint "${jsFullPath}" does not exist`)
-			return null
+	): Promise<
+		| {
+				entrypoint: string
+				arguments: string[]
+				moduleEntrypoint: string
+				apiVersion: string
+				env: Record<string, string>
+		  }
+		| { error: string }
+	> {
+		const { entrypoint: realEntrypoint, error: entrypointError } = await resolveModuleEntrypoint(
+			moduleInfo.basePath,
+			moduleInfo.manifest.runtime.entrypoint
+		)
+		if (entrypointError === 'outside') {
+			this.#logger.error(`Module entrypoint "${realEntrypoint}" is outside module directory`)
+			return { error: 'Invalid module' }
+		}
+		if (entrypointError === 'missing') {
+			this.#logger.error(`Module entrypoint "${realEntrypoint}" does not exist`)
+			return { error: 'Module files missing' }
 		}
 
 		const moduleType = moduleInfo.type
@@ -639,7 +761,7 @@ export class InstanceProcessManager {
 			case ModuleInstanceType.Connection: {
 				if (moduleInfo.manifest.runtime.api !== 'nodejs-ipc') {
 					this.#logger.error(`Only nodejs-ipc api is supported currently: "${lastLabel}"`)
-					return null
+					return { error: 'Unsupported module runtime' }
 				}
 
 				// Determine the module api version
@@ -652,31 +774,85 @@ export class InstanceProcessManager {
 						const moduleLibPackagePath = require.resolve('@companion-module/base/package.json', {
 							paths: [moduleInfo.basePath],
 						})
-						const moduleLibPackage = require(moduleLibPackagePath)
+						const moduleLibPackage = JSON.parse(await fs.readFile(moduleLibPackagePath, 'utf-8'))
 						moduleApiVersion = moduleLibPackage.version
 					} catch (e) {
 						this.#logger.error(`Failed to get module api version: "${lastLabel}" ${e}`)
-						return null
+						return { error: 'Invalid module' }
 					}
 				}
 
 				if (!isModuleApiVersionCompatible(moduleApiVersion)) {
 					this.#logger.error(`Module Api version is too new/old: "${lastLabel}" ${moduleApiVersion}`)
-					return null
+					return { error: 'Incompatible module version' }
+				}
+
+				if (doesModuleUseNewChildHandler(moduleApiVersion)) {
+					return {
+						apiVersion: moduleApiVersion,
+						entrypoint: path.join(
+							import.meta.dirname,
+							isPackaged() ? './ConnectionThread.js' : './Connection/Thread/Entrypoint.js'
+						),
+						arguments: ['--enable-source-maps'],
+						moduleEntrypoint: realEntrypoint,
+						env: {
+							MODULE_ENTRYPOINT: realEntrypoint,
+						},
+					}
+				} else {
+					return {
+						apiVersion: moduleApiVersion,
+						entrypoint: realEntrypoint,
+						arguments: [],
+						moduleEntrypoint: realEntrypoint,
+						env: {
+							CONNECTION_ID: instanceId,
+						},
+					}
+				}
+			}
+			case ModuleInstanceType.Surface: {
+				// Determine the module api version
+				let moduleApiVersion = moduleInfo.manifest.runtime.apiVersion
+				if (!moduleInfo.isPackaged) {
+					// When not packaged, lookup the version from the library itself
+					try {
+						const require = createRequire(moduleInfo.basePath)
+
+						const moduleLibPackagePath = require.resolve('@companion-surface/base/package.json', {
+							paths: [moduleInfo.basePath],
+						})
+						const moduleLibPackage = JSON.parse(await fs.readFile(moduleLibPackagePath, 'utf-8'))
+						moduleApiVersion = moduleLibPackage.version
+					} catch (e) {
+						this.#logger.error(`Failed to get module api version: "${lastLabel}" ${e}`)
+						return { error: 'Invalid module' }
+					}
+				}
+
+				if (!isSurfaceApiVersionCompatible(moduleApiVersion)) {
+					this.#logger.error(`Module Api version is too new/old: "${lastLabel}" ${moduleApiVersion}`)
+					return { error: 'Incompatible module version' }
 				}
 
 				return {
 					apiVersion: moduleApiVersion,
-					entrypoint: jsFullPath,
+					entrypoint: path.join(
+						import.meta.dirname,
+						isPackaged() ? './SurfaceThread.js' : './Surface/Thread/Entrypoint.js'
+					),
+					arguments: ['--enable-source-maps'],
+					moduleEntrypoint: realEntrypoint,
 					env: {
-						CONNECTION_ID: instanceId,
+						MODULE_ENTRYPOINT: realEntrypoint,
 					},
 				}
 			}
 			default:
-				assertNever(moduleInfo.type)
+				assertNever(moduleInfo)
 				this.#logger.error(`Unknown module type "${moduleType}" for api version check: "${lastLabel}"`)
-				return null
+				return { error: 'Unknown module type' }
 		}
 	}
 
@@ -699,7 +875,7 @@ export class InstanceProcessManager {
 	async connectionEntityLearnOptions(
 		entityModel: SomeEntityModel,
 		controlId: string
-	): Promise<CompanionOptionValues | undefined | void> {
+	): Promise<ExpressionableOptionsObject | undefined | void> {
 		const connection = this.getConnectionChild(entityModel.connectionId)
 		if (!connection) return undefined
 
@@ -711,4 +887,8 @@ interface RuntimeInfo {
 	entrypoint: string
 	apiVersion: string
 	env: Record<string, string>
+}
+
+function isConnectionChild(handler: ChildProcessHandlerBase): handler is ConnectionChildHandlerApi {
+	return !!handler && (handler instanceof ConnectionChildHandlerLegacy || handler instanceof ConnectionChildHandlerNew)
 }

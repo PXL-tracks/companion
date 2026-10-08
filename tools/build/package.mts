@@ -1,11 +1,11 @@
 #!/usr/bin/env zx
-
-import { $, fs, glob, usePowerShell, argv } from 'zx'
 import path from 'path'
-import { determinePlatformInfo } from './util.mts'
-import { generateVersionString } from '../lib.mts'
-import { fetchNodejs } from '../fetch_nodejs.mts'
 import electronBuilder from 'electron-builder'
+import { $, argv, fs, glob, usePowerShell } from 'zx'
+import { fetchBuiltinSurfaceModules } from '../fetch_builtin_modules.mts'
+import { fetchNodejs } from '../fetch_nodejs.mts'
+import { generateVersionString } from '../lib.mts'
+import { determinePlatformInfo } from './util.mts'
 
 $.verbose = true
 
@@ -25,7 +25,7 @@ if (platformInfo.nodeArch) {
 const nodeVersions = await fetchNodejs(platformInfo)
 
 const runtimesDir = 'dist/node-runtimes/'
-const latestRuntimeDir = path.join(runtimesDir, 'node22')
+const latestRuntimeDir = path.join(runtimesDir, 'node26')
 await fs.remove(runtimesDir)
 await fs.mkdirp(runtimesDir)
 
@@ -37,6 +37,16 @@ for (const [name, extractedPath] of nodeVersions) {
 if (platformInfo.runtimePlatform === 'linux') {
 	// Create a symlink for the 'main' runtime, to make script maintenance easier
 	await fs.createSymlink(latestRuntimeDir, path.join(runtimesDir, 'main'), 'dir')
+}
+
+// Download builtin surface modules
+{
+	const builtinSurfaceCacheDir = await fetchBuiltinSurfaceModules()
+	const builtinSurfacesDir = 'dist/builtin-surfaces/'
+
+	await fs.remove(builtinSurfacesDir)
+	await fs.mkdirp(builtinSurfacesDir)
+	await fs.copy(builtinSurfaceCacheDir, builtinSurfacesDir)
 }
 
 // Install dependencies
@@ -125,13 +135,11 @@ if (process.env.ELECTRON !== '0') {
 			appId: 'test-companion.bitfocus.no',
 			dmg: {
 				artifactName: 'companion-mac-${arch}.dmg',
-				sign: !!process.env.CSC_LINK, // Only sign in ci
 			},
 			mac: {
 				target: 'dmg',
 				category: 'no.bitfocus.companion',
 				extendInfo: {
-					LSBackgroundOnly: 1,
 					LSUIElement: 1,
 					NSAppleEventsUsageDescription: 'Companion uses AppleEvents to control local applications.',
 					NSLocalNetworkUsageDescription: 'Companion uses local network to communicate with devices.',
@@ -140,6 +148,8 @@ if (process.env.ELECTRON !== '0') {
 				gatekeeperAssess: false,
 				entitlements: 'launcher/entitlements.mac.plist',
 				entitlementsInherit: 'launcher/entitlements.mac.plist',
+				icon: 'icon-macos-glass.icon',
+				identity: process.env.CSC_LINK ? undefined : null, // Disable signing when CSC_LINK is not set
 			},
 			win: {
 				target: 'nsis',
@@ -176,7 +186,11 @@ if (process.env.ELECTRON !== '0') {
 				},
 			},
 			nsis: {
-				artifactName: 'companion-win64.exe',
+				include: 'installer.nsh',
+				artifactName:
+					platformInfo.electronBuilderArch === electronBuilder.Arch.arm64
+						? 'companion-winarm64.exe'
+						: 'companion-win64.exe',
 				createStartMenuShortcut: true,
 				perMachine: false,
 				oneClick: false,
@@ -230,6 +244,16 @@ if (process.env.ELECTRON !== '0') {
 		// undo the changes made
 		await fs.writeFile(launcherPkgJsonPath, launcherPkgJsonStr)
 	}
+
+	// Ensure the node_modules was included, as that requires our patch to app-builder-lib to be applied
+	const expectedPathGlob =
+		platformInfo.runtimePlatform === 'darwin'
+			? 'electron-output/*/Companion.app/Contents/Resources/node_modules'
+			: 'electron-output/*/resources/node_modules'
+	const nodeModulesDirs = await glob(expectedPathGlob, { onlyDirectories: true })
+	if (nodeModulesDirs.length === 0) throw new Error('node_modules was not included in the electron build!')
 } else {
 	// TODO - populate dist with the rest of the bits
 }
+
+console.log('Packaging complete!')

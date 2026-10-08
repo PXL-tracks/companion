@@ -1,22 +1,24 @@
-import React, { useCallback, useContext, useRef } from 'react'
-import { CButton, CButtonGroup, CFormSwitch } from '@coreui/react'
+import { faLayerGroup, faPlug } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlug, faLayerGroup, faAdd } from '@fortawesome/free-solid-svg-icons'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { useNavigate } from '@tanstack/react-router'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useRef } from 'react'
+import type { OutboundSurfaceCollection, OutboundSurfaceInfo } from '@companion-app/shared/Model/Surfaces.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import { NonIdealState } from '~/Components/NonIdealState.js'
+import { SwitchInputField } from '~/Components/SwitchInputField.js'
 import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
+import { MyErrorBoundary } from '~/Resources/Error.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { AddRemoteSurfaceButton } from './AddRemoteSurfaceButton.js'
 import { useRemoteSurfacesCollectionsApi } from './RemoteSurfacesCollectionsApi.js'
 import { RemoteSurfacesListContextProvider } from './RemoteSurfacesListContext.js'
-import { useComputed } from '~/Resources/util.js'
 import { RemoteSurfaceTableRow } from './RemoteSurfaceTableRow.js'
-import { useNavigate } from '@tanstack/react-router'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import { MyErrorBoundary } from '~/Resources/Error.js'
-import type { OutboundSurfaceInfo, OutboundSurfaceCollection } from '@companion-app/shared/Model/Surfaces.js'
-import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable.js'
-import { AddOutboundSurfaceModal, type AddOutboundSurfaceModalRef } from '~/Surfaces/Remote/AddOutboundSurfaceModal.js'
 
 interface RemoteSurfacesListProps {
 	selectedRemoteConnectionId: string | null
@@ -53,10 +55,6 @@ export const RemoteSurfacesList = observer(function RemoteSurfacesList({
 		[selectedRemoteConnectionId]
 	)
 
-	const addModalRef = useRef<AddOutboundSurfaceModalRef>(null)
-
-	const addSurface = useCallback(() => addModalRef?.current?.show(), [])
-
 	return (
 		<div className="connections-list-container flex-column-layout">
 			<div className="connections-list-header fixed-header">
@@ -70,26 +68,20 @@ export const RemoteSurfacesList = observer(function RemoteSurfacesList({
 					itself.
 				</p>
 
-				<AddOutboundSurfaceModal ref={addModalRef} />
-
 				<GenericConfirmModal ref={confirmModalRef} />
 
-				<div className="connection-group-actions mb-2">
-					<CButtonGroup size="sm">
-						<CButton color="primary" onClick={addSurface}>
-							<FontAwesomeIcon icon={faAdd} /> Add Remote Surface
-						</CButton>
-						<CButton
-							color="info"
-							className="d-xl-none"
-							onClick={() => void navigate({ to: '/surfaces/remote/discover' })}
-						>
-							<FontAwesomeIcon icon={faPlug} className="me-1" />
-							Discover Remote Surfaces
-						</CButton>
-						<CreateCollectionButton />
-					</CButtonGroup>
-				</div>
+				<ButtonGroup className="connection-group-actions mb-2">
+					<AddRemoteSurfaceButton />
+					<Button
+						color="warning"
+						className="d-xl-none"
+						onClick={() => void navigate({ to: '/surfaces/remote/discover' })}
+					>
+						<FontAwesomeIcon icon={faPlug} className="me-1" />
+						Discover Remote Surfaces
+					</Button>
+					<CreateCollectionButton />
+				</ButtonGroup>
 			</div>
 
 			<div className="connections-list-table-container scrollable-content">
@@ -128,25 +120,23 @@ function RemoteSurfacesGroupHeaderContent({ collection }: { collection: Outbound
 	const setEnabledMutation = useMutationExt(trpc.surfaces.outbound.collections.setEnabled.mutationOptions())
 
 	const setEnabled = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const enabled = e.target.checked
-
-			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e: any) => {
-				console.error('Failed to set collection enabled state', e)
+		(enabled: boolean) => {
+			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e) => {
+				console.error('Failed to set collection enabled state', stringifyError(e))
 			})
 		},
 		[setEnabledMutation, collection.id]
 	)
 
 	return (
-		<CFormSwitch
-			className="ms-1"
-			color="success"
-			checked={collection.metaData.enabled}
-			onChange={setEnabled}
-			title={collection.metaData.enabled ? 'Disable collection' : 'Enable collection'}
-			size="xl"
-		/>
+		<div className="ms-1">
+			<SwitchInputField
+				id={undefined}
+				value={collection.metaData.enabled}
+				setValue={setEnabled}
+				tooltip={collection.metaData.enabled ? 'Disable collection' : 'Enable collection'}
+			/>
+		</div>
 	)
 }
 
@@ -168,8 +158,8 @@ function CreateCollectionButton() {
 	}, [createMutation])
 
 	return (
-		<CButton color="info" size="sm" onClick={doCreateCollection}>
+		<Button color="info" size="sm" onClick={doCreateCollection}>
 			<FontAwesomeIcon icon={faLayerGroup} /> Create Collection
-		</CButton>
+		</Button>
 	)
 }

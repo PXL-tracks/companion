@@ -1,12 +1,17 @@
+import { createRequire } from 'node:module'
+import semver from 'semver'
 import { describe, expect, test } from 'vitest'
 import { isModuleApiVersionCompatible } from '../ModuleApiVersionCheck.js'
-import { createRequire } from 'module'
-import semver from 'semver'
 
 const require = createRequire(import.meta.url)
 const moduleBasePkg = require('@companion-module/base/package.json')
+const moduleBaseOldPkg = require('@companion-module/base-old/package.json')
 
 describe('isModuleApiVersionCompatible', () => {
+	test('check old installed lib', () => {
+		expect(isModuleApiVersionCompatible(moduleBaseOldPkg.version)).toBe(true)
+	})
+
 	test('check current installed lib', () => {
 		expect(isModuleApiVersionCompatible(moduleBasePkg.version)).toBe(true)
 	})
@@ -60,12 +65,13 @@ describe('isModuleApiVersionCompatible', () => {
 		const version = semver.parse(moduleBasePkg.version)
 		expect(version).not.toBe(null)
 		version!.major--
+		version!.prerelease = []
 
 		const versionStr = version!.format()
 		expect(versionStr).toBeTruthy()
 		expect(versionStr).not.toBe(moduleBasePkg.version)
 
-		expect(isModuleApiVersionCompatible(versionStr)).toBe(false)
+		expect(isModuleApiVersionCompatible(versionStr)).toBe(true) // It is compatible for now
 	})
 
 	test('prerelease of next major version', () => {
@@ -98,5 +104,11 @@ describe('isModuleApiVersionCompatible', () => {
 	})
 	test('check 1.2.5 compatibility', () => {
 		expect(isModuleApiVersionCompatible('1.2.5')).toBe(true)
+	})
+	test('check 2.0.2 compatibility', () => {
+		expect(isModuleApiVersionCompatible('2.0.2')).toBe(true)
+	})
+	test('check 2.5.0 compatibility', () => {
+		expect(isModuleApiVersionCompatible('2.5.0')).toBe(false)
 	})
 })

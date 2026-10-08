@@ -1,23 +1,16 @@
-import React, { memo, useState } from 'react'
-import {
-	CFormInput,
-	CButton,
-	CCallout,
-	CCard,
-	CCardBody,
-	CCardHeader,
-	CListGroup,
-	CFormSwitch,
-	CAlert,
-	CCol,
-	CFormLabel,
-} from '@coreui/react'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { memo, useId, useState } from 'react'
+import type { CloudControllerState } from '@companion-app/shared/Model/Cloud.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button } from '~/Components/Button'
+import { Callout } from '~/Components/Callout.js'
+import { FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { SwitchInputFieldWithLabel } from '~/Components/SwitchInputField.js'
+import { LoadingRetryOrError } from '~/Resources/Loading.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import { CloudRegionPanel } from './RegionPanel.js'
 import { CloudUserPass } from './UserPass.js'
-import { LoadingRetryOrError } from '~/Resources/Loading.js'
-import type { CloudControllerState } from '@companion-app/shared/Model/Cloud.js'
-import { useSubscription } from '@trpc/tanstack-react-query'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 
 export function CloudPage(): React.JSX.Element {
 	const cloudState = useCloudState()
@@ -26,11 +19,11 @@ export function CloudPage(): React.JSX.Element {
 		<div className="cloud-region-panel">
 			<h4>Companion Cloud</h4>
 
-			<CAlert color="danger">
+			<StaticAlert color="danger">
 				This service is deprecated and will be removed in a future version of Companion. <br />
 				We hope that before it is removed, an equivalent system will be made available in <i>Bitfocus Buttons</i> <br />
 				As an alternative you can use the new <i>companion-satellite</i> module over a local network or vpn.
-			</CAlert>
+			</StaticAlert>
 			<p>
 				Access your Companion buttons from your Bitfocus Cloud account, or create a sophisticated network of Companion
 				installations that work together over the internet for all your remote production needs.
@@ -79,7 +72,7 @@ function useCloudState() {
 function CloudPageContent({ cloudState }: { cloudState: CloudControllerState }) {
 	return (
 		<>
-			{!!cloudState.error && <CAlert color="danger">{cloudState.error}</CAlert>}
+			{!!cloudState.error && <StaticAlert color="danger">{cloudState.error}</StaticAlert>}
 
 			{!cloudState.authenticated ? (
 				<CloudUserPass
@@ -123,13 +116,20 @@ interface AuthStateProps {
 function AuthState({ authenticatedAs, cloudActive, clearError }: AuthStateProps) {
 	const logoutMutation = useMutationExt(trpc.cloud.logout.mutationOptions())
 
+	const userId = useId()
+
 	return (
-		<CCol sm={6} className="cloud-auth-state">
-			<CFormLabel>Logged in as</CFormLabel>
-			<CFormInput readOnly type="text" value={authenticatedAs} />
+		<Grid.Col sm={6} className="cloud-auth-state">
+			<FormLabel htmlFor={userId} className="mb-1">
+				Logged in as
+			</FormLabel>
+			<div id={userId} className="text-muted px-3">
+				{authenticatedAs}
+			</div>
+
 			{!cloudActive && (
-				<p>
-					<CButton
+				<div className="my-3">
+					<Button
 						color="success"
 						onClick={() => {
 							clearError()
@@ -137,10 +137,10 @@ function AuthState({ authenticatedAs, cloudActive, clearError }: AuthStateProps)
 						}}
 					>
 						Log out
-					</CButton>
-				</p>
+					</Button>
+				</div>
 			)}
-		</CCol>
+		</Grid.Col>
 	)
 }
 
@@ -154,39 +154,39 @@ function RegionsList({ regionIds, cloudActive, canActivate }: RegionsListProps) 
 	const setCloudActiveMutation = useMutationExt(trpc.cloud.setCloudActive.mutationOptions())
 
 	return (
-		<CCol sm={12}>
-			<CCard>
-				<CCardHeader>Cloud regions</CCardHeader>
+		<Grid.Col sm={12}>
+			<div className="section cloud-regions-section">
+				<h5 className="cloud-regions-heading">Cloud regions</h5>
 
 				{!cloudActive && (
-					<CCardBody>
+					<div className="mb-3">
 						Please select the regions that is closest to you. You need to select at least <b>two regions</b> which will
 						give you redundancy.
-					</CCardBody>
+					</div>
 				)}
 
-				<CListGroup flush>
+				<div className="cloud-region-list">
 					{regionIds.map((regionId) => (
 						<CloudRegionPanel key={regionId} hideDisabled={cloudActive} regionId={regionId} />
 					))}
-				</CListGroup>
+				</div>
 
-				<CCardBody>
+				<div>
 					{cloudActive && (
-						<CCallout color={'info'}>Companion Cloud is currently activated. Deactivate to change regions.</CCallout>
+						<Callout color="info">Companion Cloud is currently activated. Deactivate to change regions.</Callout>
 					)}
 
-					<CFormSwitch
+					<SwitchInputFieldWithLabel
 						label="Activate Companion Cloud"
-						color="success"
 						disabled={!cloudActive && !canActivate}
-						title="Activate Companion Cloud"
-						checked={cloudActive}
-						onChange={(e) => setCloudActiveMutation.mutate({ active: !!e.target.checked })}
+						value={cloudActive}
+						setValue={(val) => setCloudActiveMutation.mutate({ active: !!val })}
+						small
+						tooltip="Activate Companion Cloud"
 					/>
-				</CCardBody>
-			</CCard>
-		</CCol>
+				</div>
+			</div>
+		</Grid.Col>
 	)
 }
 
@@ -194,7 +194,7 @@ const SecretKeyPanel = memo(function SecretKeyPanel({ uuid }: { uuid: string }) 
 	const regenerateUUIDMutation = useMutationExt(trpc.cloud.regenerateUUID.mutationOptions())
 
 	return (
-		<CCol sm={12} className="super-secret-key">
+		<Grid.Col sm={12} className="super-secret-key">
 			<h5>Super secret key</h5>
 
 			<p>
@@ -203,13 +203,13 @@ const SecretKeyPanel = memo(function SecretKeyPanel({ uuid }: { uuid: string }) 
 				it with the key above to start controlling this companion via internet.
 			</p>
 
-			<CAlert color="success">{uuid}</CAlert>
+			<StaticAlert color="success">{uuid}</StaticAlert>
 
-			<p>
-				<CButton color="primary" onClick={() => regenerateUUIDMutation.mutate()}>
+			<div className="my-3">
+				<Button color="primary" onClick={() => regenerateUUIDMutation.mutate()}>
 					Regenerate secret key
-				</CButton>
-			</p>
-		</CCol>
+				</Button>
+			</div>
+		</Grid.Col>
 	)
 })

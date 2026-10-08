@@ -19,19 +19,27 @@ Find the length of the item passed in.
 - For JSON or other objects, it will return the number of properties
 - For numbers it will return the length of the string representation
 
+eg `length("hello")` gives `5`, `length([5, 10, 15])` gives `3`, `length({a: 1, b: 2})` gives `2`
+
 ### Numeric operations
 
 **round(val)**
 
 Rounds a number to the nearest whole number.
 
+eg `round(4.5)` gives `5`, `round(4.4)` gives `4`
+
 **floor(val)**
 
 Rounds down a number to a whole number.
 
+eg `floor(4.9)` gives `4`
+
 **ceil(val)**
 
 Rounds up a number to a whole number.
+
+eg `ceil(4.1)` gives `5`
 
 **abs(val)**
 
@@ -56,29 +64,63 @@ eg `toRadix(15, 16)` gives `"f"`
 
 Convert a number to a fixed precision string, with the specified number of digits after the decimal place.
 
+eg `toFixed(3.14159, 2)` gives `"3.14"`, `toFixed(3, 2)` gives `"3.00"`
+
 **isNumber(val)**
 
 Check if the value is a number.
+
+eg `isNumber(5)` and `isNumber("5")` give `true`, `isNumber("five")` gives `false`
 
 **max(val, val2, [val3, ...])**
 
 Finds the largest of the provided values.
 
+eg `max(3, 7, 5)` gives `7`. A common use is to stop a value going below a limit: `max(0, $(custom:countdown))` never goes below 0.
+
 **min(val, val2, [val3, ...])**
 
 Finds the smallest of the provided values.
+
+eg `min(3, 7, 5)` gives `3`. Combine with `max` to clamp a value to a range: `min(100, max(0, $(custom:level)))` keeps the value between 0 and 100.
 
 **randomInt(min, max)**
 
 Generate a random integer in the specified range (inclusive).
 
-**log(v)**
+eg `randomInt(1, 6)` gives a dice roll between 1 and 6.
 
-Calculate the natural logarithm of a number.
+**log(v, [base])**
+
+Calculate the logarithm of a number. With no base, returns the natural logarithm (base e). With a base, returns the logarithm to that base.
+
+eg `log(8, 2)` gives `3`, `log(1000, 10)` gives `3`
 
 **log10(v)**
 
 Calculate the base 10 logarithm of a number.
+
+eg `log10(1000)` gives `3`
+
+**exp(v)**
+
+Calculate e raised to the power of a number (the inverse of the natural logarithm).
+
+eg `exp(0)` gives `1`. The value of e itself is `exp(1)`.
+
+**sqrt(v)**
+
+Calculate the square root of a number.
+
+eg `sqrt(9)` gives `3`
+
+**pow(base, exponent)**
+
+Calculate the base raised to the power of the exponent. Equivalent to the `**` operator, but available as a function for clarity and for those used to other languages.
+
+eg `pow(2, 10)` gives `1024`
+
+The constant `PI` is also available as a value, eg `2 * PI`.
 
 ### String operations
 
@@ -86,13 +128,17 @@ Calculate the base 10 logarithm of a number.
 
 Trims any whitespace at the beginning and end of the string.
 
+eg `trim("  hello  ")` gives `"hello"`
+
 **strlen(val)**
 
-Find the length of the given string. For Unicode strings this will count the bytes not the graphemes.
+Find the length of the given string. For Unicode strings this will count the code units not the graphemes, so emoji and some other characters count as more than one.
 
 **substr(val, indexStart, indexEnd)**
 
-substr() extracts characters from indexStart up to but not including indexEnd. For Unicode strings, this will count based on the bytes not the graphemes.
+substr() extracts characters from indexStart up to but not including indexEnd. For Unicode strings, this will count based on the code units not the graphemes.
+
+eg `substr("Companion", 0, 3)` gives `"Com"`, `substr("Companion", -3)` gives `"ion"`
 
 - If indexStart &gt;= str.length, an empty string is returned.
 - If indexStart &lt; 0, the index is counted from the end of the string. More formally, in this case, the substring starts at max(indexStart + str.length, 0).
@@ -109,13 +155,19 @@ If you don't want the behaviour of negative numbers, you can use `max(0, index)`
 
 Split a string based on a separator
 
+eg `split("1:30:45", ":")` gives `["1", "30", "45"]`, so `split($(internal:time_hms), ":")[0]` gives the current hour
+
 **join(arr, separator)**
 
 Join an array of values into a single string separated by the specified separator
 
+eg `join([1, 30, 45], ":")` gives `"1:30:45"`
+
 **concat(str1, str2)**
 
 Combine one or more values into a single string
+
+eg `concat("Cam ", $(custom:camera))` gives `"Cam 2"` when the variable is `2`. Remember that the `+` operator only adds numbers, so this (or a template string) is how to join text.
 
 **includes(val, find)**
 
@@ -125,7 +177,7 @@ eg `includes("Companion is great!", "great")` gives `true`
 
 **indexOf(val, find, offset)**
 
-Find the index of the first occurrence of a value within the provided string. For Unicode strings, this will count based on the bytes not the graphemes.
+Find the index of the first occurrence of a value within the provided string. For Unicode strings, this will count based on the code units not the graphemes.
 
 Optionally provide an offset to begin the search from, otherwise it starts from position 0 (the beginning).
 
@@ -133,7 +185,7 @@ If the value isn't found, it will return -1, otherwise the index of the first oc
 
 **lastIndexOf(val, find, offset)**
 
-Find the index of the last occurrence of a value within the provided string, searching from the end. For Unicode strings, this will count based on the bytes not the graphemes.
+Find the index of the last occurrence of a value within the provided string, searching from the end. For Unicode strings, this will count based on the code units not the graphemes.
 
 Optionally provide an offset to begin the search from, searching from the end.
 
@@ -143,15 +195,27 @@ If the value isn't found, it will return -1, otherwise the index of the last occ
 
 Converts all characters in a string to uppercase
 
+eg `toUpperCase($(custom:scene_name))` gives `"INTERVIEW"` when the variable is `Interview`
+
 **toLowerCase(val)**
 
 Converts all characters in a string to lowercase
+
+eg `toLowerCase("Interview")` gives `"interview"`
 
 **replaceAll(val, find, replace)**
 
 Searches a string for a specific value, and then replaces all instances of that value with a new string
 
 eg `replaceAll("This is great!", "This", "Companion")` gives `Companion is great!`
+
+**stringCompare(a, b)**
+
+Compare two strings for sorting purposes, using locale-aware comparison. Returns a negative number if `a` sorts before `b`, `0` if they are equal, or a positive number if `a` sorts after `b`.
+
+This is most useful as a comparator for `arraySort` when ordering arrays of strings or objects.
+
+eg `arraySort(["banana", "apple", "cherry"], (a, b) => stringCompare(a, b))` gives `["apple", "banana", "cherry"]`
 
 **encode(str, enc)**
 
@@ -164,6 +228,32 @@ eg `encode("Companion","hex")` gives `"436f6d70616e696f6e"`
 Decode a string from the requested format ('hex','base64'). If `enc` is missing, `latin1` will be used.
 
 eg `decode("436f6d70616e696f6e","hex")` gives `"Companion"`
+
+**encodeURI(str)**
+
+Encodes a string as a valid Uniform Resource Identifier (URI)
+
+eg `encodeURI('hello world&1')` gives `"hello%20world&1"`
+
+**decodeURI(str)**
+
+Gets the unencoded version of an encoded Uniform Resource Identifier (URI)
+
+eg `decodeURI('hello%20world&1')` gives `"hello world&1"`
+
+**encodeURIComponent(str)**
+
+Encodes a string as a valid component of a Uniform Resource Identifier (URI)
+
+eg `encodeURIComponent('hello world&1')` gives `"hello%20world%261"`
+
+**decodeURIComponent(str)**
+
+Gets the unencoded version of an encoded component of a Uniform Resource Identifier (URI)
+
+eg `decodeURIComponent('hello%20world%261')` gives `"hello world&1"`
+
+### Variable operations
 
 **parseVariables(string, ?undefinedValue)**
 
@@ -181,6 +271,21 @@ Note: when possible, prefer using the `$(internal:time_hms)` syntax, as it allow
 
 eg `getVariable('internal:time_hms')` or `getVariable('internal', 'time_hms')`
 
+**blink(number, ?number)**
+
+Generate a pulsing 0/1 value that alternates between on/off.  
+The provided number specifies the duration of each cycle.  
+The second parameter is an optional value between 0 - 1 which specifies the portion of the time to spend in the on state.
+
+eg `blink(1000)` to flash once a second, on for 500ms then off for 500ms. `blink(1000, 0.25)` flashes once a second, on for 250ms off for 750ms
+
+:::tip[TIPS]
+
+- The 0/1 returned from this function can be treated as a boolean, you do not need to explicitly do this yourself
+- If you prefer specifying the number of flashes per second, use `1000/n` for the first parameter. For example, to flash three times per second write `blink(1000/3)`.
+
+:::
+
 ### Bool operations
 
 **bool(val)**
@@ -189,20 +294,27 @@ Convert a value into a boolean.
 
 Any of the following will be interpreted as true:
 
-- any non-zero int
-- "true"
+- any non-zero number
+- any non-empty string, except `"false"` and `"0"`
 
-Everything else will be false.
+Everything else (`0`, `""`, `"false"`, `"0"`, `false`, `null` and `undefined`) will be false.
+
+This is particularly useful for variables which hold their value as text — in a plain condition the text `"false"` would count as true, but `bool($(obs:streaming))` gives the expected result.
 
 ### Object/Array operations
 
 **jsonpath(obj, path)**
 
-Perform a jsonpath lookup on an object or array.
+Perform a jsonpath lookup on an object or array. This is useful for extracting values from connections which expose complex data as a single variable.
 
-The input can either be an object or an stringified object. The output will match the input format
+The input can either be an object or a stringified object. The output will match the input format
 
-You can see examples of how to use this at: https://jsonpath.com/
+eg with a variable holding `{ "scenes": [{ "name": "Camera 1" }, { "name": "Slides" }] }`:
+
+- `jsonpath($(custom:state), '$.scenes[0].name')` gives `"Camera 1"`
+- `jsonpath($(custom:state), '$.scenes[*].name')` gives `["Camera 1", "Slides"]`
+
+You can see more examples of how to use this at: https://jsonpath.com/
 
 **jsonparse(str)**
 
@@ -242,6 +354,70 @@ Optionally provide an offset to begin the search from, searching from the end.
 
 If the value isn't found, it will return -1, otherwise the index of the last occurrence. The beginning is position 0.
 
+**arraySlice(arr, start, end)**
+
+Return a shallow copy of a portion of an array, without changing the original.
+
+`start` is the index to begin from (0 is the beginning) and `end` is the index to stop before. Both are optional, and negative values count back from the end.
+
+`arraySlice([1, 2, 3, 4, 5], 1, 3)` gives `[2, 3]`.
+
+If this encounters invalid input, it will return undefined.
+
+**arrayConcat(...arrays)**
+
+Combine multiple arrays into a single new array. Any argument that isn't an array is wrapped as a single element.
+
+`arrayConcat([1, 2], [3, 4], 5)` gives `[1, 2, 3, 4, 5]`.
+
+**arrayFlat(arr)**
+
+Flatten a nested array by one level. `arrayFlat([1, [2, 3], [4, [5]]])` gives `[1, 2, 3, 4, [5]]`.
+
+If this encounters invalid input, it will return undefined.
+
+### Array iteration operations
+
+These run a function (usually an arrow function `x => ...`) over each element of an array. Most callbacks receive `(element, index)`, while `arrayReduce` receives `(accumulator, element, index)`. They are most powerful combined with arrow functions — see [Advanced expressions](scripting.md#functions).
+
+**arrayMap(arr, fn)**
+
+Return a new array with `fn` applied to every element. `arrayMap([1, 2, 3], x => x * 2)` gives `[2, 4, 6]`.
+
+**arrayFilter(arr, fn)**
+
+Return a new array containing only the elements for which `fn` returns true. `arrayFilter([1, 2, 3, 4], x => x % 2 === 0)` gives `[2, 4]`.
+
+**arrayReduce(arr, fn, initial)**
+
+Combine all elements into a single value. `fn` receives the running accumulator and the current element. `arrayReduce([1, 2, 3, 4], (sum, x) => sum + x, 0)` gives `10`.
+
+**arrayForEach(arr, fn)**
+
+Run `fn` for each element, for its side effects (such as building up a value). Returns nothing.
+
+**arrayFind(arr, fn)** / **arrayFindIndex(arr, fn)**
+
+Return the first element (or its index) for which `fn` returns true, or `undefined` / `-1` if none match.
+
+**arraySome(arr, fn)** / **arrayEvery(arr, fn)**
+
+Return whether `fn` returns true for at least one element (`arraySome`) or for all elements (`arrayEvery`).
+
+**arraySort(arr, fn)**
+
+Return a sorted copy of the array (the original is not changed). Without a comparator the elements are sorted as strings; provide `fn(a, b)` returning a negative, zero or positive number to control the order. `arraySort([3, 1, 2], (a, b) => a - b)` gives `[1, 2, 3]`.
+
+To sort strings (or objects by a string property) use `stringCompare` as the comparator, eg `arraySort($(custom:names), (a, b) => stringCompare(a, b))`. See [stringCompare](#string-operations) for details.
+
+**arrayReverse(arr)**
+
+Return a reversed copy of the array.
+
+**objectKeys(obj)** / **objectValues(obj)**
+
+Return the keys or values of an object (or array) as an array.
+
 ### Time operations
 
 **unixNow()**
@@ -256,24 +432,9 @@ eg `00:10:15` gives 615
 
 You can do the reverse of this with `secondsToTimestamp(str)`
 
-**secondsToTimestamp(seconds, format)**
+**secondsToTimestamp(seconds, format)** / **msToTimestamp(milliseconds, format)**
 
-Convert a number of seconds into a timestamp of format 'n:HH:mm:ss'.
-
-By supplying the format parameter, you can choose which components will be included in the output string.
-
-The following components are allowed:
-
-- `n` - minus sign
-- `dd` - days
-- `HH` / `hh` - 12 hour / 24 hours
-- `mm` - minutes
-- `ss` - seconds
-- `a` - AM/PM decorator
-
-**msToTimestamp(milliseconds, format)**
-
-Convert a number of milliseconds into a timestamp of format 'n:HH:mm:ss.SSS'.
+Convert a number of seconds or milliseconds into a formatted timestamp string. The default format is 'n:HH:mm:ss' for seconds and 'n:HH:mm:ss.SSS' for milliseconds.
 
 By supplying the format parameter, you can choose which components will be included in the output string.
 
@@ -284,8 +445,14 @@ The following components are allowed:
 - `HH` / `hh` - 12 hour / 24 hours
 - `mm` - minutes
 - `ss` - seconds
-- `S` / `SS` / `SSS` - milliseconds, in varying levels of accuracy
+- `S` / `SS` / `SSS` - milliseconds (only for `msToTimestamp`), in varying levels of accuracy (1/100 seconds, 1/10 seconds, or milliseconds)
 - `a` - AM/PM decorator
+
+Using multiple characters to control padding length (e.g., `HHH` for 3-digit hours, `ssss` for 4-digit seconds). Milliseconds (`S`) support 1-3 digits.
+
+eg `secondsToTimestamp(685, 'mm:ss')` gives `"11:25"`, and `secondsToTimestamp($(custom:remaining), 'HH:mm:ss')` formats a countdown variable as a clock.
+
+By default, time components show modulo values (e.g., hours modulo 24, minutes modulo 60). To show the total value instead, wrap the unit in brackets `[unit]`. For example, `[HH]:mm:ss` will display total hours instead of hours modulo 24, and `[mm]:ss` will display total minutes instead of minutes modulo 60. Only one unit can be marked as largest per format string, and only `H`, `h`, `m`, or `s` can be used as the largest unit.
 
 **timeOffset(timestamp, offset, 12hour)**
 
@@ -303,3 +470,84 @@ eg `timeDiff($(internal:time_hms), "18:00:00")` will return the seconds until `1
 An example using a Date Time String could be `timeDiff($(internal:time_hms), "2024-07-04T20:00-04:00")` which would return the number of seconds from the current Companion time until 4th July 2024, 8pm, in the UTC-4 Timezone.
 
 The returned seconds can also be used within `secondsToTimestamp` to format the result as needed.
+
+### Date operations
+
+**parseDate(value)**
+
+Parse a date value and return the Unix timestamp in milliseconds. Accepts:
+
+- Numbers: treated as Unix milliseconds
+- Strings: parsed using JavaScript's [`Date()` constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/Date). ISO 8601 format (e.g. `"2024-06-15T14:30:00Z"`) is recommended for reliable results. Ambiguous formats like `MM/DD/YYYY` are not reliably supported.
+
+Returns `null` if the value cannot be parsed.
+
+eg `parseDate("2024-06-15T12:00:00Z")` returns the Unix ms for that date.
+
+The returned value is Unix ms, the same format as `unixNow()`, so it can be used with all other date functions.
+
+**dateYear(value, timezone?)**, **dateMonth(value, timezone?)**, **dateDay(value, timezone?)**
+
+Extract date components from a date value (Unix ms or date string).
+
+- `dateYear` returns the full year (e.g. 2024)
+- `dateMonth` returns the month from 1 (January) to 12 (December)
+- `dateDay` returns the day of the month from 1 to 31
+
+eg `dateYear(unixNow())` returns the current year, `dateMonth(unixNow(), 'UTC')` returns the current month in UTC.
+
+**dateHour(value, timezone?)**, **dateMinute(value, timezone?)**, **dateSecond(value, timezone?)**
+
+Extract time components from a date value.
+
+- `dateHour` returns 0–23
+- `dateMinute` returns 0–59
+- `dateSecond` returns 0–59
+
+eg `dateHour(unixNow())` returns the current hour in local time, `dateHour(unixNow(), 'America/New_York')` returns the current hour in New York.
+
+**dateWeekday(value, timezone?)**
+
+Returns the day of the week as a number: 0 = Sunday, 1 = Monday, ..., 6 = Saturday.
+
+eg `dateWeekday(unixNow())` returns today's weekday number.
+
+**dateFormat(value, formatString, timezone?)**
+
+Format a date value into a custom string representation. The format string uses [dayjs-compatible tokens](https://day.js.org/docs/en/display/format):
+
+| Token                       | Description                | Example                 |
+| --------------------------- | -------------------------- | ----------------------- |
+| `YYYY` / `YY`               | Year                       | 2024 / 24               |
+| `MMMM` / `MMM` / `MM` / `M` | Month                      | June / Jun / 06 / 6     |
+| `dddd` / `ddd` / `DD` / `D` | Day of week / Day of month | Saturday / Sat / 05 / 5 |
+| `HH` / `H`                  | 24-hour hour               | 09 / 9                  |
+| `hh` / `h`                  | 12-hour hour               | 09 / 9                  |
+| `mm` / `m`                  | Minutes                    | 05 / 5                  |
+| `ss` / `s`                  | Seconds                    | 03 / 3                  |
+| `SSS`                       | Milliseconds               | 123                     |
+| `A` / `a`                   | AM/PM                      | AM / am                 |
+
+Pass `'iso'` as the format to get an ISO 8601 string (always UTC): `dateFormat(value, 'iso')` returns `"2024-06-15T14:30:00.000Z"`
+
+eg `dateFormat(unixNow(), 'YYYY-MM-DD HH:mm:ss')` returns something like `"2024-06-15 14:30:00"`
+
+eg `dateFormat(unixNow(), 'dddd, MMMM D, YYYY')` returns something like `"Saturday, June 15, 2024"`
+
+**dateAdd(value, amount, unit)**
+
+Add (or subtract) a duration from a date value. Returns the result as Unix timestamp in milliseconds.
+
+Supported units: `seconds`, `minutes`, `hours`, `days`, `weeks`, `months`, `years` (both singular and plural).
+
+Use a negative amount to subtract time.
+
+eg `dateAdd(unixNow(), 7, 'days')` returns the Unix ms for 7 days from now
+
+eg `dateFormat(dateAdd(unixNow(), 1, 'months'), 'YYYY-MM-DD')` formats the date 1 month from now
+
+Note: when adding months, if the resulting day exceeds the target month's length, the date overflows into the next month (e.g. January 31 + 1 month overflows into March, not February).
+
+:::tip
+The date component functions and `dateFormat` accept an optional IANA timezone string (e.g. `'UTC'`, `'Europe/London'`, `'America/New_York'`). When omitted, local time is used. All date functions return `null` (or `''` for `dateFormat`) for invalid input.
+:::

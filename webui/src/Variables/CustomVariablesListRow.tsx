@@ -1,19 +1,21 @@
-import React, { useCallback } from 'react'
-import { CButton, CButtonGroup, CCol, CForm, CFormLabel, CRow } from '@coreui/react'
-import { PreventDefaultHandler } from '~/Resources/util.js'
-import { CopyToClipboard } from 'react-copy-to-clipboard'
+import { faCompressArrowsAlt, faExpandArrowsAlt, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCompressArrowsAlt, faCopy, faExpandArrowsAlt, faTrash } from '@fortawesome/free-solid-svg-icons'
-import { TextInputField } from '~/Components/TextInputField.js'
-import { CheckboxInputField } from '~/Components/CheckboxInputField.js'
-import { usePanelCollapseHelperContext } from '~/Helpers/CollapseHelper.js'
-import { observer } from 'mobx-react-lite'
 import classNames from 'classnames'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useId } from 'react'
+import { Button, ButtonGroup } from '~/Components/Button.js'
+import { CheckboxInputField } from '~/Components/CheckboxInputField.js'
+import { CopyButton } from '~/Components/CopyButton'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { InlineHelpIcon } from '~/Components/InlineHelp'
+import { TextInputFieldSimple } from '~/Components/TextInputField.js'
 import VariableInputGroup from '~/Components/VariableInputGroup.js'
 import { VariableValueDisplay } from '~/Components/VariableValueDisplay.js'
-import { useCustomVariablesTableContext } from './CustomVariablesTableContext'
+import { usePanelCollapseHelperContext } from '~/Helpers/CollapseHelper.js'
+import { PreventDefaultHandler } from '~/Resources/util.js'
 import type { CustomVariableDefinitionExt } from './CustomVariablesList'
-import { InlineHelp } from '~/Components/InlineHelp'
+import { useCustomVariablesTableContext } from './CustomVariablesTableContext'
 
 interface CustomVariableRowProps {
 	info: CustomVariableDefinitionExt
@@ -38,38 +40,39 @@ export const CustomVariableRow = observer(function CustomVariableRow({ info }: C
 
 	const value = customVariableValues.get(info.id)
 
+	const persistFieldId = useId()
+	const descriptionFieldId = useId()
+	const currentValueFieldId = useId()
+	const startupValueFieldId = useId()
+
 	return (
 		<div className="editor-grid">
 			<div className="cell-header">
 				<div className={classNames('cell-header-item', !isCollapsed && 'span-2')}>
 					<span className="variable-style">$({fullname})</span>
-					<CopyToClipboard text={`$(${fullname})`} onCopy={customVariablesApi.onCopied}>
-						<CButton size="sm" title="Copy variable name">
-							<FontAwesomeIcon icon={faCopy} color="#d50215" />
-						</CButton>
-					</CopyToClipboard>
+					<CopyButton size="sm" title="Copy variable name" color="primary" variant="ghost" text={`$(${fullname})`} />
 				</div>
 				{isCollapsed && (
 					<div className="cell-header-item grow">
-						<VariableValueDisplay value={value} onCopied={customVariablesApi.onCopied} />
+						<VariableValueDisplay value={value} />
 					</div>
 				)}
 				<div className="cell-header-item">
-					<CButtonGroup style={{ float: 'inline-end' }}>
+					<ButtonGroup className="float-end">
 						{isCollapsed ? (
-							<CButton onClick={doExpand} size="sm" title="Expand variable view">
+							<Button onClick={doExpand} size="sm" title="Expand variable view">
 								<FontAwesomeIcon icon={faExpandArrowsAlt} />
-							</CButton>
+							</Button>
 						) : (
-							<CButton onClick={doCollapse} size="sm" title="Collapse variable view">
+							<Button onClick={doCollapse} size="sm" title="Collapse variable view">
 								<FontAwesomeIcon icon={faCompressArrowsAlt} />
-							</CButton>
+							</Button>
 						)}
 
-						<CButton onClick={() => customVariablesApi.doDelete(info.id)} size="sm" title="Delete custom variable">
+						<Button onClick={() => customVariablesApi.doDelete(info.id)} size="sm" title="Delete custom variable">
 							<FontAwesomeIcon icon={faTrash} />
-						</CButton>
-					</CButtonGroup>
+						</Button>
+					</ButtonGroup>
 				</div>
 			</div>
 			{isCollapsed ? (
@@ -78,49 +81,68 @@ export const CustomVariableRow = observer(function CustomVariableRow({ info }: C
 				</>
 			) : (
 				<>
-					<CForm onSubmit={PreventDefaultHandler} className="cell-fields">
+					<Form onSubmit={PreventDefaultHandler} className="cell-fields">
 						<div>
-							<InlineHelp help="If enabled, variable value will be saved and restored when Companion restarts.">
-								<CFormLabel>Persist value</CFormLabel>
-							</InlineHelp>
-							<CheckboxInputField
-								value={info.persistCurrentValue}
-								setValue={(val) => customVariablesApi.setPersistenceValue(info.id, val)}
-								inline={true}
-							/>
+							<FormLabel htmlFor={persistFieldId}>
+								Persist value
+								<InlineHelpIcon className="ms-1">
+									If enabled, variable value will be saved and restored when Companion restarts.
+								</InlineHelpIcon>
+							</FormLabel>
+							<div
+								style={{
+									display: 'inline-flex',
+									alignItems: 'center',
+									verticalAlign: 'middle',
+									marginLeft: '1em',
+									paddingBottom: '.5em',
+									paddingTop: '.3em',
+								}}
+							>
+								<CheckboxInputField
+									id={persistFieldId}
+									value={info.persistCurrentValue}
+									setValue={(val) => customVariablesApi.setPersistenceValue(info.id, val)}
+								/>
+							</div>
 						</div>
-						<CRow>
-							<CFormLabel htmlFor="colFormDescription" className="col-sm-3 align-right">
+						<Grid.Row>
+							<FormLabel htmlFor={descriptionFieldId} className="col-sm-3 align-right">
 								Description:
-							</CFormLabel>
-							<CCol sm={9}>
-								<TextInputField
+							</FormLabel>
+							<Grid.Col sm={9}>
+								<TextInputFieldSimple
+									id={descriptionFieldId}
 									value={info.description}
 									setValue={(description) => customVariablesApi.setDescription(info.id, description)}
-									style={{ marginBottom: '0.5rem' }}
+									className="mb-2"
 								/>
-							</CCol>
+							</Grid.Col>
 
-							<CFormLabel htmlFor="colFormCurrentValue" className="col-sm-3 align-right">
+							<FormLabel htmlFor={currentValueFieldId} className="col-sm-3 align-right">
 								Current value:
-							</CFormLabel>
-							<CCol sm={9}>
-								<VariableInputGroup value={value} name={info.id} setCurrentValue={customVariablesApi.setCurrentValue} />
-							</CCol>
-
-							<CFormLabel htmlFor="colFormStartupValue" className="col-sm-3 align-right">
-								Startup value:
-							</CFormLabel>
-							<CCol sm={9}>
+							</FormLabel>
+							<Grid.Col sm={9}>
 								<VariableInputGroup
+									id={currentValueFieldId}
+									value={value}
+									setValue={(val) => customVariablesApi.setCurrentValue(info.id, val)}
+								/>
+							</Grid.Col>
+
+							<FormLabel htmlFor={startupValueFieldId} className="col-sm-3 align-right">
+								Startup value:
+							</FormLabel>
+							<Grid.Col sm={9}>
+								<VariableInputGroup
+									id={startupValueFieldId}
 									disabled={!!info.persistCurrentValue}
 									value={info.defaultValue}
-									name={info.id}
-									setCurrentValue={customVariablesApi.setStartupValue}
+									setValue={(val) => customVariablesApi.setStartupValue(info.id, val)}
 								/>
-							</CCol>
-						</CRow>
-					</CForm>
+							</Grid.Col>
+						</Grid.Row>
+					</Form>
 				</>
 			)}
 		</div>

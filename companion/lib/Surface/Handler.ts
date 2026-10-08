@@ -10,77 +10,28 @@
  *
  */
 
-import { rotateXYForPanel, unrotateXYForPanel } from './Util.js'
-import { SurfaceGroup } from './Group.js'
-import { EventEmitter } from 'events'
-import type { ImageResult } from '../Graphics/ImageResult.js'
-import LogController, { type Logger } from '../Log/Controller.js'
+import { EventEmitter } from 'node:events'
+import debounceFn from 'debounce-fn'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import type {
-	SurfaceGroupConfig,
 	GridSize,
 	SurfaceConfig,
+	SurfaceGroupConfig,
 	SurfacePanelConfig,
 } from '@companion-app/shared/Model/Surfaces.js'
-import type { ControlsController } from '../Controls/Controller.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { IPageStore } from '../Page/Store.js'
-import type { SurfaceController } from './Controller.js'
+import type { VariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { IControlStore } from '../Controls/IControlStore.js'
 import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import type { ImageResult } from '../Graphics/ImageResult.js'
+import LogController, { type Logger } from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
 import type { VariablesController } from '../Variables/Controller.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import { createDefaultSurfacePanelConfig } from './Config.js'
+import type { SurfaceController } from './Controller.js'
+import { SurfaceGroup } from './Group.js'
 import type { DrawButtonItem, SurfaceHandlerDependencies, SurfacePanel, UpdateEvents } from './Types.js'
-import type { CompanionVariableValue } from '@companion-module/base'
-import { PanelDefaults } from './Config.js'
-import debounceFn from 'debounce-fn'
-
-const PINCODE_NUMBER_POSITIONS: [number, number][] = [
-	// 0
-	[4, 1],
-	// 1 2 3
-	[1, 2],
-	[2, 2],
-	[3, 2],
-	// 4 5 6
-	[1, 1],
-	[2, 1],
-	[3, 1],
-	// 7 8 9
-	[1, 0],
-	[2, 0],
-	[3, 0],
-]
-
-const PINCODE_NUMBER_POSITIONS_SKIP_FIRST_COL: [number, number][] = [
-	// 0
-	[5, 1],
-	// 1 2 3
-	[2, 2],
-	[3, 2],
-	[4, 2],
-	// 4 5 6
-	[2, 1],
-	[3, 1],
-	[4, 1],
-	// 7 8 9
-	[2, 0],
-	[3, 0],
-	[4, 0],
-]
-
-const PINCODE_NUMBER_POSITIONS_SDS: [number, number][] = [
-	// 0 1 2 3 4
-	[2, 1],
-	[3, 1],
-	[4, 1],
-	[5, 1],
-	[6, 1],
-	// 5 6 7 8 9
-	[2, 0],
-	[3, 0],
-	[4, 0],
-	[5, 0],
-	[6, 0],
-]
+import { rotateXYForPanel, unrotateXYForPanel } from './Util.js'
 
 /**
  * Get the display name of a surface
@@ -117,16 +68,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	#isSurfaceLocked: boolean = false
 
 	/**
-	 * Positions of pincode numbers
-	 */
-	readonly #pincodeNumberPositions: [number, number][]
-
-	/**
-	 * Position of pincode 'button'
-	 */
-	readonly #pincodeCodePosition: [number, number]
-
-	/**
 	 * Config for this surface
 	 */
 	#surfaceConfig: SurfaceConfig
@@ -160,13 +101,13 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	/**
 	 * The core controls controller
 	 */
-	readonly #controls: ControlsController
+	readonly #controls: IControlStore
 	/**
 	 * The core graphics controller
 	 */
 	readonly #graphics: GraphicsController
 	/**
-	 * The core page controller
+	 * The core page store
 	 */
 	readonly #pageStore: IPageStore
 	/**
@@ -196,8 +137,8 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	) {
 		super()
 
-		this.#logger = LogController.createLogger(`Surface/Handler/${panel.info.deviceId}`)
-		this.#logger.silly('loading for ' + panel.info.devicePath)
+		this.#logger = LogController.createLogger(`Surface/Handler/${panel.info.surfaceId}`)
+		this.#logger.silly('loading for ' + panel.info.surfaceId)
 
 		this.#surfaces = surfaceController
 		this.#controls = deps.controls
@@ -215,44 +156,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 		// Setup logger to use the name
 		this.#recreateLogger()
 
-		this.#pincodeNumberPositions = PINCODE_NUMBER_POSITIONS
-		this.#pincodeCodePosition = [0, 1]
-
-		// some surfaces need different positions for the pincode numbers
-		if (
-			this.panel.info.type === 'Loupedeck Live' ||
-			this.panel.info.type === 'Loupedeck Live S' ||
-			this.panel.info.type === 'Razer Stream Controller'
-		) {
-			this.#pincodeNumberPositions = PINCODE_NUMBER_POSITIONS_SKIP_FIRST_COL
-			this.#pincodeCodePosition = [5, 2]
-		} else if (this.panel.info.type === 'Loupedeck CT') {
-			this.#pincodeNumberPositions = PINCODE_NUMBER_POSITIONS_SKIP_FIRST_COL
-			this.#pincodeCodePosition = [3, 4]
-		} else if (this.panel.info.type === 'Stream Deck Studio' || this.panel.info.type === 'Elgato Stream Deck Studio') {
-			this.#pincodeNumberPositions = PINCODE_NUMBER_POSITIONS_SDS
-			this.#pincodeCodePosition = [1, 0]
-		} else if (this.panel.info.type === 'Mirabox Stream Dock N4') {
-			this.#pincodeNumberPositions = [
-				[4, 1],
-				[0, 0],
-				[1, 0],
-				[2, 0],
-				[3, 0],
-				[4, 0],
-				[0, 1],
-				[1, 1],
-				[2, 1],
-				[3, 1],
-			]
-			this.#pincodeCodePosition = [4, 2]
-		}
-
-		if (this.#surfaceConfig.config.never_lock) {
-			// if device can't be locked, then make sure it isnt already locked
-			this.#isSurfaceLocked = false
-		}
-
 		this.#graphics.on('button_drawn', this.#onButtonDrawn)
 
 		this.panel.on('click', this.#onDeviceClick.bind(this))
@@ -262,6 +165,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 		this.panel.on('remove', this.#onDeviceRemove.bind(this))
 		this.panel.on('resized', this.#onDeviceResized.bind(this))
 		this.panel.on('setCustomVariable', this.#onSetCustomVariable.bind(this))
+		this.panel.on('firmwareUpdateInfo', this.#onFirmwareUpdateInfo.bind(this))
 
 		setImmediate(() => {
 			this.#saveConfig()
@@ -277,7 +181,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 	#recreateLogger() {
 		const suffix = this.#surfaceConfig?.name ? ` (${this.#surfaceConfig.name})` : ''
-		this.#logger = LogController.createLogger(`Surface/Handler/${this.panel.info.deviceId}${suffix}`)
+		this.#logger = LogController.createLogger(`Surface/Handler/${this.panel.info.surfaceId}${suffix}`)
 	}
 
 	/**
@@ -302,7 +206,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	}
 
 	get surfaceId(): string {
-		return this.panel.info.deviceId
+		return this.panel.info.surfaceId
 	}
 
 	get displayName(): string {
@@ -321,29 +225,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 		if (this.panel) {
 			if (this.#isSurfaceLocked) {
-				if (this.panel.setLocked !== undefined) {
-					this.panel.setLocked(this.#isSurfaceLocked, this.#currentPincodeEntry.length)
-					return
-				}
-
-				const buffers = this.#graphics.getImagesForPincode(this.#currentPincodeEntry)
-				this.panel.clearDeck()
-
-				const rawEntries: DrawButtonItem[] = [
-					{
-						x: this.#pincodeCodePosition[0],
-						y: this.#pincodeCodePosition[1],
-						image: buffers.code,
-					},
-				]
-
-				this.#pincodeNumberPositions.forEach(([x, y], i) => {
-					if (buffers[i]) {
-						rawEntries.push({ x, y, image: buffers[i] })
-					}
-				})
-
-				this.#drawButtons(rawEntries)
+				this.panel.setLocked(this.#isSurfaceLocked, this.#currentPincodeEntry.length)
 			} else {
 				const { xOffset, yOffset } = this.#getCurrentOffset()
 
@@ -355,13 +237,19 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 				for (let y = 0; y < gridSize.rows; y++) {
 					for (let x = 0; x < gridSize.columns; x++) {
-						const image = this.#graphics.getCachedRenderOrGeneratePlaceholder({
+						const location: ControlLocation = {
 							pageNumber: pageNumber ?? 0,
 							column: x + xOffset,
 							row: y + yOffset,
-						})
+						}
+						const image = this.#graphics.getCachedRenderOrGeneratePlaceholder(location)
 
-						rawEntries.push({ x, y, image })
+						rawEntries.push({
+							x,
+							y,
+							defaultRender: image,
+							location,
+						})
 					}
 				}
 
@@ -384,9 +272,9 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 			)
 
 			return {
+				...entry,
 				x: transformedX,
 				y: transformedY,
-				image: entry.image,
 			}
 		})
 	}
@@ -395,12 +283,8 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 * Draw multiple images to a surface
 	 */
 	#drawButtons(entries: DrawButtonItem[]) {
-		if (this.panel.drawMany) {
-			this.panel.drawMany(entries)
-		} else {
-			for (const entry of entries) {
-				this.panel.draw(entry.x, entry.y, entry.image)
-			}
+		for (const entry of entries) {
+			this.panel.draw(entry)
 		}
 	}
 
@@ -415,9 +299,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 * Set the surface as locked
 	 */
 	setLocked(locked: boolean, skipDraw = false): boolean {
-		// skip if surface can't be locked
-		if (this.#surfaceConfig.config.never_lock && locked) return false
-
 		if (this.#isSurfaceLocked === !!locked) return false
 
 		this.#isSurfaceLocked = !!locked
@@ -426,7 +307,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 		if (!this.#isSurfaceLocked) this.#currentPincodeEntry = ''
 
-		if (!this.#isSurfaceLocked && !!this.panel.setLocked) {
+		if (!this.#isSurfaceLocked) {
 			this.panel.setLocked(false, this.#currentPincodeEntry.length)
 		}
 
@@ -450,7 +331,8 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 				{
 					x: location.column - xOffset,
 					y: location.row - yOffset,
-					image: render,
+					defaultRender: render,
+					location,
 				},
 			]
 			const transformedEntries = this.#transformButtonRenders(rawEntries)
@@ -463,18 +345,30 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 * @param brightness 0-100
 	 */
 	setBrightness(brightness: number): void {
-		if (this.panel) {
-			if (this.panel.setConfig) {
-				const config = {
-					...this.#surfaceConfig.config,
-					brightness: brightness,
-				}
+		if (!Number.isFinite(brightness)) return
 
-				setImmediate(() => {
-					this.panel.setConfig(config)
-				})
-			}
+		const config = {
+			...this.#surfaceConfig.config,
+			brightness: brightness,
 		}
+		this.#surfaceConfig.config = config
+
+		this.#saveConfig()
+
+		if (this.panel && this.panel.setConfig) {
+			setImmediate(() => {
+				this.panel.setConfig(config)
+			})
+		}
+	}
+
+	/**
+	 * Adjust the brightness of the panel by a relative amount
+	 * @param adjustment -100 to 100
+	 */
+	adjustBrightness(adjustment: number): void {
+		const newBrightness = Math.min(100, Math.max(0, this.#surfaceConfig.config.brightness + adjustment))
+		this.setBrightness(newBrightness)
 	}
 
 	/**
@@ -507,7 +401,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 		if (!this.panel) return
 
 		try {
-			this.#surfaces.removeDevice(this.panel.info.devicePath)
+			this.#surfaces.removeDevice(this.panel.info.surfaceId, { physicallyGone: true })
 		} catch (e) {
 			this.#logger.error(`Remove failed: ${e}`)
 		}
@@ -569,13 +463,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 				this.#logger.debug(
 					`Button ${location.pageNumber}/${location.row}/${location.column} ${pressed ? 'pressed' : 'released'}`
 				)
-			} else if (!this.panel.setLocked) {
-				if (pressed) {
-					const pressCode = this.#pincodeNumberPositions.findIndex((pos) => pos[0] == x && pos[1] == y)
-					if (pressCode !== -1) {
-						this.#onDevicePincodeKey(pressCode)
-					}
-				}
 			}
 		} catch (e) {
 			this.#logger.error(`Click failed: ${e}`)
@@ -655,26 +542,18 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 
 		if (!this.#isSurfaceLocked) return
 
-		if (this.panel.setLocked !== undefined) {
-			this.panel.setLocked(true, this.#currentPincodeEntry.length)
-		} else {
-			const datap = this.#graphics.getImagesForPincode(this.#currentPincodeEntry)
-
-			this.#drawButtons([
-				{
-					x: this.#pincodeCodePosition[0],
-					y: this.#pincodeCodePosition[1],
-					image: datap.code,
-				},
-			])
-		}
+		this.panel.setLocked(true, this.#currentPincodeEntry.length)
 	}
 
 	/**
 	 * Set the value of a custom variable
 	 */
-	#onSetCustomVariable(name: string, value: CompanionVariableValue): void {
+	#onSetCustomVariable(name: string, value: VariableValue): void {
 		this.#variables.custom.setValue(name, value)
+	}
+
+	#onFirmwareUpdateInfo(): void {
+		this.#surfaces.triggerUpdateDevicesList()
 	}
 
 	/**
@@ -687,7 +566,7 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 			startup_page_id: this.#pageStore.getFirstPageId(),
 		}
 		this.#surfaceConfig.groupId = null
-		this.setPanelConfig(structuredClone(PanelDefaults))
+		this.setPanelConfig(createDefaultSurfacePanelConfig(this.panel))
 	}
 
 	/**
@@ -736,11 +615,6 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 		)
 			redraw = true
 		if (newconfig.rotation != this.#surfaceConfig.config.rotation) redraw = true
-
-		if (newconfig.never_lock && newconfig.never_lock != this.#surfaceConfig.config.never_lock) {
-			this.setLocked(false, true)
-			redraw = true
-		}
 
 		// if this is an import, the config file may have been missing fields:
 		//  (note: import does not call `createOrSanitizeSurfaceHandlerConfig`, which might be a better option?)
@@ -807,8 +681,8 @@ export class SurfaceHandler extends EventEmitter<SurfaceHandlerEvents> {
 	 * @param purge Purge the configuration
 	 */
 	unload(purge = false): void {
-		this.#logger.error(this.panel.info.type + ' disconnected')
-		this.#logger.silly('unloading for ' + this.panel.info.devicePath)
+		this.#logger.error(this.panel.info.description + ' disconnected')
+		this.#logger.silly('unloading for ' + this.panel.info.surfaceId)
 		this.#graphics.off('button_drawn', this.#onButtonDrawn)
 
 		try {

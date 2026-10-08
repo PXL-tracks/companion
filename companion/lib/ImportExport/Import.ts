@@ -1,37 +1,39 @@
+import { nanoid } from 'nanoid'
+import { CreateExpressionVariableControlId, CreateTriggerControlId } from '@companion-app/shared/ControlId.js'
+import type { SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import type {
 	ExportFullv6,
 	ExportInstancesv6,
 	ExportPageContentv6,
 	ExportTriggerContentv6,
 } from '@companion-app/shared/Model/ExportModel.js'
-import type { ControlsController } from '../Controls/Controller.js'
-import { CreateExpressionVariableControlId, CreateTriggerControlId } from '@companion-app/shared/ControlId.js'
 import type {
 	ClientImportOrResetSelection,
 	ConnectionRemappings,
 	ImportOrResetType,
 } from '@companion-app/shared/Model/ImportExport.js'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import type { SurfaceConfig, SurfaceGroupConfig } from '@companion-app/shared/Model/Surfaces.js'
+import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
+import type { ControlsController } from '../Controls/Controller.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import type { InstanceController } from '../Instance/Controller.js'
+import type { InternalController } from '../Internal/Controller.js'
+import LogController from '../Log/Controller.js'
+import type { PageController } from '../Page/Controller.js'
+import { yieldToEventLoop } from '../Resources/Util.js'
+import { VisitorReferencesUpdater } from '../Resources/Visitors/ReferencesUpdater.js'
+import type { SurfaceController } from '../Surface/Controller.js'
+import type { VariablesController } from '../Variables/Controller.js'
 import {
-	fixupControl,
 	fixupExpressionVariableControl,
+	fixupLayeredButtonControl,
 	fixupTriggerControl,
 	type InstanceAppliedRemappings,
 } from './ImportFixup.js'
-import type { InternalController } from '../Internal/Controller.js'
-import { nanoid } from 'nanoid'
-import type { InstanceController } from '../Instance/Controller.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { PageController } from '../Page/Controller.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { VisitorReferencesUpdater } from '../Resources/Visitors/ReferencesUpdater.js'
-import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
 import { find_smallest_grid_for_page } from './Util.js'
-import LogController from '../Log/Controller.js'
-import type { SurfaceConfig, SurfaceGroupConfig } from '@companion-app/shared/Model/Surfaces.js'
-import type { SurfaceController } from '../Surface/Controller.js'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
-import type { VariablesController } from '../Variables/Controller.js'
 
 export class ImportController {
 	readonly #logger = LogController.createLogger('ImportExport/Import')
@@ -65,12 +67,12 @@ export class ImportController {
 		this.#variablesController = variablesController
 	}
 
-	importSinglePage(
+	async importSinglePage(
 		instances: ExportInstancesv6 | undefined,
 		connectionIdRemapping: Record<string, string | undefined>,
 		pageInfo: ExportPageContentv6,
 		topage: number
-	): ConnectionRemappings {
+	): Promise<ConnectionRemappings> {
 		// Setup the new instances
 		const instanceIdMap = this.#importInstances(instances, connectionIdRemapping)
 
@@ -81,7 +83,7 @@ export class ImportController {
 		}
 		this.#graphicsController.clearAllForPage(topage)
 
-		this.#performPageImport(pageInfo, topage, instanceIdMap)
+		await this.#performPageImport(pageInfo, topage, instanceIdMap, undefined)
 
 		// Report the used remap to the ui, for future imports
 		const instanceRemap2: ConnectionRemappings = {}
@@ -120,7 +122,7 @@ export class ImportController {
 			// If trigger already exists, generate a new id
 			if (this.#controlsController.getControl(controlId)) controlId = CreateTriggerControlId(nanoid())
 
-			const fixedControlObj = fixupTriggerControl(this.#internalModule, trigger, instanceIdMap)
+			const fixedControlObj = fixupTriggerControl(this.#internalModule, trigger, instanceIdMap, undefined)
 			this.#controlsController.importTrigger(controlId, fixedControlObj)
 		}
 
@@ -133,25 +135,32 @@ export class ImportController {
 		return instanceRemap2
 	}
 
-	importFull(data: ExportFullv6, config: ClientImportOrResetSelection): void {
+	async importFull(data: ExportFullv6, config: ClientImportOrResetSelection): Promise<void> {
 		const isImporting = (value: ImportOrResetType): boolean => value === 'reset-and-import'
 
 		const mergeConnections = config.connections === 'unchanged'
 
-		// Always Import instances
-		// Import connection collections if provided
-		if (data.connectionCollections && data.connectionCollections.length > 0) {
-			this.#instancesController.connectionCollections.replaceCollections(
-				data.connectionCollections || [],
-				mergeConnections
-			)
-		}
+		// Import connection collections (replace or merge depending on mode)
+		this.#instancesController.connectionCollections.replaceCollections(
+			data.connectionCollections || [],
+			mergeConnections
+		)
 
 		// Always Import instances
 		const preserveRemap: ConnectionRemappings = mergeConnections
 			? this.#createDefaultConnectionRemap(data.instances)
 			: {}
 		const instanceIdMap = this.#importInstances(data.instances, preserveRemap)
+
+		// Pre-compute outbound surface ID remap so pages and triggers can reference new IDs
+		const outboundSurfaceIdRemap: Record<string, string> = {}
+		if (isImporting(config.surfaces.remote)) {
+			for (const remoteInfo of Object.values(data.surfacesRemote || {})) {
+				if (remoteInfo && remoteInfo.id) {
+					outboundSurfaceIdRemap[remoteInfo.id] = nanoid()
+				}
+			}
+		}
 
 		// import custom variables
 		if (isImporting(config.customVariables)) {
@@ -165,7 +174,12 @@ export class ImportController {
 
 			for (const [id, variableDefinition] of Object.entries(data.expressionVariables || {})) {
 				const controlId = CreateExpressionVariableControlId(id)
-				const fixedControlObj = fixupExpressionVariableControl(this.#internalModule, variableDefinition, instanceIdMap)
+				const fixedControlObj = fixupExpressionVariableControl(
+					this.#internalModule,
+					variableDefinition,
+					instanceIdMap,
+					outboundSurfaceIdRemap
+				)
 
 				this.#controlsController.importExpressionVariable(controlId, fixedControlObj)
 			}
@@ -192,13 +206,16 @@ export class ImportController {
 					)
 				}
 
-				this.#performPageImport(pageInfo, pageNumber, instanceIdMap)
+				await this.#performPageImport(pageInfo, pageNumber, instanceIdMap, outboundSurfaceIdRemap)
+
+				// Yield between pages so a large import doesn't block the event loop for its whole duration
+				await yieldToEventLoop()
 			}
 		}
 
 		if (isImporting(config.surfaces.known)) {
-			const surfaces = data.surfaces || ({} as Record<number, SurfaceConfig>)
-			const surfaceGroups = data.surfaceGroups || ({} as Record<number, SurfaceGroupConfig>)
+			const surfaces: Record<number, SurfaceConfig> = (data.surfaces || {}) as any
+			const surfaceGroups: Record<number, SurfaceGroupConfig> = (data.surfaceGroups || {}) as any
 			const getPageId = (val: number) =>
 				this.#pagesController.store.getPageId(val) ?? this.#pagesController.store.getFirstPageId()
 			const fixPageId = (groupConfig: SurfaceGroupConfig) => {
@@ -229,6 +246,70 @@ export class ImportController {
 			this.#surfacesController.importSurfaces(surfaceGroups, surfaces)
 		}
 
+		const surfaceInstancesMap = new Map<string, string>()
+
+		if (isImporting(config.surfaces.instances)) {
+			this.#instancesController.surfaceInstanceCollections.replaceCollections(data.surfaceInstanceCollections || [])
+
+			for (const [instanceId, instanceConfig] of Object.entries(data.surfaceInstances || {})) {
+				// Create a new instance
+				const [newId, newConfig] = this.#instancesController.addSurfaceInstanceWithLabel(
+					instanceConfig.moduleId,
+					instanceConfig.label,
+					{
+						versionId: instanceConfig.moduleVersionId ?? null,
+						updatePolicy: instanceConfig.updatePolicy,
+						disabled: true,
+						collectionId: instanceConfig.collectionId,
+						sortOrder: instanceConfig.sortOrder ?? 0,
+					}
+				)
+
+				if (newId && newConfig) {
+					surfaceInstancesMap.set(instanceId, newId)
+
+					this.#instancesController.setSurfaceInstanceLabelAndConfig(newId, {
+						label: null,
+						enabled: instanceConfig.enabled !== false,
+						config: 'config' in instanceConfig ? instanceConfig.config : null,
+						// secrets: 'secrets' in instanceConfig ? instanceConfig.secrets : null,
+						updatePolicy: null,
+						// upgradeIndex: instanceConfig.lastUpgradeIndex,
+					})
+				}
+			}
+		}
+
+		if (isImporting(config.surfaces.remote)) {
+			// Compile a map of fallback instance ids by module type
+			const fallbackSurfaceInstances = new Map<string, string>()
+			const surfaceInstances = this.#instancesController.getSurfaceInstanceClientJson()
+			for (const instance of Object.values(surfaceInstances)) {
+				if (!fallbackSurfaceInstances.has(instance.moduleId))
+					fallbackSurfaceInstances.set(instance.moduleId, instance.id)
+			}
+
+			for (const remoteInfo of Object.values(data.surfacesRemote || {})) {
+				let instanceId = remoteInfo.instanceId
+				if (!surfaceInstances[instanceId]) {
+					// Try and remap the instance id, or fallback to using the module type
+					instanceId =
+						surfaceInstancesMap.get(instanceId) || fallbackSurfaceInstances.get(remoteInfo.moduleId) || instanceId
+				}
+
+				// Use the pre-computed new ID to avoid conflicts
+				const newId = outboundSurfaceIdRemap[remoteInfo.id] ?? remoteInfo.id
+
+				// Future: validation
+				this.#surfacesController.outbound.addOutboundConnection({
+					...remoteInfo,
+					// Translate the instanceId
+					instanceId: instanceId,
+					id: newId,
+				})
+			}
+		}
+
 		if (isImporting(config.triggers)) {
 			// Import trigger collections if provided
 			if (data.triggerCollections) {
@@ -237,17 +318,31 @@ export class ImportController {
 
 			for (const [id, trigger] of Object.entries(data.triggers || {})) {
 				const controlId = CreateTriggerControlId(id)
-				const fixedControlObj = fixupTriggerControl(this.#internalModule, trigger, instanceIdMap)
+				const fixedControlObj = fixupTriggerControl(
+					this.#internalModule,
+					trigger,
+					instanceIdMap,
+					outboundSurfaceIdRemap
+				)
 				this.#controlsController.importTrigger(controlId, fixedControlObj)
 			}
 		}
+
+		// Import image library data if present
+		if (isImporting(config.imageLibrary)) {
+			this.#graphicsController.imageLibrary.importImageLibrary(
+				data.imageLibraryCollections || [],
+				data.imageLibrary || []
+			)
+		}
 	}
 
-	#performPageImport = (
+	#performPageImport = async (
 		pageInfo: ExportPageContentv6,
 		topage: number,
-		instanceIdMap: InstanceAppliedRemappings
-	): void => {
+		instanceIdMap: InstanceAppliedRemappings,
+		outboundSurfaceIdRemap: Record<string, string> | undefined
+	): Promise<void> => {
 		{
 			// Ensure the configured grid size is large enough for the import
 			const requiredSize = pageInfo.gridSize || find_smallest_grid_for_page(pageInfo)
@@ -282,7 +377,8 @@ export class ImportController {
 		const referencesUpdater = new VisitorReferencesUpdater(
 			this.#internalModule,
 			connectionLabelRemap,
-			connectionIdRemap
+			connectionIdRemap,
+			outboundSurfaceIdRemap
 		)
 
 		// Import the controls
@@ -290,8 +386,17 @@ export class ImportController {
 			for (const [column, control] of Object.entries(rowObj)) {
 				if (control) {
 					// Import the control
-					const fixedControlObj = fixupControl(this.#logger, structuredClone(control), referencesUpdater, instanceIdMap)
-					if (!fixedControlObj) continue
+					let fixedControlObj: SomeButtonModel
+					if (control.type === 'pagenum' || control.type === 'pageup' || control.type === 'pagedown') {
+						fixedControlObj = {
+							type: control.type,
+						}
+					} else if (control.type === 'button-layered') {
+						fixedControlObj = fixupLayeredButtonControl(this.#logger, control, referencesUpdater, instanceIdMap)
+					} else {
+						this.#logger.warn(`Unknown control type: ${control.type}`)
+						continue
+					}
 
 					const location: ControlLocation = {
 						pageNumber: Number(topage),
@@ -301,6 +406,9 @@ export class ImportController {
 					this.#controlsController.importControl(location, fixedControlObj)
 				}
 			}
+
+			// Yield between rows so importing a densely-populated page doesn't block the event loop
+			await yieldToEventLoop()
 		}
 	}
 
@@ -332,7 +440,7 @@ export class ImportController {
 				} else {
 					// Create a new instance
 					const [newId, newConfig] = this.#instancesController.addConnectionWithLabel(
-						{ type: obj.instance_type },
+						{ type: obj.moduleId },
 						obj.label,
 						{
 							versionId: obj.moduleVersionId ?? null,
@@ -381,11 +489,11 @@ export class ImportController {
 			if (!obj || !obj.label) continue
 
 			// See if there is an existing instance with the same label and type
-			const existingId = this.#instancesController.getIdForLabel(obj.label)
+			const existingId = this.#instancesController.getIdForLabel(ModuleInstanceType.Connection, obj.label)
 			if (
 				existingId &&
-				this.#instancesController.getInstanceConfigOfType(existingId, ModuleInstanceType.Connection)?.instance_type ===
-					obj.instance_type
+				this.#instancesController.getInstanceConfigOfType(existingId, ModuleInstanceType.Connection)?.moduleId ===
+					obj.moduleId
 			) {
 				remap[oldId] = existingId
 			} else {

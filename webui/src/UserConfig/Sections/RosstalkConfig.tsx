@@ -1,10 +1,8 @@
-import React from 'react'
 import { observer } from 'mobx-react-lite'
 import type { UserConfigProps } from '../Components/Common.js'
-import { UserConfigSwitchRow } from '../Components/UserConfigSwitchRow.js'
 import { UserConfigHeadingRow } from '../Components/UserConfigHeadingRow.js'
 import { UserConfigStaticTextRow } from '../Components/UserConfigStaticTextRow.js'
-import { InlineHelp } from '~/Components/InlineHelp.js'
+import { UserConfigSwitchRow } from '../Components/UserConfigSwitchRow.js'
 
 export const RosstalkConfig = observer(function RosstalkConfig(props: UserConfigProps) {
 	return (
@@ -13,10 +11,7 @@ export const RosstalkConfig = observer(function RosstalkConfig(props: UserConfig
 			<UserConfigSwitchRow userConfig={props} label="RossTalk Listener" field="rosstalk_enabled" />
 
 			{props.config.rosstalk_enabled && (
-				<UserConfigStaticTextRow
-					label={<InlineHelp help="You can't change this value.">Rosstalk Listen Port</InlineHelp>}
-					text={7788}
-				/>
+				<UserConfigStaticTextRow label="Rosstalk Listen Port" text={7788} textHelp="You can't change this value." />
 			)}
 		</>
 	)

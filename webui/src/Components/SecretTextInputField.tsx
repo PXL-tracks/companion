@@ -1,33 +1,45 @@
-import React, { useMemo, useState, useCallback, useRef } from 'react'
-import { CButton, CFormInput, CInputGroup } from '@coreui/react'
-import { observer } from 'mobx-react-lite'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { Input } from '@base-ui/react'
 import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import classNames from 'classnames'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useRef, useState } from 'react'
+import { Button } from './Button'
+import { InputGroup } from './Form'
+import { computeInputValidity, InputValidityIcon } from './InputValidity.js'
 
 interface SecretTextInputFieldProps {
+	id: string | undefined
 	tooltip?: string
+	placeholder?: string
 	value: string
-	style?: React.CSSProperties
+	className?: string
+	inputClassName?: string
 	setValue: (value: string) => void
-	checkValid?: (value: string) => boolean
+	checkValid?: boolean | ((value: string) => boolean | undefined)
+	immediateValue?: boolean
 }
 
 export const SecretTextInputField = observer(function SecretTextInputField({
+	id,
 	tooltip,
+	placeholder,
 	value,
-	style,
+	className,
+	inputClassName,
 	setValue,
 	checkValid,
+	immediateValue,
 }: SecretTextInputFieldProps) {
 	const [tmpValue, setTmpValue] = useState<string | null>(null)
 	const [showSecretValue, setShowSecretValue] = useState<boolean>(false)
 
 	const storeValue = useCallback(
 		(value: string) => {
-			setTmpValue(value)
+			if (!immediateValue) setTmpValue(value)
 			setValue(value)
 		},
-		[setValue]
+		[immediateValue, setValue]
 	)
 	const doOnChange = useCallback(
 		(e: React.ChangeEvent<HTMLInputElement> | React.FormEvent<HTMLInputElement>) => storeValue(e.currentTarget.value),
@@ -36,41 +48,51 @@ export const SecretTextInputField = observer(function SecretTextInputField({
 
 	const currentValueRef = useRef<string>()
 	currentValueRef.current = value ?? ''
-	const focusStoreValue = useCallback(() => setTmpValue(currentValueRef.current ?? ''), [])
+	const focusStoreValue = useCallback(() => {
+		if (!immediateValue) setTmpValue(currentValueRef.current ?? '')
+	}, [immediateValue])
 	const blurClearValue = useCallback(() => {
 		setTmpValue(null)
 	}, [])
 
 	const toggleShowSecretValue = useCallback(() => setShowSecretValue((prev) => !prev), [])
 
-	const showValue = (tmpValue ?? value ?? '').toString()
+	const showValue = ((immediateValue ? null : tmpValue) ?? value ?? '').toString()
+	const validity = computeInputValidity(checkValid, showValue)
+	const valueIsInvalid = validity === 'invalid'
 
-	const extraStyle = useMemo(
-		() => ({ color: !!checkValid && !checkValid(showValue) ? 'red' : undefined, ...style }),
-		[checkValid, showValue, style]
-	)
-
-	// Render the input
 	return (
-		<>
-			<CInputGroup>
-				<CFormInput
+		<InputGroup className={className}>
+			<span className="input-validity-wrapper">
+				<Input
+					id={id}
 					type={showSecretValue ? 'text' : 'password'}
+					className={classNames(
+						'text-input-field',
+						{
+							'invalid-value': valueIsInvalid,
+							'has-validity-icon': validity !== 'unknown',
+						},
+						inputClassName
+					)}
 					value={showValue}
-					style={extraStyle}
 					title={tooltip}
+					placeholder={placeholder}
 					onChange={doOnChange}
 					onFocus={focusStoreValue}
 					onBlur={blurClearValue}
 				/>
-				<CButton
-					color="secondary"
-					title={showSecretValue ? 'Hide secret' : 'Show secret'}
-					onClick={toggleShowSecretValue}
-				>
-					<FontAwesomeIcon icon={showSecretValue ? faEyeSlash : faEye} />
-				</CButton>
-			</CInputGroup>
-		</>
+				<InputValidityIcon validity={validity} />
+			</span>
+			<Button
+				color="secondary"
+				className="input-group-borders border-start-0"
+				title={showSecretValue ? 'Hide secret' : 'Show secret'}
+				aria-label={showSecretValue ? 'Hide secret value' : 'Show secret value'}
+				onClick={toggleShowSecretValue}
+			>
+				<FontAwesomeIcon icon={showSecretValue ? faEyeSlash : faEye} />
+			</Button>
+		</InputGroup>
 	)
 })

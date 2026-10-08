@@ -1,0 +1,39 @@
+import { createFileRoute, Outlet } from '@tanstack/react-router'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useCallback } from 'react'
+import { useDocumentTitle } from 'usehooks-ts'
+import { StandalonePageError } from '~/Components/StandalonePageError'
+import { TRPCConnectionStatus, useTRPCConnectionStatus } from '~/Hooks/useTRPCConnectionStatus'
+import { trpc } from '~/Resources/TRPC'
+
+export const Route = createFileRoute('/_standalone/emulator')({
+	component: RouteComponent,
+})
+
+function RouteComponent() {
+	const status = useTRPCConnectionStatus()
+
+	const emulatorPageConfig = useSubscription(trpc.surfaces.emulatorPageConfig.subscriptionOptions())
+
+	useDocumentTitle(
+		emulatorPageConfig.data?.installName && emulatorPageConfig.data.installName.length > 0
+			? `${emulatorPageConfig.data.installName} - Emulator (Bitfocus Companion)`
+			: 'Bitfocus Companion - Emulator'
+	)
+
+	const doRetry = useCallback(() => window.location.reload(), [])
+
+	return (
+		<div className="page-emulator-base">
+			{status.status === TRPCConnectionStatus.Connected || !emulatorPageConfig.data ? (
+				<Outlet />
+			) : (
+				<StandalonePageError
+					dataReady={false}
+					error={status.error || 'Lost connection to Companion'}
+					doRetry={doRetry}
+				/>
+			)}
+		</div>
+	)
+}

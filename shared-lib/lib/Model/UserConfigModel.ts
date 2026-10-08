@@ -1,21 +1,18 @@
-export interface UserConfigModel {
+import type { ResolvedButtonGraphicsDecoration } from './StyleModel.js'
+
+export type UserConfigModel = {
 	setup_wizard: number
 	detailed_data_collection: boolean
 
 	page_direction_flipped: boolean
 	page_plusminus: boolean
-	remove_topbar: boolean
+	buttons_decoration: ResolvedButtonGraphicsDecoration
+	buttons_status_icons: 'show' | 'none'
 
-	xkeys_enable: boolean
-	elgato_plugin_enable: boolean // Also disables local streamdeck
 	usb_hotplug: boolean
-	loupedeck_enable: boolean
-	mirabox_streamdock_enable: boolean
-	contour_shuttle_enable: boolean
-	vec_footpedal_enable: boolean
-	blackmagic_controller_enable: boolean
-	mystrix_enable: boolean
-	logitech_mx_console_enable: boolean
+	auto_enable_discovered_surfaces: boolean
+
+	satellite_subscriptions_enabled: boolean
 
 	pin_enable: boolean
 	link_lockouts: boolean
@@ -41,8 +38,6 @@ export interface UserConfigModel {
 
 	emberplus_enabled: boolean
 
-	videohub_panel_enabled: boolean
-
 	artnet_enabled: boolean
 	artnet_universe: number
 	artnet_channel: number
@@ -67,14 +62,14 @@ export interface UserConfigModel {
 	admin_password: string
 
 	gridSize: UserConfigGridSize
-	gridSizeInlineGrow: boolean
 	gridSizePromptGrow: boolean
 
 	installName: string
+	mdns_announcements_enabled: boolean
 	default_export_filename: string
 
-	/** Whether to run the mdns  */
-	discoveryEnabled: boolean
+	/** IANA timezone name (e.g. 'America/New_York') used for internal time variables and time-based triggers. Empty = system timezone. */
+	timezone: string
 
 	backups: BackupRulesConfig[]
 }

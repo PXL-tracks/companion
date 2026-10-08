@@ -1,14 +1,14 @@
+import { action, observable } from 'mobx'
 import type {
 	ClientDevicesListItem,
-	OutboundSurfaceInfo,
-	SurfacesUpdate,
-	OutboundSurfacesUpdate,
 	ClientSurfaceItem,
 	OutboundSurfaceCollection,
+	OutboundSurfaceInfo,
+	OutboundSurfacesUpdate,
+	SurfacesUpdate,
 } from '@companion-app/shared/Model/Surfaces.js'
-import { action, observable } from 'mobx'
-import { assertNever } from '~/Resources/util.js'
 import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
+import { assertNever } from '~/Resources/util.js'
 import { applyJsonPatchInPlace, updateObjectInPlace } from './ApplyDiffToMap'
 
 export class SurfacesStore {
@@ -81,15 +81,6 @@ export class SurfacesStore {
 				break
 		}
 	})
-
-	public getOutboundStreamDeckSurface = (address: string, port: number): OutboundSurfaceInfo | undefined => {
-		for (const surface of this.outboundSurfaces.values()) {
-			if (surface.type === 'elgato' && surface.address === address && (surface.port ?? 5343) === port) {
-				return surface
-			}
-		}
-		return undefined
-	}
 
 	public getSurfacesOverflowingBounds = (
 		bounds: UserConfigGridSize

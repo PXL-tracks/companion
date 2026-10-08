@@ -1,20 +1,15 @@
+import path from 'node:path'
+import { DatabaseSync, backup as SqliteBackup, type StatementSync } from 'node:sqlite'
 import fs from 'fs-extra'
-import path from 'path'
-import type { Database as SQLiteDB, Statement } from 'better-sqlite3'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 import LogController, { type Logger } from '../Log/Controller.js'
 import { showErrorMessage, showFatalError } from '../Resources/Util.js'
-import { createSqliteDatabase } from './Util.js'
 
 enum DatabaseStartupState {
 	Normal = 0,
 	Reset = 1,
 	RAM = 2,
 	Fatal = 3,
-}
-
-interface ITableRow {
-	id: string
-	value: string
 }
 
 /**
@@ -95,7 +90,7 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 	/**
 	 * The SQLite database
 	 */
-	public store!: SQLiteDB
+	public store!: DatabaseSync
 
 	/**
 	 * This needs to be called in the extending class
@@ -154,11 +149,10 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 	 */
 	private saveBackup(): void {
 		const timeBefore = performance.now()
-		this.store
-			?.backup(`${this.cfgBakFile}`)
+		SqliteBackup(this.store, `${this.cfgBakFile}`)
 			.then(() => {
 				// perform a flush of the WAL file. It may be a little aggressive for this to be a TRUNCATE vs FULL, but it ensures the WAL doesn't grow infinitely
-				this.store.pragma('wal_checkpoint(TRUNCATE)')
+				this.store.exec('PRAGMA wal_checkpoint(TRUNCATE)')
 
 				const saveDuration = performance.now() - timeBefore
 
@@ -206,7 +200,7 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 	 */
 	protected startSQLite(): void {
 		if (this.cfgDir == ':memory:') {
-			this.store = createSqliteDatabase(this.cfgDir)
+			this.store = new DatabaseSync(this.cfgDir)
 			this.tableCache.clear()
 			this.create()
 			this.defaultTableView.get('test')
@@ -228,7 +222,7 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 
 							fs.moveSync(this.cfgFile, this.cfgCorruptFile)
 							this.logger.error(`${this.name} could not be parsed.  A copy has been saved to ${this.cfgCorruptFile}.`)
-						} catch (_e: any) {
+						} catch (_e) {
 							this.logger.error(`${this.name} could not be parsed.  A copy could not be saved.`)
 						}
 					} catch (err) {
@@ -247,9 +241,9 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 					this.logger.info(`Legacy ${this.cfgLegacyFile} exists.  Attempting migration to SQLite.`)
 					this.migrateFileToSqlite()
 					this.defaultTableView.get('test')
-				} catch (e: any) {
+				} catch (e) {
 					this.setStartupState(DatabaseStartupState.Reset)
-					this.logger.error(e.message)
+					this.logger.error(stringifyError(e))
 					this.startSQLiteWithDefaults()
 				}
 			} else {
@@ -260,13 +254,13 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 
 		if (!this.store) {
 			try {
-				this.store = createSqliteDatabase(':memory:')
+				this.store = new DatabaseSync(':memory:')
 				this.tableCache.clear()
 				this.setStartupState(DatabaseStartupState.RAM)
 				this.create()
 				this.defaultTableView.get('test')
 				this.loadDefaults()
-			} catch (_e: any) {
+			} catch (_e) {
 				this.setStartupState(DatabaseStartupState.Fatal)
 			}
 		}
@@ -293,10 +287,10 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 	}
 
 	#createDatabase(filename: string) {
-		const db = createSqliteDatabase(filename)
+		const db = new DatabaseSync(filename)
 
 		try {
-			db.pragma('journal_mode = WAL')
+			db.exec('PRAGMA journal_mode = WAL')
 		} catch (err) {
 			this.logger.warn(`Error setting journal mode: ${err}`)
 		}
@@ -321,9 +315,9 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 				this.store = this.#createDatabase(this.cfgFile)
 				this.tableCache.clear()
 				this.defaultTableView.get('test')
-			} catch (e: any) {
+			} catch (e) {
 				this.setStartupState(DatabaseStartupState.Reset)
-				this.logger.error(e.message)
+				this.logger.error(stringifyError(e))
 				this.startSQLiteWithDefaults()
 			}
 		} else {
@@ -340,7 +334,7 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 			if (fs.existsSync(this.cfgFile)) {
 				fs.rmSync(this.cfgFile)
 			}
-		} catch (_e: any) {
+		} catch (_e) {
 			// Ignore, we are about to replace the file anyway
 		} finally {
 			try {
@@ -349,8 +343,8 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 				this.create()
 				this.defaultTableView.get('test')
 				this.loadDefaults()
-			} catch (e: any) {
-				this.logger.error(e.message)
+			} catch (e) {
+				this.logger.error(stringifyError(e))
 			}
 		}
 	}
@@ -370,6 +364,112 @@ export abstract class DataStoreBase<TDefaultTableContent extends Record<string, 
 
 		return newTable
 	}
+
+	/**
+	 * Check if a table exists in the database
+	 * @param tableName - the name of the table to check
+	 * @returns true if the table exists, false otherwise
+	 */
+	public tableExists(tableName: string): boolean {
+		if (!tableName || typeof tableName !== 'string') throw new Error('Invalid table name')
+
+		try {
+			const result = this.store
+				.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+				.get(tableName) as { name: string } | undefined
+
+			return !!result
+		} catch (e) {
+			this.logger.warn(`Error checking if table ${tableName} exists: ${stringifyError(e)}`)
+			return false
+		}
+	}
+
+	/**
+	 * Rename a table in the database with proper edge case handling.
+	 *
+	 * **IMPORTANT**: This method should only be called during database upgrades (before any controllers
+	 * are initialized). DataStoreTableView objects contain prepared SQL statements with baked-in table names.
+	 * If any code has cached references to DataStoreTableView objects for the old table name, those
+	 * references will break after the rename. During startup upgrades this is safe because the cache is
+	 * empty and no external code has obtained table views yet.
+	 *
+	 * Edge cases handled:
+	 * - If both tables exist and have rows, their contents are merged (old table takes precedence on conflicts)
+	 * - If the new table does not exist or is empty, it is replaced by the old table
+	 * - If the old table doesn't exist, the operation is skipped
+	 *
+	 * @param oldTableName - the current name of the table
+	 * @param newTableName - the new name for the table
+	 */
+	public renameTable(oldTableName: string, newTableName: string): void {
+		if (!oldTableName || typeof oldTableName !== 'string') throw new Error('Invalid old table name')
+		if (!newTableName || typeof newTableName !== 'string') throw new Error('Invalid new table name')
+
+		// Clear the old table from cache since it is no longer usable
+		this.tableCache.delete(oldTableName)
+
+		const oldTableExists = this.tableExists(oldTableName)
+		const newTableExists = this.tableExists(newTableName)
+
+		// If old table doesn't exist, nothing to do
+		if (!oldTableExists) {
+			this.logger.info(`Skipping table rename from "${oldTableName}" to "${newTableName}": old table does not exist`)
+			return
+		}
+
+		// If new table doesn't exist, simple rename
+		if (!newTableExists) {
+			this.logger.info(`Renaming table "${oldTableName}" to "${newTableName}"`)
+			this.store.prepare(`ALTER TABLE ${oldTableName} RENAME TO ${newTableName}`).run()
+			this.setDirty()
+			return
+		}
+
+		// Both tables exist - need to merge them
+		this.logger.info(`Merging table "${oldTableName}" into existing table "${newTableName}"`)
+
+		try {
+			// Get all rows from the old table
+			const oldRows = this.store.prepare(`SELECT id, value FROM ${oldTableName}`).all()
+
+			// Get existing IDs from the new table to avoid conflicts
+			const newTableIds = new Set<string>(
+				(this.store.prepare(`SELECT id FROM ${newTableName}`).all() as { id: string }[]).map((row) => row.id)
+			)
+
+			// Prepare insert statement for new table
+			const insertStmt = this.store.prepare(
+				`INSERT INTO ${newTableName} (id, value) VALUES (@id, @value) ON CONFLICT(id) DO UPDATE SET value = @value`
+			)
+
+			// Copy rows from old table to new table
+			// Using transaction for better performance and atomicity
+			this.store.prepare('BEGIN').run()
+			try {
+				for (const row of oldRows) {
+					insertStmt.run(row)
+				}
+
+				this.store.prepare('COMMIT').run()
+			} catch (e) {
+				this.store.prepare('ROLLBACK').run()
+				throw e
+			}
+
+			// Drop the old table
+			this.store.prepare(`DROP TABLE ${oldTableName}`).run()
+
+			this.logger.info(
+				`Successfully merged ${oldRows.length} rows from "${oldTableName}" into "${newTableName}" (${newTableIds.size} existing rows, ${oldRows.length - newTableIds.size} new rows added)`
+			)
+
+			this.setDirty()
+		} catch (e) {
+			this.logger.error(`Error merging tables "${oldTableName}" and "${newTableName}": ${stringifyError(e)}`)
+			throw e
+		}
+	}
 }
 
 type ValueIfJsonEncodable<T> = T extends number | { [key: string]: any } ? T : never
@@ -378,17 +478,17 @@ type ValueIfString<T> = T extends string ? T : never
 export class DataStoreTableView<TableContent extends Record<string, any>> {
 	readonly #logger: Logger
 
-	readonly #store: SQLiteDB
+	readonly #store: DatabaseSync
 	readonly tableName: string
 	readonly #triggerDirty: () => void
 
-	readonly #deleteByIdQuery: Statement<[{ id: string }], ITableRow>
-	readonly #emptyTableQuery: Statement<[], ITableRow>
-	readonly #getAllQuery: Statement<[], ITableRow>
-	readonly #getByIdQuery: Statement<[{ id: string }], ITableRow>
-	readonly #setByIdQuery: Statement<[{ id: string; value: string }], ITableRow>
+	readonly #deleteByIdQuery: StatementSync
+	readonly #emptyTableQuery: StatementSync
+	readonly #getAllQuery: StatementSync
+	readonly #getByIdQuery: StatementSync
+	readonly #setByIdQuery: StatementSync
 
-	constructor(logger: Logger, store: SQLiteDB, tableName: string, triggerDirty: () => void) {
+	constructor(logger: Logger, store: DatabaseSync, tableName: string, triggerDirty: () => void) {
 		this.#logger = logger.child({ source: tableName })
 		this.#store = store
 		this.tableName = tableName
@@ -431,8 +531,8 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 					out[record.id] = record.value
 				}
 			}
-		} catch (e: any) {
-			this.#logger.warn(`Error getting: ${e.message}`)
+		} catch (e) {
+			this.#logger.warn(`Error getting: ${stringifyError(e)}`)
 		}
 
 		return out
@@ -443,9 +543,9 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 
 		try {
 			const row = this.#getByIdQuery.get({ id: key })
-			return row?.value
-		} catch (e: any) {
-			this.#logger.warn(`Error getting ${key}: ${e.message}`)
+			return row?.value as string | undefined
+		} catch (e) {
+			this.#logger.warn(`Error getting ${key}: ${stringifyError(e)}`)
 			return undefined
 		}
 	}
@@ -460,8 +560,8 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 
 		try {
 			this.#setByIdQuery.run({ id: key, value: value })
-		} catch (e: any) {
-			this.#logger.warn(`Error updating ${key}: ${e.message}`)
+		} catch (e) {
+			this.#logger.warn(`Error updating ${key}: ${stringifyError(e)}`)
 		}
 
 		this.#triggerDirty()
@@ -479,8 +579,8 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 
 		try {
 			return JSON.parse(value)
-		} catch (e: any) {
-			this.#logger.warn(`Error parsing ${id}: ${e.message}`)
+		} catch (e) {
+			this.#logger.warn(`Error parsing ${id}: ${stringifyError(e)}`)
 			return undefined
 		}
 	}
@@ -504,8 +604,8 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 
 		try {
 			return JSON.parse(value)
-		} catch (e: any) {
-			this.#logger.warn(`Error parsing ${String(id)}: ${e.message}`)
+		} catch (e) {
+			this.#logger.warn(`Error parsing ${String(id)}: ${stringifyError(e)}`)
 			return defaultValue
 		}
 	}
@@ -562,8 +662,8 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 
 		try {
 			this.#deleteByIdQuery.run({ id })
-		} catch (e: any) {
-			this.#logger.warn(`Error deleting ${id}: ${e.message}`)
+		} catch (e) {
+			this.#logger.warn(`Error deleting ${id}: ${stringifyError(e)}`)
 		}
 
 		this.#triggerDirty()
@@ -577,8 +677,8 @@ export class DataStoreTableView<TableContent extends Record<string, any>> {
 
 		try {
 			this.#emptyTableQuery.run()
-		} catch (e: any) {
-			this.#logger.warn(`Error emptying: ${e.message}`)
+		} catch (e) {
+			this.#logger.warn(`Error emptying: ${stringifyError(e)}`)
 		}
 
 		this.#triggerDirty()

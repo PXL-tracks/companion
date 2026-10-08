@@ -1,30 +1,23 @@
-# PXL Tracks - Companion Fork
+# [Bitfocus Companion](https://companion.free)
 
-## Quick Start (Windows)
-
-```powershell
-mkdir C:\PXL\Tracks
-cd C:\PXL\Tracks
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/PXL-tracks/companion/pxl-stable/pxl-start.ps1" -OutFile "pxl-start.ps1"
-.\pxl-start.ps1
-```
-
-This will automatically clone, build, and start everything!
-
----
-
-# [Bitfocus Companion](https://bitfocus.io/companion)
-
-**Documentation**
+**User Documentation**
 
 - https://companion.free/user-guide/beta/getting-started/Installation
 
+**Developer Documentation**
+
+Bitfocus Companion is open-source software. If you would like to contribute to our project please check out the developer documentation.
+Slack is also the perfect place for asking questions, especially when you're getting started.
+
+- https://companion.free/for-developers/
+
 **Slack / Chat**
 
-- https://bfoc.us/ke7e9dqgaz
+- https://l.companion.free/q/78U0Kpbc9
 
-**Our website**
+**Our websites**
 
+- https://companion.free/
 - https://bitfocus.io/companion/
 
 **Bleeding edge builds**
@@ -39,7 +32,7 @@ For checking known bugs or reporting of potential bugs, please use the [issue sy
 
 ## Modules (Supported devices/software)
 
-- https://bitfocus.io/connections (600+!)
+- https://bitfocus.io/connections (700+!)
 
 ## Contributors
 

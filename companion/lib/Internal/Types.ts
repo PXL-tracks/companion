@@ -1,23 +1,38 @@
+import type { EventEmitter } from 'node:events'
+import type { SetOptional } from 'type-fest'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import type { ActionEntityModel, FeedbackEntityModel, FeedbackValue } from '@companion-app/shared/Model/EntityModel.js'
+import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import type { VariableDefinition, VariableValue } from '@companion-app/shared/Model/Variables.js'
+import type { CompanionFeedbackButtonStyleResult, CompanionOptionValues } from '@companion-module/base'
+import type { JsonValue } from '@companion-module/host'
+import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
 import type { VisitorReferencesCollectorVisitor } from '../Resources/Visitors/ReferencesCollector.js'
 import type { VisitorReferencesUpdaterVisitor } from '../Resources/Visitors/ReferencesUpdater.js'
-import type {
-	CompanionFeedbackButtonStyleResult,
-	CompanionOptionValues,
-	CompanionVariableValue,
-} from '@companion-module/base'
-import type { RunActionExtras, VariableDefinitionTmp } from '../Instance/Connection/ChildHandler.js'
-import type { SetOptional } from 'type-fest'
-import type { ActionEntityModel, FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import type { ActionRunner } from '../Controls/ActionRunner.js'
-import type { EventEmitter } from 'events'
+import type { VariablesAndExpressionParser } from '../Variables/VariablesAndExpressionParser.js'
 
-export interface FeedbackEntityModelExt extends FeedbackEntityModel {
+export interface FeedbackForInternalExecution {
 	controlId: string
 	location: ControlLocation | undefined
-	referencedVariables: string[] | null
+
+	id: string
+	definitionId: string
+
+	options: CompanionOptionValues
+}
+
+export interface ActionForInternalExecution {
+	// controlId: string
+	// location: ControlLocation | undefined
+
+	id: string
+	definitionId: string
+
+	options: CompanionOptionValues
+
+	rawEntity: ControlEntityInstance
 }
 
 export type InternalVisitor = VisitorReferencesCollectorVisitor | VisitorReferencesUpdaterVisitor
@@ -28,7 +43,7 @@ export type InternalVisitor = VisitorReferencesCollectorVisitor | VisitorReferen
 export interface FeedbackForVisitor {
 	id: string
 	type: string
-	options: CompanionOptionValues
+	options: ExpressionableOptionsObject
 }
 
 /**
@@ -37,15 +52,31 @@ export interface FeedbackForVisitor {
 export interface ActionForVisitor {
 	id: string
 	action: string
-	options: CompanionOptionValues
+	options: ExpressionableOptionsObject
 }
 
 export interface InternalModuleFragmentEvents {
 	checkFeedbacks: [...feedbackType: string[]]
 	checkFeedbacksById: [...feedbackIds: string[]]
 	regenerateVariables: []
-	setVariables: [variables: Record<string, CompanionVariableValue | undefined>]
+	setVariables: [variables: Record<string, VariableValue | undefined>]
 }
+
+/**
+ * Executing an internal action using an internal module fragment returns this
+ * if it handled the action.  The embedded result is the result of the action.
+ * (Note that the action definition must specify that it returns a result using
+ * `hasResult: true`, or the result will be ignored.)
+ */
+export type ActionResult = { result: JsonValue | undefined }
+
+/**
+ * The result of asking an internal module fragment to execute an action.
+ *
+ * If the fragment doesn't handle the action, this will be `null`.  Otherwise
+ * the result returned by the action will be stored in the `result` property.
+ */
+export type InternalActionResult = ActionResult | null
 
 export interface InternalModuleFragment extends EventEmitter<InternalModuleFragmentEvents> {
 	getActionDefinitions?: () => Record<string, InternalActionDefinition>
@@ -55,10 +86,10 @@ export interface InternalModuleFragment extends EventEmitter<InternalModuleFragm
 	 * @returns Whether the action was handled
 	 */
 	executeAction?(
-		action: ControlEntityInstance,
+		action: ActionForInternalExecution,
 		extras: RunActionExtras,
-		actionRunner: ActionRunner
-	): Promise<boolean> | boolean
+		parser: VariablesAndExpressionParser
+	): Promise<InternalActionResult> | InternalActionResult
 
 	/**
 	 * Perform an upgrade for an action
@@ -72,7 +103,8 @@ export interface InternalModuleFragment extends EventEmitter<InternalModuleFragm
 	 * Get an updated value for a feedback
 	 */
 	executeFeedback?: (
-		feedback: FeedbackEntityModelExt
+		feedback: FeedbackForInternalExecution,
+		parser: VariablesAndExpressionParser
 	) => CompanionFeedbackButtonStyleResult | boolean | ExecuteFeedbackResultWithReferences | void
 
 	feedbackUpgrade?: (feedback: FeedbackEntityModel, controlId: string) => FeedbackEntityModel | void
@@ -84,26 +116,38 @@ export interface InternalModuleFragment extends EventEmitter<InternalModuleFragm
 	 */
 	visitReferences(visitor: InternalVisitor, actions: ActionForVisitor[], feedbacks: FeedbackForVisitor[]): void
 
-	getVariableDefinitions?: () => VariableDefinitionTmp[]
+	getVariableDefinitions?: () => VariableDefinition[]
 	updateVariables?: () => void
-
-	onVariablesChanged?: (changedVariablesSet: Set<string>, fromControlId: string | null) => void
 }
 
 export interface ExecuteFeedbackResultWithReferences {
-	referencedVariables: string[]
-	value: CompanionFeedbackButtonStyleResult | CompanionVariableValue | undefined
+	referencedVariables: Iterable<string>
+	value: FeedbackValue | undefined
 }
 
 export type InternalActionDefinition = SetOptional<
 	Omit<
 		ClientEntityDefinition,
-		'entityType' | 'showInvert' | 'feedbackType' | 'feedbackStyle' | 'hasLifecycleFunctions'
+		| 'entityType'
+		| 'showInvert'
+		| 'feedbackType'
+		| 'feedbackStyle'
+		| 'hasLifecycleFunctions'
+		| 'feedbackAffectedProperties'
 	>,
-	'hasLearn' | 'learnTimeout' | 'showButtonPreview' | 'supportsChildGroups' | 'optionsToIgnoreForSubscribe'
+	| 'sortKey'
+	| 'hasLearn'
+	| 'learnTimeout'
+	| 'actionHasResult'
+	| 'showButtonPreview'
+	| 'supportsChildGroups'
+	| 'optionsToMonitorForInvalidations'
 >
 
 export type InternalFeedbackDefinition = SetOptional<
-	Omit<ClientEntityDefinition, 'entityType' | 'hasLifecycleFunctions' | 'optionsToIgnoreForSubscribe'>,
-	'hasLearn' | 'learnTimeout' | 'showButtonPreview' | 'supportsChildGroups'
+	Omit<
+		ClientEntityDefinition,
+		'entityType' | 'hasLifecycleFunctions' | 'optionsToMonitorForInvalidations' | 'actionHasResult'
+	>,
+	'sortKey' | 'hasLearn' | 'learnTimeout' | 'showButtonPreview' | 'supportsChildGroups' | 'feedbackAffectedProperties'
 >

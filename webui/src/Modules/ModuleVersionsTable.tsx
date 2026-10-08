@@ -1,31 +1,31 @@
-import React, { useCallback, useContext, useState } from 'react'
-import { CButton, CButtonGroup } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+	faCircleMinus,
 	faEyeSlash,
+	faFlask,
 	faPlus,
 	faQuestionCircle,
 	faSync,
-	faCircleMinus,
 	faTrash,
 	faWarning,
-	faFlask,
 } from '@fortawesome/free-solid-svg-icons'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime.js'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useState } from 'react'
+import semver from 'semver'
+import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import type { ClientModuleVersionInfo } from '@companion-app/shared/Model/ModuleInfo.js'
 import type {
 	ModuleStoreModuleInfoStore,
 	ModuleStoreModuleInfoVersion,
 } from '@companion-app/shared/Model/ModulesStore.js'
-import semver from 'semver'
 import { isSomeModuleApiVersionCompatible } from '@companion-app/shared/ModuleApiVersionCheck.js'
-import { ModuleVersionUsageIcon } from './ModuleVersionUsageIcon.js'
+import { Button, ButtonGroup } from '~/Components/Button'
 import { useTableVisibilityHelper, VisibilityButton } from '~/Components/TableVisibility.js'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ModuleVersionUsageIcon } from './ModuleVersionUsageIcon.js'
 
 dayjs.extend(relativeTime)
 
@@ -104,11 +104,11 @@ export const ModuleVersionsTable = observer(function ModuleVersionsTable({
 					<th>Version</th>
 					<th>&nbsp;</th>
 					<th colSpan={3} className="fit">
-						<CButtonGroup className="table-header-buttons">
+						<ButtonGroup className="table-header-buttons">
 							<VisibilityButton {...visibleVersions} keyId="availableStable" color="success" label="Stable" />
 							<VisibilityButton {...visibleVersions} keyId="availableBeta" color="warning" label="Beta" />
 							<VisibilityButton {...visibleVersions} keyId="availableDeprecated" color="primary" label="Deprecated" />
-						</CButtonGroup>
+						</ButtonGroup>
 					</th>
 				</tr>
 			</thead>
@@ -179,7 +179,7 @@ const ModuleVersionRow = observer(function ModuleVersionRow({
 
 	return (
 		<tr>
-			<td>
+			<td className="compact">
 				{installedInfo ? (
 					<ModuleUninstallButton
 						moduleType={moduleType}
@@ -217,7 +217,7 @@ const ModuleVersionRow = observer(function ModuleVersionRow({
 					</>
 				)}
 			</td>
-			<td>
+			<td className="compact">
 				<ModuleVersionUsageIcon matchingConnections={matchingConnections} isInstalled={!!installedInfo} />
 				{helpPath && (
 					<div className="float_right" onClick={doShowHelp}>
@@ -276,7 +276,7 @@ function ModuleUninstallButton({ moduleType, moduleId, versionId, disabled }: Mo
 	}, [uninstallModuleMutation, notifier, moduleType, moduleId, versionId])
 
 	return (
-		<CButton color="white" disabled={isRunningInstallOrUninstall || disabled} onClick={doRemove}>
+		<Button disabled={isRunningInstallOrUninstall || disabled} onClick={doRemove}>
 			{isRunningInstallOrUninstall ? (
 				<span title="Removing">
 					<FontAwesomeIcon icon={faSync} spin />
@@ -286,7 +286,7 @@ function ModuleUninstallButton({ moduleType, moduleId, versionId, disabled }: Mo
 					<FontAwesomeIcon icon={faTrash} />
 				</span>
 			)}
-		</CButton>
+		</Button>
 	)
 }
 
@@ -340,7 +340,7 @@ function ModuleInstallButton({ moduleType, moduleId, versionId, apiVersion, hasT
 	}
 
 	return (
-		<CButton color="white" disabled={isRunningInstallOrUninstall} onClick={doInstall}>
+		<Button disabled={isRunningInstallOrUninstall} onClick={doInstall}>
 			{isRunningInstallOrUninstall ? (
 				<span title="Installing">
 					<FontAwesomeIcon icon={faSync} />
@@ -350,6 +350,6 @@ function ModuleInstallButton({ moduleType, moduleId, versionId, apiVersion, hasT
 					<FontAwesomeIcon icon={faPlus} />
 				</span>
 			)}
-		</CButton>
+		</Button>
 	)
 }

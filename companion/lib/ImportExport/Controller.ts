@@ -9,43 +9,53 @@
  * this program.
  */
 
-import { upgradeImport } from '../Data/Upgrade.js'
-import yaml from 'yaml'
-import zlib from 'node:zlib'
+import { EventEmitter } from 'node:events'
+import path from 'node:path'
 import type express from 'express'
+import workerPool from 'workerpool'
+import z from 'zod'
+import type { SomeButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
 import type { ExportFullv6, ExportPageContentv6 } from '@companion-app/shared/Model/ExportModel.js'
-import type { AppInfo } from '../Registry.js'
 import {
-	type ImportOrResetType,
 	zodClientImportOrResetSelection,
 	type ClientImportObject,
-	type ClientPageInfo,
 	type ClientImportOrResetSelection,
+	type ClientPageInfo,
+	type ImportOrResetType,
 } from '@companion-app/shared/Model/ImportExport.js'
-import type { InstanceController } from '../Instance/Controller.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { VariablesController } from '../Variables/Controller.js'
+import type { RendererButtonStyle } from '@companion-app/shared/Model/Render.js'
+import type { SomeButtonGraphicsElement } from '@companion-app/shared/Model/StyleLayersModel.js'
+import { assertNever } from '@companion-app/shared/Util.js'
 import type { ControlsController } from '../Controls/Controller.js'
-import type { PageController } from '../Page/Controller.js'
-import type { SurfaceController } from '../Surface/Controller.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { InternalController } from '../Internal/Controller.js'
-import { ExportController } from './Export.js'
-import { FILE_VERSION } from './Constants.js'
-import { MultipartUploader } from '../Resources/MultipartUploader.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import { zodLocation } from '../Preview/Graphics.js'
-import z from 'zod'
-import { EventEmitter } from 'node:events'
-import { BackupController } from './Backups.js'
+import { pageDownElements } from '../Controls/ControlTypes/PageDown.js'
+import { pageNumberElements } from '../Controls/ControlTypes/PageNumber.js'
+import { pageUpElements } from '../Controls/ControlTypes/PageUp.js'
 import type { DataDatabase } from '../Data/Database.js'
+import { upgradeImport } from '../Data/Upgrade.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import { ConvertSomeButtonGraphicsElementForDrawing } from '../Graphics/ConvertGraphicsElements.js'
+import { PREVIEW_RENDER_SIZE } from '../Graphics/ImageResult.js'
+import type { InstanceController } from '../Instance/Controller.js'
+import type { InternalController } from '../Internal/Controller.js'
+import LogController from '../Log/Controller.js'
+import type { PageController } from '../Page/Controller.js'
+import { zodLocation } from '../Preview/Graphics.js'
+import type { AppInfo } from '../Registry.js'
+import { MultipartUploader } from '../Resources/MultipartUploader.js'
+import { isPackaged } from '../Resources/Util.js'
+import type { SurfaceController } from '../Surface/Controller.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import type { VariablesController } from '../Variables/Controller.js'
+import { BackupController } from './Backups.js'
+import { FILE_VERSION, MAX_IMPORT_FILE_SIZE } from './Constants.js'
+import { ExportController } from './Export.js'
 import { ImportController } from './Import.js'
+import type { ImportExportThreadMethods, ParseImportDataResult } from './ThreadMethods.js'
 import { find_smallest_grid_for_page } from './Util.js'
 
-const MAX_IMPORT_FILE_SIZE = 1024 * 1024 * 500 // 500MB. This is small enough that it can be kept in memory
-
 export class ImportExportController {
-	// readonly #logger = LogController.createLogger('ImportExport/Controller')
+	readonly #logger = LogController.createLogger('ImportExport/Controller')
 
 	readonly #controlsController: ControlsController
 	readonly #graphicsController: GraphicsController
@@ -59,40 +69,72 @@ export class ImportExportController {
 	readonly #exportController: ExportController
 	readonly #importController: ImportController
 
-	readonly #multipartUploader = new MultipartUploader<[string | null, ClientImportObject | null]>(
+	#pool = workerPool.pool(path.join(import.meta.dirname, isPackaged() ? './ImportExportThread.js' : './Thread.js'), {
+		minWorkers: 1,
+		maxWorkers: 1, // Only need one worker for import parsing
+		workerType: 'thread',
+		onCreateWorker: () => {
+			this.#logger.info('ImportExport worker created')
+			return undefined
+		},
+		onTerminateWorker: () => {
+			this.#logger.info('ImportExport worker terminated')
+		},
+	})
+
+	#poolExec = async <TKey extends keyof typeof ImportExportThreadMethods>(
+		key: TKey,
+		args: Parameters<(typeof ImportExportThreadMethods)[TKey]>,
+		transfer?: object[]
+	): Promise<ReturnType<(typeof ImportExportThreadMethods)[TKey]>> => {
+		return this.#pool.exec(key, args, {
+			transfer: transfer || [],
+		})
+	}
+
+	readonly #multipartUploader = new MultipartUploader<[string | null, ClientImportObject | null], null>(
 		'ImportExport/Controller',
 		MAX_IMPORT_FILE_SIZE,
-		async (_name, data, _updateProgress, sessionCtx) => {
-			let dataStr: string
+		async (_name, data, _userData, _updateProgress, sessionCtx) => {
+			// Extract ArrayBuffer from the Buffer for zero-copy transfer
+			// The buffer becomes detached/unusable in this thread after transfer
+			const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+
+			const mainThreadSendTime = performance.now()
+			this.#logger.info(`Import: Transferring ${arrayBuffer.byteLength} bytes to worker`)
+
+			let result: ParseImportDataResult
 			try {
-				dataStr = await new Promise((resolve, reject) => {
-					zlib.gunzip(data, (err, data) => {
-						if (err) reject(err)
-						else resolve(data?.toString() || dataStr)
-					})
-				})
-			} catch (_e) {
-				// Ignore, it is probably not compressed
-				dataStr = data.toString('utf-8')
+				result = await this.#poolExec('parseImportData', [arrayBuffer], [arrayBuffer])
+			} catch (e) {
+				this.#logger.error(`Import: Worker error: ${e}`)
+				return ['Worker error during import parsing', null]
 			}
 
-			let rawObject
-			try {
-				// YAML parser will handle JSON too
-				rawObject = yaml.parse(dataStr)
-			} catch (_e) {
-				return ['File is corrupted or unknown format', null]
+			const mainThreadReceiveTime = performance.now()
+
+			// Log detailed timing information
+			const { timing } = result
+			const totalMainThreadTime = mainThreadReceiveTime - mainThreadSendTime
+			const workerTotalTime = timing.workerEndTime - timing.workerStartTime
+			const gunzipTime = timing.gunzipEndTime - timing.gunzipStartTime
+			const parseTime = timing.parseEndTime - timing.parseStartTime
+			const ipcOverhead = totalMainThreadTime - workerTotalTime
+
+			this.#logger.info(
+				`Import: Parsing complete. ` +
+					`Total: ${totalMainThreadTime.toFixed(1)}ms, ` +
+					`Worker: ${workerTotalTime.toFixed(1)}ms (gunzip: ${gunzipTime.toFixed(1)}ms, parse: ${parseTime.toFixed(1)}ms), ` +
+					`IPC overhead: ${ipcOverhead.toFixed(1)}ms`
+			)
+
+			if (result.error) {
+				return [result.error, null]
 			}
 
-			if (rawObject.version > FILE_VERSION) {
-				return ['File was saved with a newer unsupported version of Companion', null]
-			}
+			const rawObject = result.data
 
-			if (rawObject.type !== 'full' && rawObject.type !== 'page' && rawObject.type !== 'trigger_list') {
-				return ['Unknown import type', null]
-			}
-
-			let importObject = upgradeImport(rawObject)
+			let importObject = upgradeImport(rawObject, this.#userConfigController.getAll())
 
 			// fix any db instances missing the upgradeIndex property
 			if (importObject.instances) {
@@ -131,15 +173,18 @@ export class ImportExportController {
 				buttons: 'pages' in importObject,
 				customVariables: importContainsKey('custom_variables'),
 				expressionVariables: importContainsKey('expressionVariables'),
-				surfaces: importContainsKey('surfaces') || importContainsKey('surfaceGroups'),
+				surfacesKnown: importContainsKey('surfaces') || importContainsKey('surfaceGroups'),
+				surfacesInstances: importContainsKey('surfaceInstances'),
+				surfacesRemote: importContainsKey('surfacesRemote'),
 				triggers: null,
+				imageLibrary: importContainsKey('imageLibrary'),
 			}
 
 			for (const [connectionId, connectionConfig] of Object.entries(importObject.instances || {})) {
 				if (!connectionConfig || connectionId === 'internal' || connectionId === 'bitfocus-companion') continue
 
 				clientObject.connections[connectionId] = {
-					moduleId: connectionConfig.instance_type,
+					moduleId: connectionConfig.moduleId,
 					moduleVersionId: connectionConfig.moduleVersionId ?? null,
 					label: connectionConfig.label,
 					sortOrder: connectionConfig.sortOrder,
@@ -177,7 +222,8 @@ export class ImportExportController {
 
 			// rest is done from browser
 			return [null, clientObject]
-		}
+		},
+		z.null()
 	)
 
 	/**
@@ -214,6 +260,7 @@ export class ImportExportController {
 			appInfo,
 			apiRouter,
 			controls,
+			graphics,
 			instance,
 			page.store,
 			surfaces,
@@ -301,7 +348,7 @@ export class ImportExportController {
 					const importObject = ctx.pendingImport?.object
 					if (!importObject) return null
 
-					let importPage
+					let importPage: ExportPageContentv6 | undefined
 					if (importObject.type === 'page') {
 						importPage = importObject.page
 					} else if (importObject.type === 'full') {
@@ -312,11 +359,50 @@ export class ImportExportController {
 					const controlObj = importPage.controls?.[input.location.row]?.[input.location.column]
 					if (!controlObj) return null
 
-					const res = await this.#graphicsController.drawPreview({
-						...controlObj.style,
-						style: controlObj.type,
-					})
-					return res?.style ? (res?.asDataUrl ?? null) : null
+					const controlObjLayered = controlObj as SomeButtonModel
+
+					let drawType: RendererButtonStyle['drawType']
+					let rawElements: SomeButtonGraphicsElement[]
+					switch (controlObjLayered.type) {
+						case 'button-layered':
+							drawType = 'button'
+							rawElements = controlObjLayered.style.layers
+							break
+						case 'pagenum':
+							drawType = 'pagenum'
+							rawElements = structuredClone(pageNumberElements)
+							break
+						case 'pageup':
+							drawType = 'pageup'
+							rawElements = structuredClone(pageUpElements)
+							break
+						case 'pagedown':
+							drawType = 'pagedown'
+							rawElements = structuredClone(pageDownElements)
+							break
+						default:
+							assertNever(controlObjLayered)
+							return null
+					}
+
+					const parser = this.#variablesController.values.createVariablesAndExpressionParser(null, null, null)
+
+					// Compute the new drawing
+					const { elements } = await ConvertSomeButtonGraphicsElementForDrawing(
+						this.#instancesController.definitions,
+						parser,
+						this.#graphicsController.renderPixelBuffers.bind(this.#graphicsController),
+						rawElements,
+						new Map(),
+						true,
+						null, // Future: we should be able to resolve references within this import ui, but it needs some thought on how to cache and resolve cross-page references
+						null,
+						null
+					)
+
+					const res = await this.#graphicsController.drawPreview(drawType, elements)
+					if (!res?.style) return null
+					return await res.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
 				}),
 
 			importSinglePage: publicProcedure
@@ -405,7 +491,7 @@ export class ImportExportController {
 							Object.values(config).some((val) => val === 'unchanged') ||
 							Object.values(config.surfaces).some((val) => val === 'unchanged')
 
-						console.log(
+						this.#logger.info(
 							`Performing full import: ${isPartialReset ? 'Partial Reset' : 'Full Reset'} Config: ${JSON.stringify(config)}`
 						)
 						const data = ctx.pendingImport?.object
@@ -417,11 +503,11 @@ export class ImportExportController {
 						await this.#reset(config)
 
 						// Perform the import
-						this.#importController.importFull(data, config)
+						await this.#importController.importFull(data, config)
 
 						// trigger startup triggers to run
 						setImmediate(() => {
-							this.#controlsController.triggers.emit('startup')
+							this.#controlsController.triggerEvents.emit('startup')
 						})
 					})
 				}),
@@ -472,6 +558,18 @@ export class ImportExportController {
 			await this.#surfacesController.reset()
 		}
 
+		if (shouldReset(config.surfaces.instances)) {
+			await this.#instancesController.deleteAllSurfaceInstances(true)
+
+			if (!isImporting(config.surfaces.instances)) {
+				this.#instancesController.createDefaultSurfaceInstances()
+			}
+		}
+
+		if (shouldReset(config.surfaces.remote)) {
+			this.#surfacesController.outbound.reset()
+		}
+
 		if (shouldReset(config.triggers)) {
 			for (const [controlId, control] of controls.entries()) {
 				if (control.type === 'trigger') {
@@ -497,6 +595,11 @@ export class ImportExportController {
 
 		if (shouldReset(config.userconfig)) {
 			this.#userConfigController.reset()
+		}
+
+		if (shouldReset(config.imageLibrary)) {
+			// Reset image library
+			this.#graphicsController.imageLibrary.resetImageLibrary()
 		}
 
 		return 'ok'

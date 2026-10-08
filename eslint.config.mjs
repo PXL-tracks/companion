@@ -1,13 +1,13 @@
 // @ts-check
 
-import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 import eslint from '@eslint/js'
+import pluginQuery from '@tanstack/eslint-plugin-query'
 import neslint from 'eslint-plugin-n'
-import tseslint from 'typescript-eslint'
+import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 import reacteslint from 'eslint-plugin-react'
 import hookseslint from 'eslint-plugin-react-hooks'
 import reactRefreshEslint from 'eslint-plugin-react-refresh'
-import pluginQuery from '@tanstack/eslint-plugin-query'
+import tseslint from 'typescript-eslint'
 
 export default [
 	// setup the parser first
@@ -42,6 +42,8 @@ export default [
 				{ argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', varsIgnorePattern: '^_(.+)' },
 			],
 			'no-extra-semi': 'off',
+			'no-useless-assignment': 'off',
+			'preserve-caught-error': 'off', // Future: Maybe this should be enabled?
 			// 'n/no-unsupported-features/es-syntax': ['error', { ignores: ['modules'] }],
 			'no-use-before-define': 'off',
 			'no-warning-comments': ['error', { terms: ['nocommit', '@nocommit', '@no-commit'] }],
@@ -118,6 +120,32 @@ export default [
 					allowModules: ['@companion-app/shared', '@companion-module/base', 'type-fest'],
 				},
 			],
+			'n/prefer-node-protocol': 'error',
+			'n/no-unsupported-features/node-builtins': [
+				'error',
+				{
+					version: 'current',
+					ignores: ['sqlite'],
+				},
+			],
+		},
+	},
+	{
+		files: ['launcher/**/*.ts', 'launcher/**/*.js', 'shared-lib/**/*.ts', 'shared-lib/**/*.js'],
+		rules: {
+			'n/prefer-node-protocol': 'error',
+		},
+	},
+	{
+		files: ['config-tool/**/*.ts'],
+		rules: {
+			// Confusing import issues currently
+			'n/no-missing-import': [
+				'error',
+				{
+					allowModules: ['@companion-app/shared'],
+				},
+			],
 		},
 	},
 
@@ -146,9 +174,12 @@ export default [
 			'webui/public/_deps/**/*',
 			'webui/post-install.ts',
 			'.yarnrc.yml',
+			'companion/generated/**/*',
+			'companion/lib/Service/Satellite/SatelliteSurfaceManifestSchema.ts',
 			// TMP
 			'companion/lib/Cloud/**/*',
 			'companion/test/**/*',
+			'config-tool/test/**/*',
 			'webui/test/**/*',
 			'.cache/*',
 		],
@@ -178,8 +209,20 @@ export default [
 			react: reacteslint,
 		},
 		rules: {
+			'import/no-unresolved': 'off',
 			...hookseslint.configs.recommended.rules,
-			'react-refresh/only-export-components': 'warn',
+			'react-refresh/only-export-components': [
+				'warn',
+				{
+					extraHOCs: [
+						// tanstack router
+						'createFileRoute',
+						'createRootRoute',
+						// mobx
+						'observer',
+					],
+				},
+			],
 			'@typescript-eslint/only-throw-error': [
 				'error',
 				{

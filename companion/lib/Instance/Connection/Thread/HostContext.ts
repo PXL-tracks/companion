@@ -1,0 +1,366 @@
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
+import { EntityModelType, isValidFeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
+import type {
+	SharedUdpSocketMessageJoin,
+	SharedUdpSocketMessageLeave,
+	SharedUdpSocketMessageSend,
+} from '@companion-module/base/host-api'
+import {
+	createModuleLogger,
+	type CompanionAdvancedFeedbackResult,
+	type CompanionGraphicsCompositeElementDefinitions,
+	type CompanionPresetDefinitions,
+	type CompanionPresetSection,
+	type CompanionRecordedAction,
+	type CompanionVariableValue,
+	type Complete,
+	type HostActionDefinition,
+	type HostFeedbackDefinition,
+	type HostFeedbackValue,
+	type HostVariableDefinition,
+	type HostVariableValue,
+	type InstanceStatus,
+	type ModuleHostContext,
+	type OSCSomeArguments,
+	type SomeCompanionFeedbackInputField,
+} from '@companion-module/host'
+import type { CompositeElementDefinition } from '../../Definitions.js'
+import type { EncodedOSCArgument, ModuleChildIpcWrapper, RecordActionMessage } from '../IpcTypesNew.js'
+import { VariableValueBatcher } from '../VariableValueBatcher.js'
+import { translateEntityInputFields } from './ConfigFields.js'
+import { ConvertPresetDefinitions } from './Presets.js'
+import { ConvertLayerPresetElements } from './PresetsLayered.js'
+
+/**
+ * The context of methods and properties provided to the surfaces, which they can use to report events or make requests.
+ */
+export class HostContext<TConfig, TSecrets> implements ModuleHostContext<TConfig, TSecrets> {
+	readonly #logger = createModuleLogger('HostContext')
+	readonly #ipcWrapper: ModuleChildIpcWrapper
+
+	readonly #connectionId: string
+	readonly #currentUpgradeIndex: number
+
+	/**
+	 * The `affectedProperties` most recently declared by each feedback definition (keyed by feedback id).
+	 * Retained from `setFeedbackDefinitions` so that `setPresetDefinitions` can limit the style overrides it
+	 * generates for advanced feedbacks to the properties the feedback declares. Empty until the module reports
+	 * its feedbacks, which it is free to do after reporting its presets - hence `#lastReportedPresets` below.
+	 */
+	#feedbackAffectedProperties: ReadonlyMap<string, string[] | undefined> = new Map()
+
+	/**
+	 * The raw presets from the module's last `setPresetDefinitions` call, retained so they can be re-converted
+	 * if the feedback definitions change afterwards. A module is free to report its presets before its
+	 * feedbacks; without this, those presets would keep the unrestricted style overrides that were generated
+	 * while the `affectedProperties` were still unknown.
+	 */
+	#lastReportedPresets: { sections: CompanionPresetSection[]; presets: CompanionPresetDefinitions } | null = null
+
+	/**
+	 * Coalesce variable value updates before sending them over IPC, to avoid a flood of tiny messages
+	 * when a module pushes values very frequently (e.g. a stopwatch).
+	 */
+	readonly #variableValuesBatcher = new VariableValueBatcher<HostVariableValue>((values) =>
+		this.#ipcWrapper.sendWithNoCb('setVariableValues', { newValues: values })
+	)
+
+	constructor(ipcWrapper: ModuleChildIpcWrapper, connectionId: string, currentUpgradeIndex: number) {
+		this.#ipcWrapper = ipcWrapper
+		this.#connectionId = connectionId
+		this.#currentUpgradeIndex = currentUpgradeIndex
+	}
+
+	/** The connection status has changed */
+	setStatus(status: InstanceStatus, message: string | null): void {
+		this.#ipcWrapper.sendWithNoCb('set-status', { status, message })
+	}
+	/** The actions available in the connection have changed */
+	setActionDefinitions(rawActions: HostActionDefinition[]): void {
+		const actions: Record<string, ClientEntityDefinition> = {}
+
+		for (const rawAction of rawActions) {
+			actions[rawAction.id] = {
+				entityType: EntityModelType.Action,
+				label: rawAction.name,
+				sortKey: rawAction.sortName ? String(rawAction.sortName) : null,
+				description: rawAction.description,
+				options: translateEntityInputFields(rawAction.options || [], EntityModelType.Action),
+				optionsToMonitorForInvalidations: rawAction.optionsToMonitorForSubscribe || null,
+				hasLifecycleFunctions: !!rawAction.hasLifecycleFunctions,
+				hasLearn: !!rawAction.hasLearn,
+				learnTimeout: rawAction.learnTimeout,
+
+				actionHasResult: !!rawAction.hasResult,
+
+				showInvert: false,
+				showButtonPreview: false,
+				supportsChildGroups: [],
+
+				feedbackType: null,
+				feedbackStyle: undefined,
+				feedbackAffectedProperties: undefined,
+				feedbackDisableStyleOverrides: false,
+
+				optionsSupportExpressions: true,
+			} satisfies Complete<ClientEntityDefinition>
+		}
+
+		this.#ipcWrapper.sendWithNoCb('setActionDefinitions', { actions })
+	}
+	/** The feedbacks available in the connection have changed */
+	setFeedbackDefinitions(rawFeedbacks: HostFeedbackDefinition[]): void {
+		const feedbacks: Record<string, ClientEntityDefinition> = {}
+		const affectedProperties = new Map<string, string[] | undefined>()
+
+		for (const rawFeedback of rawFeedbacks) {
+			affectedProperties.set(rawFeedback.id, rawFeedback.affectedProperties)
+
+			if (!isValidFeedbackEntitySubType(rawFeedback.type)) continue
+
+			feedbacks[rawFeedback.id] = {
+				entityType: EntityModelType.Feedback,
+				label: rawFeedback.name,
+				sortKey: rawFeedback.sortName ? String(rawFeedback.sortName) : null,
+				description: rawFeedback.description,
+				options: translateEntityInputFields(rawFeedback.options || [], EntityModelType.Feedback),
+				optionsToMonitorForInvalidations: null,
+				feedbackType: rawFeedback.type,
+				feedbackStyle: rawFeedback.defaultStyle,
+				feedbackAffectedProperties: rawFeedback.affectedProperties,
+				feedbackDisableStyleOverrides: false,
+				hasLifecycleFunctions: true, // Feedbacks always have lifecycle functions
+				hasLearn: !!rawFeedback.hasLearn,
+				learnTimeout: rawFeedback.learnTimeout,
+				showInvert: rawFeedback.showInvert ?? shouldShowInvertForFeedback(rawFeedback.options || []),
+
+				actionHasResult: undefined,
+
+				showButtonPreview: false,
+				supportsChildGroups: [],
+
+				optionsSupportExpressions: true,
+			} satisfies Complete<ClientEntityDefinition>
+		}
+
+		const affectedPropertiesChanged = !areAffectedPropertiesEqual(this.#feedbackAffectedProperties, affectedProperties)
+		this.#feedbackAffectedProperties = affectedProperties
+
+		this.#ipcWrapper.sendWithNoCb('setFeedbackDefinitions', { feedbacks })
+
+		// The style overrides generated for the presets were derived from the previous `affectedProperties`,
+		// so they must be rebuilt against the new ones.
+		if (affectedPropertiesChanged && this.#lastReportedPresets) {
+			this.#sendPresetDefinitions(this.#lastReportedPresets.sections, this.#lastReportedPresets.presets)
+		}
+	}
+	/** The variables available in the connection have changed */
+	setVariableDefinitions(definitions: HostVariableDefinition[], values: HostVariableValue[]): void {
+		this.#ipcWrapper.sendWithNoCb('setVariableDefinitions', {
+			variables: definitions.map((d) => ({ name: d.id, description: d.name })),
+			newValues: values,
+		})
+	}
+	/** The presets provided by the connection have changed */
+	setPresetDefinitions(rawSections: CompanionPresetSection[], rawPresets: CompanionPresetDefinitions): void {
+		this.#lastReportedPresets = { sections: rawSections, presets: rawPresets }
+
+		this.#sendPresetDefinitions(rawSections, rawPresets)
+	}
+
+	/** Convert the given raw presets against the current feedback definitions, and report them to the host */
+	#sendPresetDefinitions(rawSections: CompanionPresetSection[], rawPresets: CompanionPresetDefinitions): void {
+		const { presets, uiPresets } = ConvertPresetDefinitions(
+			this.#logger,
+			this.#connectionId,
+			this.#currentUpgradeIndex,
+			rawSections,
+			rawPresets,
+			this.#feedbackAffectedProperties
+		)
+
+		this.#ipcWrapper.sendWithNoCb('setPresetDefinitions', {
+			presets: presets,
+			uiPresets: uiPresets,
+		})
+	}
+	/** The composite graphics elements provided by the connection have changed */
+	setCompositeElementDefinitions(compositeElements: CompanionGraphicsCompositeElementDefinitions): void {
+		const convertedElements: CompositeElementDefinition[] = []
+
+		for (const [id, rawElement] of Object.entries(compositeElements)) {
+			if (!rawElement) continue
+			convertedElements.push({
+				id,
+				name: rawElement.name,
+				description: rawElement.description,
+				options: translateEntityInputFields(rawElement.options || [], EntityModelType.Feedback),
+				elements: ConvertLayerPresetElements(
+					this.#logger,
+					this.#connectionId,
+					undefined,
+					rawElement.elements || [],
+					true // Force new unique IDs for elements within composite definitions
+				).slice(
+					1 // Crop off the canvas element
+				),
+			} satisfies Complete<CompositeElementDefinition>)
+		}
+
+		this.#ipcWrapper.sendWithNoCb('setCompositeElementDefinitions', {
+			definitions: convertedElements,
+		})
+	}
+	/** The connection has some new values for variables */
+	setVariableValues(values: HostVariableValue[]): void {
+		this.#variableValuesBatcher.add(values)
+	}
+
+	/**
+	 * Tear down the context. Called when the connection is being destroyed, to release any pending timers
+	 * (e.g. the batched variable value flush) so the module thread can exit cleanly.
+	 */
+	destroy(): void {
+		this.#variableValuesBatcher.destroy()
+	}
+
+	/** The connection has some new values for feedbacks it is running */
+	updateFeedbackValues(values: HostFeedbackValue[]): void {
+		// Transform advanced feedback imageBuffers from Uint8Array to base64 strings, to make them json serializable
+		const safeValues: HostFeedbackValue[] = values.map((val) => {
+			if (val.feedbackType === 'advanced' && val.value && typeof val.value === 'object') {
+				const valueObject = val.value as CompanionAdvancedFeedbackResult
+				if ('imageBuffer' in valueObject && valueObject.imageBuffer) {
+					const imageBuffer = valueObject.imageBuffer as unknown // Do some type trickery, as the types say it can't be a Buffer, but we want to support that for now
+					if (imageBuffer instanceof Uint8Array) {
+						return {
+							...val,
+							value: {
+								...valueObject,
+								// Backwards compatibility fixup, ensure the imageBuffer is a string
+								imageBuffer: imageBuffer.toBase64(),
+							},
+						}
+					} else {
+						return val
+					}
+				} else {
+					return val
+				}
+			} else {
+				return val
+			}
+		})
+
+		this.#ipcWrapper.sendWithNoCb('updateFeedbackValues', { values: safeValues })
+	}
+	/** The connection has updated its config, which should be persisted */
+	saveConfig(newConfig: TConfig | undefined, newSecrets: TSecrets | undefined): void {
+		this.#ipcWrapper.sendWithNoCb('saveConfig', { config: newConfig, secrets: newSecrets })
+	}
+	/** Send an OSC message from the default osc listener in companion */
+	sendOSC(host: string, port: number, path: string, args: OSCSomeArguments): void {
+		const encodedArgs: EncodedOSCArgument[] = []
+
+		if (args !== undefined && args !== null) {
+			// Simplify as an array
+			const argsArr = !Array.isArray(args) ? [args] : args
+
+			for (const arg of argsArr) {
+				if (typeof arg === 'string') {
+					encodedArgs.push({ type: 's', value: arg })
+				} else if (typeof arg === 'number') {
+					encodedArgs.push({ type: 'f', value: arg })
+				} else if (arg instanceof Uint8Array) {
+					// Future: use native toBase64 when available
+					encodedArgs.push({ type: 'b', value: arg.toBase64() })
+				} else if (arg && typeof arg === 'object') {
+					if (arg.type === 's' || arg.type === 'f' || arg.type === 'i') {
+						encodedArgs.push(arg)
+					} else if (arg.type === 'b' && arg.value instanceof Uint8Array) {
+						// Future: use native toBase64 when available
+						encodedArgs.push({ type: 'b', value: arg.value.toBase64() })
+					} else {
+						throw new Error(`Unsupported OSC argument type: ${JSON.stringify(arg)}`)
+					}
+				} else {
+					throw new Error(`Unsupported OSC argument type: ${arg}`)
+				}
+			}
+		}
+
+		this.#ipcWrapper.sendWithNoCb('send-osc', { host, port, path, args: encodedArgs })
+	}
+	/** When the action-recorder is running, the module has recorded an action to add to the recorded stack */
+	recordAction(action: CompanionRecordedAction, uniquenessId: string | undefined): void {
+		this.#ipcWrapper.sendWithNoCb('recordAction', {
+			uniquenessId: uniquenessId || null,
+			actionId: action.actionId,
+			options: action.options,
+			delay: action.delay,
+		} satisfies Complete<RecordActionMessage>)
+	}
+	/**
+	 * The connection has a new value for a custom variable
+	 * Note: This should only be used by a few internal modules, it is not intended for general use
+	 */
+	setCustomVariable(controlId: string, customVariableId: string, value: CompanionVariableValue | undefined): void {
+		this.#ipcWrapper.sendWithNoCb('setCustomVariable', { controlId, customVariableId, value })
+	}
+
+	async sharedUdpSocketJoin(msg: SharedUdpSocketMessageJoin): Promise<string> {
+		return this.#ipcWrapper.sendWithCb('sharedUdpSocketJoin', {
+			family: msg.family,
+			portNumber: msg.portNumber,
+		})
+	}
+	async sharedUdpSocketLeave(msg: SharedUdpSocketMessageLeave): Promise<void> {
+		await this.#ipcWrapper.sendWithCb('sharedUdpSocketLeave', { handleId: msg.handleId })
+	}
+	async sharedUdpSocketSend(msg: SharedUdpSocketMessageSend): Promise<void> {
+		await this.#ipcWrapper.sendWithCb('sharedUdpSocketSend', {
+			handleId: msg.handleId,
+			message: msg.message.toString('base64'),
+			address: msg.address,
+			port: msg.port,
+		})
+	}
+}
+
+function shouldShowInvertForFeedback(options: SomeCompanionFeedbackInputField[]): boolean {
+	for (const option of options) {
+		if (option.type === 'checkbox' && (option.id === 'invert' || option.id === 'inverted')) {
+			// It looks like there is already a matching field
+			return false
+		}
+	}
+
+	// Nothing looked to be a user defined invert field
+	return true
+}
+
+/**
+ * Whether two `affectedProperties` maps describe the same set of limits, so that an unchanged report of the
+ * feedback definitions doesn't needlessly rebuild (and re-report) the presets.
+ */
+function areAffectedPropertiesEqual(
+	a: ReadonlyMap<string, string[] | undefined>,
+	b: ReadonlyMap<string, string[] | undefined>
+): boolean {
+	if (a.size !== b.size) return false
+
+	for (const [id, aProperties] of a) {
+		if (!b.has(id)) return false
+
+		const bProperties = b.get(id)
+		if (aProperties === undefined || bProperties === undefined) {
+			if (aProperties !== bProperties) return false
+			continue
+		}
+
+		if (aProperties.length !== bProperties.length) return false
+		if (aProperties.some((property, i) => property !== bProperties[i])) return false
+	}
+
+	return true
+}

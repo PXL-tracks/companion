@@ -1,14 +1,14 @@
-import React, { useContext, useMemo } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { observer } from 'mobx-react-lite'
-import { useNavigate } from '@tanstack/react-router'
-import { makeAbsolutePath } from '~/Resources/util.js'
-import { AddInstancePanel } from '~/Instances/AddInstancePanel.js'
-import type { AddInstanceService } from '~/Instances/AddInstanceService'
+import { useContext, useMemo } from 'react'
+import { makeLabelSafe } from '@companion-app/shared/Label.js'
 import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
 import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { AddInstancePanel } from '~/Instances/AddInstancePanel.js'
+import type { AddInstanceService } from '~/Instances/AddInstanceService'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { makeAbsolutePath } from '~/Resources/util.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore'
-import { makeLabelSafe } from '@companion-app/shared/Label.js'
 
 export const AddConnectionsPanel = observer(function AddConnectionsPanel() {
 	const service = useAddConnectionService()
@@ -17,20 +17,26 @@ export const AddConnectionsPanel = observer(function AddConnectionsPanel() {
 		<AddInstancePanel
 			service={service}
 			title="Add New Connection"
-			description={(storeCount) =>
-				storeCount > 0 ? (
+			helpAction="/user-guide/config/connections#adding-a-connection"
+			description={(moduleCount) =>
+				moduleCount > 0 ? (
 					<>
 						<div className="intro-text">
 							<p className="mb-2">
-								<strong>Companion supports over {storeCount} different devices</strong> and the list grows every day.
+								<strong>Companion supports over {moduleCount} different devices</strong>, and the list grows every day.
 							</p>
 						</div>
 						<div>
 							<span className="text-muted">
 								Can't find your device?{' '}
-								<a target="_blank" href={makeAbsolutePath('/user-guide/modules')} className="text-decoration-none">
+								<a
+									target="_blank"
+									href={makeAbsolutePath('/user-guide/config/modules')}
+									className="text-decoration-none"
+								>
 									Check our guidance for getting device support
 								</a>
+								.<br /> To import an offline module, go to the <Link to="/modules">Modules page</Link>.
 							</span>
 						</div>
 					</>
@@ -38,7 +44,7 @@ export const AddConnectionsPanel = observer(function AddConnectionsPanel() {
 					<div>
 						<strong>Connect to hundreds of devices</strong> with Companion modules. Ensure you have an internet
 						connection to search and install modules, or{' '}
-						<a target="_blank" href="https://user.bitfocus.io/download" className="text-decoration-none">
+						<a target="_blank" href="https://l.companion.free/q/lp68nsiV4" className="text-decoration-none">
 							download a module bundle
 						</a>
 					</div>

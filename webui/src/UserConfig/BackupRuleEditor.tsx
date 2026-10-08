@@ -1,14 +1,18 @@
-import React, { useCallback, useContext } from 'react'
-import { CAlert, CButton, CCol, CForm, CFormLabel, CFormSelect, CInputGroup } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTrash } from '@fortawesome/free-solid-svg-icons'
-import { RootAppStoreContext } from '../Stores/RootAppStore.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useId } from 'react'
 import type { BackupRulesConfig, PreviousBackupInfo } from '@companion-app/shared/Model/UserConfigModel.js'
-import { TextInputField } from '../Components/TextInputField.js'
-import { NumberInputField } from '../Components/NumberInputField.js'
-import { backupTypes } from './BackupConstants.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button } from '~/Components/Button'
+import { SimpleDropdownInputField } from '~/Components/DropdownInputFieldSimple.js'
+import { Form, FormLabel, InputGroup } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { NumberInputField } from '../Components/NumberInputField.js'
+import { TextInputField, TextInputFieldSimple } from '../Components/TextInputField.js'
+import { RootAppStoreContext } from '../Stores/RootAppStore.js'
+import { backupTypes } from './BackupConstants.js'
 
 interface PreviousBackupRowProps {
 	backup: PreviousBackupInfo
@@ -61,9 +65,9 @@ const PreviousBackupRow = observer(function PreviousBackupRow({ backup, ruleId }
 				</small>
 			</td>
 			<td className="no-wrap" style={{ verticalAlign: 'middle' }}>
-				<CButton color="danger" size="sm" onClick={deleteBackup} title="Delete backup">
+				<Button color="danger" size="sm" onClick={deleteBackup} title="Delete backup">
 					<FontAwesomeIcon icon={faTrash} />
-				</CButton>
+				</Button>
 			</td>
 		</tr>
 	)
@@ -105,30 +109,41 @@ export const BackupRuleEditor = observer(function BackupRuleEditor({ ruleId }: B
 			})
 	}, [runBackupNowMutation, notifier, ruleId])
 
+	const nameFieldId = useId()
+	const cronFieldId = useId()
+	const backupTypeFieldId = useId()
+	const backupPathFieldId = useId()
+	const backupNamePatternFieldId = useId()
+	const keepFieldId = useId()
+
 	// If no rule found, show message
 	if (!rule) {
-		return <CAlert color="warning">Backup rule not found</CAlert>
+		return <StaticAlert color="warning">Backup rule not found</StaticAlert>
 	}
 
 	const previousBackups = [...(rule.previousBackups || [])].sort((a, b) => b.createdAt - a.createdAt)
 
 	return (
-		<CForm className="p-3 row g-sm-2">
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Rule Name</CFormLabel>
-			<CCol className={`fieldtype-textinput`} sm={8}>
-				<CInputGroup>
-					<TextInputField value={rule.name} setValue={(value) => updateField('name', value)} />
-					<CButton color="warning" onClick={runNow}>
+		<Form className="p-3 row g-sm-2">
+			<FormLabel htmlFor={nameFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+				Rule Name
+			</FormLabel>
+			<Grid.Col className={`fieldtype-textinput`} sm={8}>
+				<InputGroup>
+					<TextInputFieldSimple id={nameFieldId} value={rule.name} setValue={(value) => updateField('name', value)} />
+					<Button color="warning" onClick={runNow}>
 						Run Now
-					</CButton>
-				</CInputGroup>
-			</CCol>
+					</Button>
+				</InputGroup>
+			</Grid.Col>
 
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Cron Schedule</CFormLabel>
-			<CCol className={`fieldtype-textinput`} sm={8}>
-				<TextInputField value={rule.cron} setValue={(value) => updateField('cron', value)} />
-			</CCol>
-			<CCol className={`fieldtype-textinput mt-0`} sm={{ offset: 4, span: 8 }}>
+			<FormLabel htmlFor={cronFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+				Cron Schedule
+			</FormLabel>
+			<Grid.Col className={`fieldtype-textinput`} sm={8}>
+				<TextInputFieldSimple id={cronFieldId} value={rule.cron} setValue={(value) => updateField('cron', value)} />
+			</Grid.Col>
+			<Grid.Col className={`fieldtype-textinput mt-0`} sm={{ offset: 4, span: 8 }}>
 				<small className="form-text text-muted">
 					Use cron syntax (e.g., "0 0 * * *" for daily at midnight). You can use{' '}
 					<a href="https://crontab.guru" target="_blank" rel="noopener noreferrer">
@@ -136,59 +151,69 @@ export const BackupRuleEditor = observer(function BackupRuleEditor({ ruleId }: B
 					</a>{' '}
 					to help you generate the correct syntax.
 				</small>
-			</CCol>
+			</Grid.Col>
 
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Backup Type</CFormLabel>
-			<CCol className={`fieldtype-textinput`} sm={8}>
-				<CFormSelect
+			<FormLabel htmlFor={backupTypeFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+				Backup Type
+			</FormLabel>
+			<Grid.Col className={`fieldtype-textinput`} sm={8}>
+				<SimpleDropdownInputField
+					id={backupTypeFieldId}
 					value={rule.backupType}
-					onChange={(e) => updateField('backupType', e.target.value as BackupRulesConfig['backupType'])}
-				>
-					{backupTypes.map((type) => (
-						<option key={type.value} value={type.value}>
-							{type.label}
-						</option>
-					))}
-				</CFormSelect>
-			</CCol>
+					setValue={(value) => updateField('backupType', value as BackupRulesConfig['backupType'])}
+					choices={backupTypes}
+				/>
+			</Grid.Col>
 			{rule.backupType === 'db' && (
-				<CCol sm={12}>
-					<CAlert color="warning" className="mt-2">
+				<Grid.Col sm={12}>
+					<StaticAlert color="warning" className="mt-2">
 						Raw backups are a direct copy of the database file. They cannot be restored through the web interface, but
 						contain more data than the default exports.
-					</CAlert>
-				</CCol>
+					</StaticAlert>
+				</Grid.Col>
 			)}
 
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Backup Path</CFormLabel>
-			<CCol className={`fieldtype-textinput`} sm={8}>
-				<TextInputField value={rule.backupPath} setValue={(value) => updateField('backupPath', value)} />
-			</CCol>
-			<CCol className={`fieldtype-textinput mt-0`} sm={{ offset: 4, span: 8 }}>
+			<FormLabel htmlFor={backupPathFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+				Backup Path
+			</FormLabel>
+			<Grid.Col className={`fieldtype-textinput`} sm={8}>
+				<TextInputFieldSimple
+					id={backupPathFieldId}
+					value={rule.backupPath}
+					setValue={(value) => updateField('backupPath', value)}
+				/>
+			</Grid.Col>
+			<Grid.Col className={`fieldtype-textinput mt-0`} sm={{ offset: 4, span: 8 }}>
 				<small className="form-text text-muted">
 					Directory path where backups will be saved. Leave empty for default location.
 				</small>
-			</CCol>
+			</Grid.Col>
 
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Backup Name Pattern</CFormLabel>
-			<CCol className={`fieldtype-textinput`} sm={8}>
+			<FormLabel htmlFor={backupNamePatternFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+				Backup Name Pattern
+			</FormLabel>
+			<Grid.Col className={`fieldtype-textinput`} sm={8}>
 				<TextInputField
+					id={backupNamePatternFieldId}
 					value={rule.backupNamePattern}
 					setValue={(value) => updateField('backupNamePattern', value)}
 					useVariables
 				/>
-			</CCol>
+			</Grid.Col>
 
-			<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Number of Backups to Keep</CFormLabel>
-			<CCol className={`fieldtype-textinput`} sm={8}>
-				<NumberInputField value={rule.keep} min={1} setValue={(value) => updateField('keep', value)} />
-			</CCol>
-			<CCol className={`fieldtype-textinput mt-0`} sm={{ offset: 4, span: 8 }}>
+			<FormLabel htmlFor={keepFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+				Number of Backups to Keep
+			</FormLabel>
+			<Grid.Col className={`fieldtype-textinput`} sm={8}>
+				<NumberInputField id={keepFieldId} value={rule.keep} min={1} setValue={(value) => updateField('keep', value)} />
+			</Grid.Col>
+			<Grid.Col className={`fieldtype-textinput mt-0`} sm={{ offset: 4, span: 8 }}>
 				<small className="form-text text-muted">How many backup files to retain before deleting the oldest ones</small>
-			</CCol>
+			</Grid.Col>
 
-			<CCol sm={12}>
-				<label className="form-label">Previous Backups</label>
+			<Grid.Col sm={12}>
+				<hr />
+				<FormLabel htmlFor={undefined}>Previous Backups</FormLabel>
 				{rule.previousBackups && rule.previousBackups.length > 0 && (
 					<div className="table-responsive">
 						<table className="table table-sm table-striped">
@@ -206,7 +231,7 @@ export const BackupRuleEditor = observer(function BackupRuleEditor({ ruleId }: B
 						<small>No backup files found. Backups may have been manually deleted or moved.</small>
 					</div>
 				)}
-			</CCol>
-		</CForm>
+			</Grid.Col>
+		</Form>
 	)
 })

@@ -1,7 +1,8 @@
 import type { CollectionBase } from './Collections.js'
-import type { ClientInstanceConfigBase } from './Instance.js'
+import type { ClientInstanceConfigBase, ModuleInstanceType } from './Instance.js'
 
 export interface ClientConnectionConfig extends ClientInstanceConfigBase {
+	moduleType: ModuleInstanceType.Connection
 	hasRecordActionsHandler: boolean
 }
 
@@ -12,9 +13,7 @@ export interface ConnectionCollectionData {
 export type ConnectionCollection = CollectionBase<ConnectionCollectionData>
 
 export type ClientConnectionsUpdate =
-	| ClientConnectionsUpdateInitOp
-	| ClientConnectionsUpdateUpdateOp
-	| ClientConnectionsUpdateRemoveOp
+	ClientConnectionsUpdateInitOp | ClientConnectionsUpdateUpdateOp | ClientConnectionsUpdateRemoveOp
 
 export interface ClientConnectionsUpdateInitOp {
 	type: 'init'

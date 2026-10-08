@@ -9,28 +9,96 @@
  * this program.
  */
 
-import LogController from '../Log/Controller.js'
-import EventEmitter from 'events'
-import type { VariableValueData, VariablesCache } from './Util.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { CompanionVariableValue, CompanionVariableValues } from '@companion-module/base'
-import { router, publicProcedure } from '../UI/TRPC.js'
+import EventEmitter from 'node:events'
 import z from 'zod'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import { VariablesAndExpressionParser } from './VariablesAndExpressionParser.js'
+import { formatLocation } from '@companion-app/shared/ControlId.js'
+import type { ThisLocationVariable } from '@companion-app/shared/ControlLocation.js'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import {
+	stringifyVariableValue,
+	type VariableValue,
+	type VariableValues,
+} from '@companion-app/shared/Model/Variables.js'
 import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import LogController from '../Log/Controller.js'
+import { publicProcedure, router } from '../UI/TRPC.js'
+import type { VariablesCache, VariableValueData } from './Util.js'
+import { VariablesAndExpressionParser } from './VariablesAndExpressionParser.js'
+import { VariablesBlinker } from './VariablesBlinker.js'
 
 export interface VariablesValuesEvents {
-	variables_changed: [changed: Set<string>, connection_labels: Set<string>]
-	local_variables_changed: [changed: Set<string>, fromControlId: string]
+	variables_changed: [changed: ReadonlySet<string>, connection_labels: ReadonlySet<string>]
+	local_variables_changed: [changed: ReadonlySet<string>, fromControlId: string]
+}
+
+const ThisLocationVariables: Record<
+	ThisLocationVariable,
+	(location: ControlLocation | null | undefined) => VariableValue
+> = {
+	'this:page': (location) => location?.pageNumber,
+	'this:column': (location) => location?.column,
+	'this:row': (location) => location?.row,
+	'this:location': (location) => (location ? formatLocation(location) : undefined),
+
+	// The remaining variables simply delegate to internally-defined variables.
+	'this:page_name': (location) =>
+		location ? `$(internal:page_number_${location.pageNumber}_name)` : VARIABLE_UNKNOWN_VALUE,
+	'this:active': (location) =>
+		location
+			? `$(internal:b_active_${location.pageNumber}_${location.row}_${location.column})`
+			: VARIABLE_UNKNOWN_VALUE,
+
+	'this:step': (location) =>
+		location ? `$(internal:b_step_${location.pageNumber}_${location.row}_${location.column})` : VARIABLE_UNKNOWN_VALUE,
+	'this:step_count': (location) =>
+		location
+			? `$(internal:b_step_count_${location.pageNumber}_${location.row}_${location.column})`
+			: VARIABLE_UNKNOWN_VALUE,
+
+	'this:actions_running': (location) =>
+		location
+			? `$(internal:b_actions_running_${location.pageNumber}_${location.row}_${location.column})`
+			: VARIABLE_UNKNOWN_VALUE,
+
+	'this:button_status': (location) =>
+		location
+			? `$(internal:b_status_${location.pageNumber}_${location.row}_${location.column})`
+			: VARIABLE_UNKNOWN_VALUE,
+}
+
+const ThisLocationVariablesSet: ReadonlySet<string> = new Set(Object.keys(ThisLocationVariables))
+
+export function InjectedVariablesForLocation(controlLocation: ControlLocation | null | undefined): VariablesCache {
+	return new Map(
+		Object.entries(ThisLocationVariables).map(([variableId, computeVariable]) => [
+			variableId,
+			computeVariable(controlLocation),
+		])
+	)
 }
 
 export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 	readonly #logger = LogController.createLogger('Variables/Values')
 
-	#variableValues: VariableValueData = {}
+	readonly #blinker: VariablesBlinker
+	#variableValues: VariableValueData = Object.create(null)
 
-	getVariableValue(label: string, name: string): CompanionVariableValue | undefined {
+	readonly #userconfig: DataUserConfig
+
+	constructor(userconfig: DataUserConfig) {
+		super()
+
+		this.#userconfig = userconfig
+
+		this.#blinker = new VariablesBlinker((values) => {
+			this.setVariableValues('internal', values)
+		})
+	}
+
+	getVariableValue(label: string, name: string): VariableValue | undefined {
 		if (label === 'internal' && name.substring(0, 7) == 'custom_') {
 			label = 'custom'
 			name = name.substring(7)
@@ -39,19 +107,25 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 		return this.#variableValues[label]?.[name]
 	}
 
-	getCustomVariableValue(name: string): CompanionVariableValue | undefined {
+	getCustomVariableValue(name: string): VariableValue | undefined {
 		return this.getVariableValue('custom', name)
 	}
 
 	createVariablesAndExpressionParser(
 		controlLocation: ControlLocation | null | undefined,
 		localValues: ControlEntityInstance[] | null,
-		overrideVariableValues: CompanionVariableValues | null
+		overrideVariableValues: VariableValues | null
 	): VariablesAndExpressionParser {
-		const thisValues: VariablesCache = new Map()
-		this.addInjectedVariablesForLocation(thisValues, controlLocation)
+		const thisValues = InjectedVariablesForLocation(controlLocation)
 
-		return new VariablesAndExpressionParser(this.#variableValues, thisValues, localValues, overrideVariableValues)
+		return new VariablesAndExpressionParser(
+			this.#userconfig,
+			this.#blinker,
+			this.#variableValues,
+			thisValues,
+			localValues,
+			overrideVariableValues
+		)
 	}
 
 	forgetConnection(_id: string, label: string): void {
@@ -73,7 +147,9 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 	}
 
 	connectionLabelRename(labelFrom: string, labelTo: string): void {
-		const valuesTo = this.#variableValues[labelTo] || {}
+		if (labelFrom === labelTo) return
+
+		const valuesTo = this.#variableValues[labelTo] || Object.create(null)
 		this.#variableValues[labelTo] = valuesTo
 
 		// Move variable values, and track the 'diff'
@@ -111,12 +187,15 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 	}
 
 	setVariableValues(label: string, variables: VariableValueEntry[]): void {
-		const moduleValues = this.#variableValues[label] ?? {}
+		if (variables.length === 0) return
+
+		const moduleValues = this.#variableValues[label] ?? Object.create(null)
 		this.#variableValues[label] = moduleValues
 
 		const all_changed_variables_set = new Set<string>()
 		const connection_labels = new Set<string>()
 		for (const variable of variables) {
+			if (BANNED_PROPS.has(variable.id)) continue
 			if (moduleValues[variable.id] !== variable.value) {
 				moduleValues[variable.id] = variable.value
 
@@ -129,7 +208,7 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 
 				// Skip debug if it's just internal:time_* spamming.
 				if (this.#logger.isSillyEnabled() && !(label === 'internal' && variable.id.startsWith('time_'))) {
-					this.#logger.silly('Variable $(' + label + ':' + variable.id + ') is "' + variable.value + '"')
+					this.#logger.silly(`Variable $(${label}:${variable.id}) is "${stringifyVariableValue(variable.value)}"`)
 				}
 			}
 		}
@@ -138,7 +217,7 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 		this.#emitVariablesChanged(all_changed_variables_set, connection_labels)
 	}
 
-	#emitVariablesChanged(all_changed_variables_set: Set<string>, connection_labels: Set<string>) {
+	#emitVariablesChanged(all_changed_variables_set: ReadonlySet<string>, connection_labels: ReadonlySet<string>) {
 		try {
 			if (all_changed_variables_set.size > 0) {
 				this.emit('variables_changed', all_changed_variables_set, connection_labels)
@@ -148,52 +227,12 @@ export class VariablesValues extends EventEmitter<VariablesValuesEvents> {
 		}
 	}
 
-	/**
-	 * Variables to inject based on location
-	 */
-	addInjectedVariablesForLocation(values: VariablesCache, location: ControlLocation | null | undefined): void {
-		values.set('$(this:page)', location?.pageNumber)
-		values.set('$(this:column)', location?.column)
-		values.set('$(this:row)', location?.row)
-
-		// Reactivity happens for these because of references to the inner variables
-		values.set(
-			'$(this:page_name)',
-			location ? `$(internal:page_number_${location.pageNumber}_name)` : VARIABLE_UNKNOWN_VALUE
-		)
-		// values.set(
-		// 	'$(this:pushed)',
-		// 	location
-		// 		? `$(internal:b_pushed_${location.pageNumber}_${location.row}_${location.column})`
-		// 		: VARIABLE_UNKNOWN_VALUE
-		// )
-		values.set(
-			'$(this:step)',
-			location ? `$(internal:b_step_${location.pageNumber}_${location.row}_${location.column})` : VARIABLE_UNKNOWN_VALUE
-		)
-		values.set(
-			'$(this:step_count)',
-			location
-				? `$(internal:b_step_count_${location.pageNumber}_${location.row}_${location.column})`
-				: VARIABLE_UNKNOWN_VALUE
-		)
-
-		// values.set(
-		// 	'$(this:actions_running)',
-		// 	location
-		// 		? `$(internal:b_actions_running_${location.pageNumber}_${location.row}_${location.column})`
-		// 		: VARIABLE_UNKNOWN_VALUE
-		// )
-		// values.set(
-		// 	'$(this:button_status)',
-		// 	location
-		// 		? `$(internal:b_status_${location.pageNumber}_${location.row}_${location.column})`
-		// 		: VARIABLE_UNKNOWN_VALUE
-		// )
+	triggerLocationVariablesChange(controlId: string): void {
+		this.emit('local_variables_changed', ThisLocationVariablesSet, controlId)
 	}
 }
 
 export interface VariableValueEntry {
 	id: string
-	value: CompanionVariableValue | undefined
+	value: VariableValue | undefined
 }

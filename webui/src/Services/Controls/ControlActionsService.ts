@@ -1,12 +1,15 @@
 import { useMemo } from 'react'
-import type { IEntityEditorService } from './ControlEntitiesService.js'
+import type { JsonValue } from 'type-fest'
 import type {
 	EntityModelType,
 	EntityOwner,
+	FeedbackEntityStyleOverride,
 	SomeEntityModel,
 	SomeSocketEntityLocation,
 } from '@companion-app/shared/Model/EntityModel.js'
+import type { ExpressionOrValue } from '@companion-app/shared/Model/Options.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import type { IEntityEditorService } from './ControlEntitiesService.js'
 
 export function useActionRecorderActionService(sessionId: string): IEntityEditorService {
 	const deleteActionMutation = useMutationExt(trpc.actionRecorder.session.action.delete.mutationOptions())
@@ -39,7 +42,12 @@ export function useActionRecorderActionService(sessionId: string): IEntityEditor
 				})
 			},
 
-			setValue: (entityId: string, _action: SomeEntityModel | undefined, key: string, value: any) => {
+			setValue: (
+				entityId: string,
+				_action: SomeEntityModel | undefined,
+				key: string,
+				value: ExpressionOrValue<JsonValue | undefined>
+			) => {
 				setValueMutation.mutateAsync({ sessionId, actionId: entityId, key, value }).catch((e) => {
 					console.error(e)
 				})
@@ -64,22 +72,22 @@ export function useActionRecorderActionService(sessionId: string): IEntityEditor
 			performLearn: undefined,
 			setEnabled: undefined,
 			setHeadline: undefined,
+			setRawStoreResult: undefined,
 
-			setInverted: (_entityId: string, _inverted: boolean) => {
+			setInverted: (_entityId: string, _inverted: ExpressionOrValue<boolean>) => {
 				// Not supported
 			},
 			setVariableName: (_entityId: string, _variableName: string) => {
 				// Not supported
 			},
-			setVariableValue: (_entityId: string, _variableValue: string) => {
+			setVariableValue: (_entityId: string, _variableValue: JsonValue | undefined) => {
 				// Not supported
 			},
 
-			setSelectedStyleProps: (_entityId: string, _keys: string[]) => {
+			replaceStyleOverride(_entityId: string, _override: FeedbackEntityStyleOverride) {
 				// Not supported
 			},
-
-			setStylePropsValue: (_entityId: string, _key: string, _value: any) => {
+			removeStyleOverride(_entityId: string, _overrideId: string) {
 				// Not supported
 			},
 		}),

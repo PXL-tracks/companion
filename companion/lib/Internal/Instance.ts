@@ -9,27 +9,33 @@
  * this program.
  */
 
+import { EventEmitter } from 'node:events'
 import debounceFn from 'debounce-fn'
-import type { InstanceController } from '../Instance/Controller.js'
-import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
-import type { RunActionExtras, VariableDefinitionTmp } from '../Instance/Connection/ChildHandler.js'
-import type {
-	ActionForVisitor,
-	FeedbackForVisitor,
-	FeedbackEntityModelExt,
-	InternalModuleFragment,
-	InternalVisitor,
-	InternalActionDefinition,
-	InternalFeedbackDefinition,
-	InternalModuleFragmentEvents,
-} from './Types.js'
-import type { CompanionFeedbackButtonStyleResult, CompanionVariableValues } from '@companion-module/base'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import { FeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
-import { EventEmitter } from 'events'
-import type { InternalModuleUtils } from './Util.js'
-import LogController from '../Log/Controller.js'
+import { FeedbackEntitySubType, type FeedbackEntityModel } from '@companion-app/shared/Model/EntityModel.js'
 import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
+import { exprVal } from '@companion-app/shared/Model/Options.js'
+import {
+	stringifyVariableValue,
+	type VariableDefinition,
+	type VariableValues,
+} from '@companion-app/shared/Model/Variables.js'
+import type { CompanionFeedbackButtonStyleResult } from '@companion-module/base'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import type { InstanceController } from '../Instance/Controller.js'
+import LogController from '../Log/Controller.js'
+import type {
+	ActionForInternalExecution,
+	ActionForVisitor,
+	FeedbackForInternalExecution,
+	FeedbackForVisitor,
+	InternalActionDefinition,
+	InternalActionResult,
+	InternalFeedbackDefinition,
+	InternalModuleFragment,
+	InternalModuleFragmentEvents,
+	InternalVisitor,
+} from './Types.js'
 
 export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents> implements InternalModuleFragment {
 	readonly #logger = LogController.createLogger('InternalInstance')
@@ -76,7 +82,7 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 		}
 	)
 
-	constructor(_internalUrils: InternalModuleUtils, instanceController: InstanceController) {
+	constructor(instanceController: InstanceController) {
 		super()
 
 		this.#instanceController = instanceController
@@ -91,26 +97,26 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 		)
 	}
 
-	getVariableDefinitions(): VariableDefinitionTmp[] {
-		const variables: VariableDefinitionTmp[] = [
+	getVariableDefinitions(): VariableDefinition[] {
+		const variables: VariableDefinition[] = [
 			{
-				label: 'Connection: Count total',
+				description: 'Connection: Count total',
 				name: 'instance_total',
 			},
 			{
-				label: 'Connection: Count disabled',
+				description: 'Connection: Count disabled',
 				name: 'instance_disabled',
 			},
 			{
-				label: 'Connection: Count errors',
+				description: 'Connection: Count errors',
 				name: 'instance_errors',
 			},
 			{
-				label: 'Connection: Count warnings',
+				description: 'Connection: Count warnings',
 				name: 'instance_warns',
 			},
 			{
-				label: 'Connection: Count OK',
+				description: 'Connection: Count OK',
 				name: 'instance_oks',
 			},
 		]
@@ -120,7 +126,7 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 			const label = this.#instanceController.getLabelForConnection(connectionId)
 			if (label) {
 				variables.push({
-					label: `Connection Status: ${label}`,
+					description: `Connection Status: ${label}`,
 					name: `connection_${label}_status`,
 				})
 			}
@@ -153,6 +159,8 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 			connection_collection_enabled: {
 				label: 'Connection: Enable or disable connection collection',
@@ -175,6 +183,8 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 		}
 	}
@@ -187,6 +197,7 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 				description:
 					'Change button color on Connection Status\nDisabled color is not used when "All" connections is selected',
 				feedbackStyle: undefined,
+				feedbackAffectedProperties: ['color', 'bgcolor'],
 				showInvert: false,
 				options: [
 					{
@@ -201,50 +212,68 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 						label: 'OK foreground color',
 						id: 'ok_fg',
 						default: 0xffffff,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'OK background color',
 						id: 'ok_bg',
 						default: 0x00c800,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'Warning foreground color',
 						id: 'warning_fg',
 						default: 0x000000,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'Warning background color',
 						id: 'warning_bg',
 						default: 0xffff00,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'Error foreground color',
 						id: 'error_fg',
 						default: 0xffffff,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'Error background color',
 						id: 'error_bg',
 						default: 0xc80000,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'Disabled foreground color',
 						id: 'disabled_fg',
 						default: 0x999999,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 					{
 						type: 'colorpicker',
 						label: 'Disabled background color',
 						id: 'disabled_bg',
 						default: 0x404040,
+						enableAlpha: false,
+						returnType: 'number',
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 			instance_custom_state: {
 				feedbackType: FeedbackEntitySubType.Boolean,
@@ -272,10 +301,12 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 							{ id: 'good', label: 'OK' },
 							{ id: 'warning', label: 'Warning' },
 							{ id: 'error', label: 'Error' },
-							{ id: null as any, label: 'Disabled' },
+							{ id: 'null', label: 'Disabled' },
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 			connection_collection_enabled: {
 				feedbackType: FeedbackEntitySubType.Boolean,
@@ -303,98 +334,127 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 		}
 	}
 
-	executeAction(action: ControlEntityInstance, _extras: RunActionExtras): boolean {
-		if (action.definitionId === 'instance_control') {
-			let newState = action.rawOptions.enable == 'true'
-			if (action.rawOptions.enable == 'toggle') {
-				const curState = this.#instanceController.getInstanceStatus(action.rawOptions.instance_id)
-
-				newState = !curState?.category
-			}
-
-			this.#instanceController.enableDisableConnection(action.rawOptions.instance_id, newState)
-			return true
-		} else if (action.definitionId === 'connection_collection_enabled') {
-			let newState: boolean | 'toggle' = action.rawOptions.enable == 'true'
-			if (action.rawOptions.enable == 'toggle') newState = 'toggle'
-
-			this.#instanceController.connectionCollections.setCollectionEnabled(action.rawOptions.collection_id, newState)
-			return true
-		} else {
-			return false
+	feedbackUpgrade(feedback: FeedbackEntityModel, _controlId: string): FeedbackEntityModel | void {
+		// The 'Disabled' choice of instance_custom_state used to be stored as `null`, which the
+		// dropdown in the UI cannot represent or select. Migrate it to the string 'null'.
+		if (feedback.definitionId === 'instance_custom_state' && feedback.options.state?.value === null) {
+			feedback.options.state = exprVal('null')
+			return feedback
 		}
 	}
 
-	executeFeedback(feedback: FeedbackEntityModelExt): CompanionFeedbackButtonStyleResult | boolean | void {
+	executeAction(action: ActionForInternalExecution, _extras: RunActionExtras): InternalActionResult {
+		switch (action.definitionId) {
+			case 'instance_control': {
+				const instanceId = stringifyVariableValue(action.options.instance_id)
+				if (instanceId) {
+					let newState = action.options.enable == 'true'
+					if (action.options.enable == 'toggle') {
+						const curState = this.#instanceController.getInstanceStatus(instanceId)
+
+						newState = !curState?.category
+					}
+
+					this.#instanceController.enableDisableConnection(instanceId, newState)
+				}
+				break
+			}
+			case 'connection_collection_enabled': {
+				const collectionId = stringifyVariableValue(action.options.collection_id)
+				if (collectionId) {
+					let newState: boolean | 'toggle' = action.options.enable == 'true'
+					if (action.options.enable == 'toggle') newState = 'toggle'
+
+					this.#instanceController.connectionCollections.setCollectionEnabled(collectionId, newState)
+				}
+				break
+			}
+			default:
+				return null
+		}
+
+		return { result: undefined }
+	}
+
+	executeFeedback(feedback: FeedbackForInternalExecution): CompanionFeedbackButtonStyleResult | boolean | void {
 		if (feedback.definitionId === 'instance_status') {
 			if (feedback.options.instance_id == 'all') {
 				if (this.#instancesError > 0) {
 					return {
-						color: feedback.options.error_fg,
-						bgcolor: feedback.options.error_bg,
+						color: feedback.options.error_fg as any,
+						bgcolor: feedback.options.error_bg as any,
 					}
 				}
 
 				if (this.#instancesWarning > 0) {
 					return {
-						color: feedback.options.warning_fg,
-						bgcolor: feedback.options.warning_bg,
+						color: feedback.options.warning_fg as any,
+						bgcolor: feedback.options.warning_bg as any,
 					}
 				}
 
 				return {
-					color: feedback.options.ok_fg,
-					bgcolor: feedback.options.ok_bg,
+					color: feedback.options.ok_fg as any,
+					bgcolor: feedback.options.ok_bg as any,
 				}
 			}
 
-			const cur_instance = this.#instanceController.getInstanceStatus(feedback.options.instance_id)
+			const instanceId = stringifyVariableValue(feedback.options.instance_id)
+			const cur_instance = instanceId ? this.#instanceController.getInstanceStatus(instanceId) : undefined
 			if (cur_instance !== undefined) {
 				switch (cur_instance.category) {
 					case 'error':
 						return {
-							color: feedback.options.error_fg,
-							bgcolor: feedback.options.error_bg,
+							color: feedback.options.error_fg as any,
+							bgcolor: feedback.options.error_bg as any,
 						}
 					case 'warning':
 						return {
-							color: feedback.options.warning_fg,
-							bgcolor: feedback.options.warning_bg,
+							color: feedback.options.warning_fg as any,
+							bgcolor: feedback.options.warning_bg as any,
 						}
 					case 'good':
 						return {
-							color: feedback.options.ok_fg,
-							bgcolor: feedback.options.ok_bg,
+							color: feedback.options.ok_fg as any,
+							bgcolor: feedback.options.ok_bg as any,
 						}
 					default:
 						return {
-							color: feedback.options.disabled_fg,
-							bgcolor: feedback.options.disabled_bg,
+							color: feedback.options.disabled_fg as any,
+							bgcolor: feedback.options.disabled_bg as any,
 						}
 				}
 			}
 			// disabled has no 'status' entry
 			return {
-				color: feedback.options.disabled_fg,
-				bgcolor: feedback.options.disabled_bg,
+				color: feedback.options.disabled_fg as any,
+				bgcolor: feedback.options.disabled_bg as any,
 			}
 		} else if (feedback.definitionId === 'instance_custom_state') {
-			const selected_status = this.#instanceStatuses[String(feedback.options.instance_id)]?.category ?? null
+			const instanceId = stringifyVariableValue(feedback.options.instance_id)
+			if (!instanceId) return false
+
+			const selected_status = this.#instanceStatuses[instanceId]?.category ?? 'null'
 
 			return selected_status == feedback.options.state
 		} else if (feedback.definitionId === 'connection_collection_enabled') {
-			const state = this.#instanceController.connectionCollections.isCollectionEnabled(feedback.options.collection_id)
+			const collectionId = stringifyVariableValue(feedback.options.collection_id)
+			if (!collectionId) return false
+
+			const state = this.#instanceController.connectionCollections.isCollectionEnabled(collectionId)
 			const target = feedback.options.enable == 'true'
 			return state == target
 		}
 	}
 
 	updateVariables(): void {
-		const values: CompanionVariableValues = {
+		const values: VariableValues = {
 			instance_total: this.#instancesTotal,
 			instance_disabled: this.#instancesDisabled,
 			instance_errors: this.#instancesError,
@@ -473,7 +533,7 @@ export class InternalInstance extends EventEmitter<InternalModuleFragmentEvents>
 		for (const feedback of feedbacks) {
 			try {
 				if (feedback.type === 'instance_status') {
-					if (feedback.options.instance_id !== 'all') {
+					if (feedback.options.instance_id?.value !== 'all') {
 						visitor.visitConnectionId(feedback.options, 'instance_id', feedback.id)
 					}
 				} else if (feedback.type === 'instance_custom_state') {

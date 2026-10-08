@@ -1,30 +1,27 @@
+import { pointerIntersection } from '@dnd-kit/collision'
+import { useSortable } from '@dnd-kit/react/sortable'
+import { faSort } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import classNames from 'classnames'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useState } from 'react'
+import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import {
-	stringifySocketEntityLocation,
-	type EntityOwner,
 	type EntityModelType,
+	type EntityOwner,
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
-import { observer } from 'mobx-react-lite'
-import React, { useContext, useState, useCallback, useRef } from 'react'
+import { LearnButton } from '~/Components/LearnButton.js'
 import { usePanelCollapseHelperContextForPanel } from '~/Helpers/CollapseHelper.js'
+import { useLazyMountWithHeight } from '~/Hooks/useLazyMountWithHeight.js'
 import { useControlEntityService } from '~/Services/Controls/ControlEntitiesService.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { stringifyEntityOwnerId } from '../Util.js'
 import { EntityRowHeader } from './EntityCellControls.js'
 import { EntityManageChildGroups } from './EntityChildGroup.js'
 import { EntityCommonCells } from './EntityCommonCells.js'
-import { faSort } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { useDrop, useDrag } from 'react-dnd'
-import { checkDragStateWithThresholds, DragPlacement } from '~/Resources/DragAndDrop.js'
-import type { EntityListDragItem } from './EntityListDropZone.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
 import { useEntityEditorContext } from './EntityEditorContext.js'
-import { LearnButton } from '~/Components/LearnButton.js'
-
-interface EntityTableRowDragStatus {
-	isDragging: boolean
-}
+import { entityGroupKey, EntityNestingLevelContext, type EntityDragData } from './EntityListDnd.js'
 
 interface EntityTableRowProps {
 	entity: SomeEntityModel
@@ -47,76 +44,40 @@ export const EntityTableRow = observer(function EntityTableRow({
 	feedbackListType,
 }: EntityTableRowProps): JSX.Element | null {
 	const { serviceFactory, readonly } = useEntityEditorContext()
+	const nestingLevel = useContext(EntityNestingLevelContext)
 
-	const ref = useRef<HTMLTableRowElement>(null)
-	const [, drop] = useDrop<EntityListDragItem>({
-		accept: dragId,
-		hover(item, monitor) {
-			if (!ref.current) {
-				return
-			}
-
-			// Ensure the hover targets this element, and not a child element
-			if (!monitor.isOver({ shallow: true })) return
-
-			const dragParentId = item.ownerId
-			const dragIndex = item.index
-
-			const hoverOwnerId = ownerId
-			const hoverIndex = index
-			const hoverId = entity.id
-
-			// Use midpoint detection with direction-aware placement
-			const result = checkDragStateWithThresholds(item, monitor, hoverId, {
-				dropRectangle: ref.current?.getBoundingClientRect(), // Enables midpoint detection for better handling of variable height rows
-			})
-			if (!result) return
-
-			// Determine final hover index based on placement
-			// When dragging down, we place after. When dragging up, we place before.
-			const finalHoverIndex = result === DragPlacement.Before ? hoverIndex : hoverIndex + 1
-
-			// Don't replace items with themselves
-			if (
-				item.entityId === hoverId ||
-				(dragIndex === finalHoverIndex &&
-					stringifyEntityOwnerId(dragParentId) === stringifyEntityOwnerId(hoverOwnerId) &&
-					stringifySocketEntityLocation(item.listId) === stringifySocketEntityLocation(serviceFactory.listId))
-			) {
-				return
-			}
-
-			// Time to actually perform the entity move
-			serviceFactory.moveCard(item.listId, item.entityId, hoverOwnerId, finalHoverIndex)
-
-			// Note: we're mutating the monitor item here!
-			// Generally it's better to avoid mutations,
-			// but it's good here for the sake of performance
-			// to avoid expensive index searches.
-			item.index = finalHoverIndex
-			item.listId = serviceFactory.listId
-			item.ownerId = hoverOwnerId
-		},
-		drop(item, _monitor) {
-			item.dragState = null
-		},
-	})
-	const [{ isDragging }, drag, preview] = useDrag<EntityListDragItem, unknown, EntityTableRowDragStatus>({
+	// The sortable `group` is the list+owner this entity belongs to, so dnd-kit can move entities
+	// between nested groups and between action lists (which share the `dragId` type). The actual
+	// move is applied on hover in useEntityListReorderMonitor.
+	//
+	// TODO: entities use a deliberately limited dnd setup. Their nested lists render as separate DOM
+	// containers, and dnd-kit's optimistic sorting physically moves nodes between containers, which
+	// corrupts React's tree (duplicated rows / "removeChild" errors) once the async mobx update lands.
+	// OptimisticSortingPlugin is registered globally and can't be removed per-sortable, so it is blocked
+	// for entity drags in SortableHysteresis instead; the move is applied on hover via
+	// useEntityListReorderMonitor, and the drag preview comes from a <DragOverlay> (EntityDragLayer)
+	// rather than a clone of the source row - so dnd-kit never clones/moves the source and React stays
+	// in control. A proper fix is to rebuild the entity editor as a single flat container (like the
+	// layered ElementsList) so optimistic sorting + drop animations can be re-enabled. See also the
+	// matching TODO in useEntityListReorderMonitor.ts. The `data` is read by EntityDragLayer.
+	const dragData: EntityDragData = { kind: 'entity', entity, entityTypeLabel }
+	const { ref, handleRef, isDragging } = useSortable({
+		id: entity.id,
+		index,
 		type: dragId,
-		canDrag: !readonly,
-		item: {
-			entityId: entity.id,
-			listId: serviceFactory.listId,
-			index: index,
-			ownerId: ownerId,
-			// ref: ref,
-			dragState: null,
-		},
-		collect: (monitor) => ({
-			isDragging: monitor.isDragging(),
-		}),
+		accept: dragId,
+		group: entityGroupKey(serviceFactory.listId, ownerId),
+		data: dragData,
+		disabled: readonly,
+		// Pointer-based collision (not the default area/shape detector) so the target is exactly the row
+		// under the cursor: lets the cursor reach the last row (to drop at the end) and hit the small
+		// nested child-group rows/dropzones, which the area detector skips in favour of bigger targets.
+		collisionDetector: pointerIntersection,
+		// A nested child row sits inside its parent row's droppable, so both collide when the pointer is
+		// over the child. Deeper rows get a higher priority so the innermost one wins. Spaced by 2 to
+		// leave room for the children-area shield in between (see EntityNestingLevelContext).
+		collisionPriority: nestingLevel * 2,
 	})
-	preview(drop(ref))
 
 	if (!entity) {
 		// Invalid entity, so skip
@@ -124,23 +85,72 @@ export const EntityTableRow = observer(function EntityTableRow({
 	}
 
 	return (
-		<tr ref={ref} className={isDragging ? 'entitylist-dragging' : ''}>
-			<td ref={drag} className="td-reorder">
+		<EntityTableRowContent
+			entity={entity}
+			ownerId={ownerId}
+			entityType={entityType}
+			entityTypeLabel={entityTypeLabel}
+			feedbackListType={feedbackListType}
+			isDragging={isDragging}
+			rowRef={ref}
+			dragRef={handleRef}
+			disableLazyMount={false}
+		/>
+	)
+})
+
+interface EntityTableRowContentProps {
+	entity: SomeEntityModel
+	ownerId: EntityOwner | null
+
+	entityType: EntityModelType
+	entityTypeLabel: string
+	feedbackListType: ClientEntityDefinition['feedbackType']
+
+	isDragging?: boolean
+	rowRef: (element: Element | null) => void
+	dragRef: (element: Element | null) => void
+
+	/** Force the expanded content to always render (e.g. when used as a drag preview) */
+	disableLazyMount: boolean
+}
+
+export const EntityTableRowContent = observer(function EntityTableRowContent({
+	entity,
+	ownerId,
+	entityType,
+	entityTypeLabel,
+	feedbackListType,
+	isDragging,
+	rowRef,
+	dragRef,
+	disableLazyMount,
+}: EntityTableRowContentProps): React.JSX.Element {
+	return (
+		<div
+			ref={rowRef}
+			className={classNames('entity-row', {
+				'entity-disabled': !!entity.disabled,
+				'entity-row-grabbing': isDragging,
+			})}
+		>
+			<div ref={dragRef} className="entity-row-reorder">
 				<FontAwesomeIcon icon={faSort} />
-			</td>
-			<td>
+			</div>
+			<div className="entity-row-content">
 				{entity.type === entityType ? (
 					<EntityEditorRowContent
 						ownerId={ownerId}
 						entityTypeLabel={entityTypeLabel}
 						entity={entity}
 						feedbackListType={feedbackListType}
+						disableLazyMount={disableLazyMount}
 					/>
 				) : (
 					<p>Entity is not a {entityTypeLabel}!</p>
 				)}
-			</td>
-		</tr>
+			</div>
+		</div>
 	)
 })
 
@@ -149,6 +159,7 @@ interface EntityEditorRowContentProps {
 	entityTypeLabel: string
 	entity: SomeEntityModel
 	feedbackListType: ClientEntityDefinition['feedbackType']
+	disableLazyMount: boolean
 }
 
 export const EntityEditorRowContent = observer(function EntityEditorRowContent({
@@ -156,6 +167,7 @@ export const EntityEditorRowContent = observer(function EntityEditorRowContent({
 	entityTypeLabel,
 	entity,
 	feedbackListType,
+	disableLazyMount,
 }: EntityEditorRowContentProps) {
 	const { serviceFactory, readonly, localVariablePrefix } = useEntityEditorContext()
 	const entityService = useControlEntityService(serviceFactory, entity, entityTypeLabel)
@@ -198,7 +210,7 @@ export const EntityEditorRowContent = observer(function EntityEditorRowContent({
 			/>
 
 			{!isCollapsed && (
-				<div className="editor-grid">
+				<LazyEditorGrid entity={entity} disableLazyMount={disableLazyMount}>
 					<div className="cell-description">
 						<div className="grow">
 							{headlineExpanded && <div className="name">{definitionName}</div>}
@@ -220,8 +232,37 @@ export const EntityEditorRowContent = observer(function EntityEditorRowContent({
 					/>
 
 					<EntityManageChildGroups entity={entity} entityDefinition={entityDefinition} />
-				</div>
+				</LazyEditorGrid>
 			)}
 		</>
+	)
+})
+
+interface LazyEditorGridProps {
+	entity: SomeEntityModel
+	disableLazyMount: boolean
+}
+
+/**
+ * Wraps the expensive `editor-grid` content (option inputs, expression previews, nested child
+ * lists) so it is only mounted while the row is on (or near) screen. When unmounted it reserves
+ * the row's last-measured height so scrolling stays stable.
+ */
+const LazyEditorGrid = observer(function LazyEditorGrid({
+	entity,
+	disableLazyMount,
+	children,
+}: React.PropsWithChildren<LazyEditorGridProps>) {
+	const defKey = `${entity.connectionId}::${entity.type}::${entity.definitionId}`
+	const { setRef, shouldMount, placeholderHeight } = useLazyMountWithHeight(entity.id, defKey, disableLazyMount)
+
+	return (
+		<div
+			ref={setRef}
+			className="editor-grid"
+			style={shouldMount ? undefined : { height: placeholderHeight, boxSizing: 'border-box' }}
+		>
+			{shouldMount ? children : null}
+		</div>
 	)
 })

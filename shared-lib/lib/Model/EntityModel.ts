@@ -1,11 +1,27 @@
 import z from 'zod'
+import type { CompanionFeedbackButtonStyleResult, JsonValue } from '@companion-module/host'
 import type { ActionSetId } from './ActionModel.js'
-import type { ButtonStyleProperties } from './StyleModel.js'
+import {
+	createExpressionOrValueSchema,
+	ExpressionOrJsonValueSchema,
+	type ExpressionableOptionsObject,
+	type ExpressionOrValue,
+} from './Options.js'
+import type { VariableValue } from './Variables.js'
 
 export type SomeEntityModel = ActionEntityModel | FeedbackEntityModel
-export type SomeReplaceableEntityModel =
-	| Pick<ActionEntityModel, 'id' | 'type' | 'definitionId' | 'options' | 'upgradeIndex'>
-	| Pick<FeedbackEntityModel, 'id' | 'type' | 'definitionId' | 'style' | 'options' | 'isInverted' | 'upgradeIndex'>
+export type SomeReplaceableEntityModel = ReplaceableActionEntityModel | ReplaceableFeedbackEntityModel
+export type ReplaceableActionEntityModel = Pick<
+	ActionEntityModel,
+	'id' | 'type' | 'definitionId' | 'options' | 'upgradeIndex' | 'storeResult'
+>
+export type ReplaceableFeedbackEntityModel = Pick<
+	FeedbackEntityModel,
+	'id' | 'type' | 'definitionId' | 'styleOverrides' | 'options' | 'isInverted' | 'upgradeIndex'
+> & {
+	// Backwards compatibility for old modules
+	style?: CompanionFeedbackButtonStyleResult
+}
 
 export enum EntityModelType {
 	Action = 'action',
@@ -16,6 +32,7 @@ export enum FeedbackEntitySubType {
 	Boolean = 'boolean',
 	Advanced = 'advanced',
 	Value = 'value',
+	StyleOverride = 'style-override',
 }
 
 export function isValidFeedbackEntitySubType(value: FeedbackEntitySubType | string): value is FeedbackEntitySubType {
@@ -30,20 +47,70 @@ export function isInternalUserValueFeedback(entity: EntityModelBase): boolean {
 	)
 }
 
+export type RawStoreResultLocalVariable = {
+	readonly type: 'local-variable'
+	readonly location: Readonly<ExpressionOrValue<string>>
+	readonly variableName: Readonly<ExpressionOrValue<string>>
+}
+
+export type RawStoreResultCustomVariable = {
+	readonly type: 'custom-variable'
+	readonly variableName: Readonly<ExpressionOrValue<string>>
+	readonly createIfNotExists: boolean
+}
+
+export type RawStoreResult = RawStoreResultLocalVariable | RawStoreResultCustomVariable
+
+const zodExpressionableString = createExpressionOrValueSchema(z.string())
+
+export const zodRawStoreResult: z.ZodSchema<RawStoreResult> = z.discriminatedUnion('type', [
+	z.object({
+		type: z.literal('local-variable'),
+		location: zodExpressionableString,
+		variableName: zodExpressionableString,
+	}),
+	z.object({
+		type: z.literal('custom-variable'),
+		variableName: zodExpressionableString,
+		createIfNotExists: z.boolean(),
+	}),
+])
+
 export interface ActionEntityModel extends EntityModelBase {
 	readonly type: EntityModelType.Action
+
+	/**
+	 * If this action returns a result, the target the result should be written
+	 * to.  (Absent means any result is discarded.)
+	 */
+	storeResult?: RawStoreResult
 }
 
 export interface FeedbackEntityModel extends EntityModelBase {
 	readonly type: EntityModelType.Feedback
 
 	/** Boolean feedbacks can be inverted */
-	isInverted?: boolean
+	isInverted?: ExpressionOrValue<boolean>
 	/** If in a list that produces local-variables, this entity value will be exposed under this name */
 	variableName?: string
-	/** When in a list that supports advanced feedbacks, this style can be set */
-	style?: Partial<ButtonStyleProperties>
+
+	/** When in a style list on a layered button, some overrides to apply */
+	styleOverrides?: FeedbackEntityStyleOverride[]
 }
+
+export interface FeedbackEntityStyleOverride {
+	overrideId: string
+	elementId: string
+	elementProperty: string
+	// Note: When overriding advanced feedbacks, this should be set to `{ isExpression: false, value: 'color' }` or similar to indicate which property it is using
+	override: ExpressionOrValue<JsonValue | undefined>
+}
+export const schemaFeedbackEntityStyleOverride: z.ZodType<FeedbackEntityStyleOverride> = z.object({
+	overrideId: z.string(),
+	elementId: z.string(),
+	elementProperty: z.string(),
+	override: ExpressionOrJsonValueSchema,
+})
 
 export interface EntityModelBase {
 	readonly type: EntityModelType
@@ -52,7 +119,7 @@ export interface EntityModelBase {
 	definitionId: string
 	connectionId: string
 	headline?: string
-	options: Record<string, any>
+	options: ExpressionableOptionsObject
 	disabled?: boolean
 	upgradeIndex: number | undefined
 
@@ -76,13 +143,15 @@ export interface EntitySupportedChildGroupDefinition {
 	hint?: string
 
 	/** Only valid for feedback entities */
-	feedbackListType?: FeedbackEntitySubType.Boolean | FeedbackEntitySubType.Value
+	feedbackListType?: FeedbackEntitySubType.Boolean | FeedbackEntitySubType.Value | FeedbackEntitySubType.StyleOverride
 
 	/**
 	 * Limit the maximum number of direct children in this group.
 	 */
 	maximumChildren?: number
 }
+
+export type FeedbackValue = CompanionFeedbackButtonStyleResult | VariableValue
 
 const zodActionSetId: z.ZodSchema<ActionSetId> = z.union([
 	z.literal('down'),

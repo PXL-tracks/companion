@@ -9,382 +9,317 @@
  * this program.
  */
 
-import { Image } from './Image.js'
-import { ParseAlignment, parseColor } from '../Resources/Util.js'
-import { formatLocation } from '@companion-app/shared/ControlId.js'
-import { ImageResult } from './ImageResult.js'
-import type { GraphicsOptions } from './Controller.js'
-import type { DrawStyleButtonModel, DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
+import { isPromise } from 'node:util/types'
+import type * as imageRs from '@julusian/image-rs'
+import { Canvas, loadImage } from '@napi-rs/canvas'
+import QuickLRU from 'quick-lru'
+import { ButtonDecorationRenderer } from '@companion-app/shared/Graphics/ButtonDecorationRenderer.js'
+import type { TextLayoutCache } from '@companion-app/shared/Graphics/ImageBase.js'
+import { GraphicsLayeredButtonRenderer } from '@companion-app/shared/Graphics/LayeredRenderer.js'
+import { DrawBounds } from '@companion-app/shared/Graphics/Util.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { RendererDrawStyle } from '@companion-app/shared/Model/Render.js'
+import type { DrawImageBuffer } from '@companion-app/shared/Model/StyleModel.js'
+import type { SurfaceRotation } from '@companion-app/shared/Model/Surfaces.js'
+import { rotateResolution, transformButtonImage } from '../Resources/Util.js'
+import { Image } from './Image.js'
+import { ImageResult, type ImageResultProcessedStyle } from './ImageResult.js'
 
-const colorButtonYellow = 'rgb(255, 198, 0)'
-const colorWhite = 'white'
-const colorBlack = 'black'
-const colorDarkGrey = 'rgba(15, 15, 15, 1)'
-
-const internalIcons = {
-	// 15x8 argb
-	cloud:
-		'AAAAAAAAAAAAAAAAAAAAAAAAAAAD////D////4L////7//////////D+/v51+/v7A////wAAAAAAAAAAAAAAAAAAA' +
-		'AAAAAAAAAAAAAAAAABN////kf///////////v7+//z8/P/5+fn/9vb2RfDw8AAAAAAAAAAAAAAAAAAAAAB7///////////////0/////' +
-		'P7+/v/9/f3/+vr6//b29v/y8vL/7e3tf+np6QAAAAAAAAAAAv///xz///+k/////////////////f39//r6+v/39/f/8/Pz/+7u7v/p6' +
-		'en/5OTkquDg4DDV1dUC////N////6v////s/v7+//39/f/7+/v/+Pj4//T09P/v7+//6urq/+Xl5f/g4OD/3Nzc8dfX18DS0tJKz8/Pt' +
-		'P/////+/v7/+/v7//n5+f/09PT/8PDw/+vr6//m5ub/4eHh/9zc3P/Y2Nj/1NTU/9HR0f/Ozs7HzMzM2Pv7+//5+fn/9fX1//Hx8f/s7' +
-		'Oz/5+fn/+Li4v/d3d3/2dnZ/9TU1P/R0dH/z8/P/83Nzf/MzMzGy8vLVvb29u7y8vL/7e3t/+jo6P/j4+P/3t7e/9nZ2f/V1dX/0dHR/' +
-		'87Ozv/Nzc3/zMzM/8zMzOHMzMwwysrK',
-	// 15x8 argb
-	cloudError:
-		'AAAAAAAAAAAAAAAAAAAAABj/AACj/wIC7P8BAfX/Cwv+/0xM///m5vD+/v51+/v7A////wAAAAAAAAAAAAAAAAAAA' +
-		'AAAAAAAGf8AAMz/AACk/z09kf///////////n5+//8ZGf/54eH/9vb2RfDw8AAAAAAAAAAAAAAAAAAAAAB7//////9bW///g4P0/////' +
-		'P7+/v/90tL//i0t//4UFP/6XFz/7e3tf+np6QAAAAAAAAAAAv///xz///+k//////8XF////////f39//ygoP//CAj/+mVl/+/n5//9F' +
-		'RX/5OTkquDg4DDV1dUC////N////6v////s/v7+//8XF//77+///FlZ//4QEP/0pKT/6urq/+Xl5f/8FBT/3Nzc8dfX18DS0tJKz8/Pt' +
-		'P/////+/v7/+/v7//1OTv/+ERH//DY2/+3Q0P/m5ub/4eHh/+5qav/vWlr/1NTU/9HR0f/Ozs7HzMzM2Pv7+//5+fn/9fX1//PNzf/9G' +
-		'Rn/83Z2/+Li4v/d3d3/7G9v//cqKv/Uw8P/z8/P/83Nzf/MzMzGy8vLVvb29u7y8vL/7e3t/+jo6P/mzc3/81NT//wREf/8ERH/8T4+/' +
-		'9O7u//Nzc3/zMzM/8zMzOHMzMwwysrK',
+/**
+ * Shared style for lock icon display
+ */
+const LOCK_ICON_STYLE: ImageResultProcessedStyle = {
+	type: 'button',
+	color: {
+		color: 0x000000,
+	},
+	text: {
+		text: '🔒',
+		color: 0xc8c8c8,
+		size: 'auto',
+		halign: 'center',
+		valign: 'center',
+	},
 }
 
-// let lastDraw = 0
+const emptySet: ReadonlySet<string> = new Set()
+
+/**
+ * Choose an oversampling factor for a given render resolution.
+ *
+ * Oversampling improves antialiasing quality when rendering at low resolutions, but the benefit
+ * diminishes as the resolution grows while the cost scales with the square of the factor. So we
+ * scale it down for larger buttons, and disable it entirely once the native antialiasing is already
+ * indistinguishable from the oversampled result.
+ *
+ * The decision is keyed on the short edge (`min(width, height)`): that is the axis where detail
+ * (text height, curve smoothness) runs out of pixels first, and using the short edge keeps the
+ * result stable under 90° rotation (which swaps width/height).
+ *
+ * `maxOversampling` caps the result for content that does not need the full factor. Antialiasing
+ * only helps edges, so simple content can request a lower ceiling: a solid fill needs nothing (1),
+ * a small bit of secondary text is fine at 2. The size-based rule still applies below the cap.
+ */
+export function computeOversampling(width: number, height: number, maxOversampling = 4): number {
+	const shortEdge = Math.min(width, height)
+	let oversampling: number
+	if (shortEdge <= 96)
+		oversampling = 4 // Stream Deck hardware sizes (72-96px) - quality critical, and cheap
+	else if (shortEdge <= 168)
+		oversampling = 2 // Larger surfaces incl. SD+ LCD strip (200x100) - near-identical, ~3x cheaper
+	else oversampling = 1 // Emulator/web/large LCDs - native AA already matches os4, up to ~30-47x cheaper
+
+	return Math.min(oversampling, maxOversampling)
+}
 
 export class GraphicsRenderer {
+	static #IMAGE_CACHE = new Map<string, Image[]>()
+
+	/** Static cache for text layout computations, shared across all Image instances */
+	static #textLayoutCache: TextLayoutCache = new QuickLRU({ maxSize: 5000 })
+
+	/**
+	 * Get a cached Image instance.
+	 * Note: This assumes that the image is modified sync
+	 */
+	static #getCachedImage<T>(width: number, height: number, oversampling: number, fcn: (image: Image) => T): T {
+		const key = `${width}x${height}x${oversampling}`
+
+		let pool = GraphicsRenderer.#IMAGE_CACHE.get(key)
+		if (!pool) {
+			pool = []
+			GraphicsRenderer.#IMAGE_CACHE.set(key, pool)
+		}
+
+		const img = pool.pop() || Image.create(width, height, oversampling, GraphicsRenderer.#textLayoutCache)
+		img.clear()
+
+		const res = fcn(img)
+		if (isPromise(res)) {
+			res
+				.finally(() => {
+					pool.push(img)
+				})
+				.catch(() => null)
+			return res
+		} else {
+			pool.push(img)
+			return res
+		}
+	}
+
 	/**
 	 * Draw the image for an empty button
 	 */
-	static drawBlank(options: GraphicsOptions, location: ControlLocation | null): ImageResult {
-		// let now = performance.now()
-		// console.log('starting drawBlank ' + now, 'time elapsed since last start ' + (now - lastDraw))
-		// lastDraw = now
-		// console.time('drawBlankImage')
-		const img = new Image(72, 72, 2)
+	static drawBlank(showTopbar: boolean, location: ControlLocation | null): ImageResult {
+		// A blank is a solid fill, plus (with a topbar) some small secondary text. So it never needs
+		// the full oversampling: cap at 1 when there are no edges to antialias, 2 for the topbar text.
+		const maxOversampling = showTopbar ? 2 : 1
 
+		return new ImageResult(null, async (width, height, rotation, format) => {
+			const dimensions = rotateResolution(width, height, rotation)
+			return GraphicsRenderer.#getCachedImage(
+				dimensions[0],
+				dimensions[1],
+				computeOversampling(dimensions[0], dimensions[1], maxOversampling),
+				async (img) => {
+					GraphicsRenderer.#drawBlankImage(img, showTopbar, location)
+
+					return this.#RotateAndConvertImage(img, width, height, rotation, format)
+				}
+			)
+		})
+	}
+
+	static #drawBlankImage(img: Image, showTopbar: boolean, location: ControlLocation | null) {
 		img.fillColor('black')
 
-		if (!options.remove_topbar) {
-			img.drawTextLine(2, 3, location ? formatLocation(location) : 'x/x', 'rgb(50, 50, 50)', 8)
-			img.horizontalLine(13.5, 'rgb(30, 30, 30)')
+		if (showTopbar) {
+			const topBarBounds = new DrawBounds(
+				0,
+				0,
+				img.width,
+				Math.max(ButtonDecorationRenderer.DEFAULT_HEIGHT, Math.floor(0.2 * img.height))
+			)
+
+			ButtonDecorationRenderer.drawStatusBar(
+				img,
+				{
+					pushed: false,
+					location: location ?? undefined,
+					stepCount: 1,
+					stepCurrent: 1,
+					button_status: undefined,
+					action_running: undefined,
+				},
+				topBarBounds,
+				true
+			)
 		}
-		// console.timeEnd('drawBlankImage')
-		return new ImageResult(img.buffer(), img.realwidth, img.realheight, img.toDataURLSync(), undefined)
 	}
 
-	static wrapDrawButtonImage(
-		buffer: Buffer,
+	/**
+	 * Draw the image for a button
+	 */
+	static async drawButtonImageBuffer(
+		drawStyle: RendererDrawStyle,
+		resolution: { width: number; height: number; oversampling: number },
+		rotation: SurfaceRotation | null,
+		format: imageRs.PixelFormat
+	): Promise<Uint8Array> {
+		const dimensions = rotateResolution(resolution.width, resolution.height, rotation)
+
+		const { buffer, width, height } = await GraphicsRenderer.#getCachedImage(
+			dimensions[0],
+			dimensions[1],
+			resolution.oversampling,
+			async (img) => {
+				await GraphicsLayeredButtonRenderer.draw(img, drawStyle, emptySet, null, {
+					x: 0,
+					y: 0,
+				})
+
+				return {
+					buffer: img.buffer(),
+					width: img.realwidth,
+					height: img.realheight,
+				}
+			}
+		)
+
+		return transformButtonImage(buffer, width, height, rotation, resolution.width, resolution.height, format)
+	}
+
+	/**
+	 * Create a 200px preview WebP from the original image
+	 */
+	static async createImagePreview(
+		originalDataUrl: string
+	): Promise<{ width: number; height: number; previewDataUrl: string }> {
+		try {
+			// Load the original image data directly from data URL
+			const originalImage = await loadImage(originalDataUrl)
+
+			// Get original dimensions
+			const originalWidth = originalImage.width
+			const originalHeight = originalImage.height
+
+			// Calculate preview dimensions (max 200px on longest side, but don't upsize small images)
+			const maxSize = 200
+			let previewWidth: number
+			let previewHeight: number
+
+			// Check if the image is smaller than the target preview size
+			const largestDimension = Math.max(originalWidth, originalHeight)
+
+			if (largestDimension <= maxSize) {
+				// Image is smaller than target size - don't upsize, just use original dimensions
+				previewWidth = originalWidth
+				previewHeight = originalHeight
+			} else {
+				// Image is larger than target size - downsize to fit within maxSize
+				if (originalWidth > originalHeight) {
+					previewWidth = maxSize
+					previewHeight = Math.round((originalHeight * previewWidth) / originalWidth)
+				} else {
+					previewHeight = maxSize
+					previewWidth = Math.round((originalWidth * previewHeight) / originalHeight)
+				}
+			}
+
+			// Create preview canvas
+			const canvas = new Canvas(previewWidth, previewHeight)
+			const ctx = canvas.getContext('2d')
+
+			// Draw resized image
+			ctx.drawImage(originalImage, 0, 0, previewWidth, previewHeight)
+
+			// Convert to data URL (WebP format with 75% quality)
+			const previewDataUrl = canvas.toDataURL('image/webp', 0.75)
+
+			return {
+				width: originalWidth,
+				height: originalHeight,
+				previewDataUrl,
+			}
+		} catch (e) {
+			throw new Error(`Failed to process image: ${e instanceof Error ? e.message : e}`, { cause: e })
+		}
+	}
+
+	static async #RotateAndConvertImage(
+		img: Image,
 		width: number,
 		height: number,
-		dataUrl: string,
-		draw_style: DrawStyleModel['style'] | undefined,
-		drawStyle: DrawStyleModel
-	): ImageResult {
-		const draw_style2 = draw_style === 'button' ? (drawStyle.style === 'button' ? drawStyle : undefined) : draw_style
+		rotation: SurfaceRotation | null,
+		format: imageRs.PixelFormat
+	): Promise<Buffer> {
+		// Future: once we support rotation within Image, we can avoid this final transform
 
-		return new ImageResult(buffer, width, height, dataUrl, draw_style2)
+		return transformButtonImage(img.buffer(), img.realwidth, img.realheight, rotation, width, height, format)
 	}
 
 	/**
-	 * Draw the image for a btuton
+	 * Draw a lock icon for a given size
+	 * @param width Width of the image
+	 * @param height Height of the image
 	 */
-	static async drawButtonImageUnwrapped(
-		options: GraphicsOptions,
-		drawStyle: DrawStyleModel,
-		location: ControlLocation | undefined,
-		pagename: string | undefined
-	): Promise<{
-		buffer: Buffer
-		width: number
-		height: number
-		dataUrl: string
-		draw_style: DrawStyleModel['style'] | undefined
-	}> {
-		// console.log('starting drawButtonImage '+ performance.now())
-		// console.time('drawButtonImage')
-		const img = new Image(72, 72, 4)
+	static drawLockIcon(): ImageResult {
+		return new ImageResult(LOCK_ICON_STYLE, async (width, height, rotation, format) => {
+			const dimensions = rotateResolution(width, height, rotation)
+			return GraphicsRenderer.#getCachedImage(
+				dimensions[0],
+				dimensions[1],
+				computeOversampling(dimensions[0], dimensions[1]),
+				async (img) => {
+					// Fill with black background
+					img.fillColor('rgb(0, 0, 0)')
 
-		let draw_style: DrawStyleModel['style'] | undefined = undefined
+					// Draw a centered padlock unicode character in light grey
+					img.drawAlignedText(
+						0,
+						0,
+						dimensions[0],
+						dimensions[1],
+						'🔒',
+						'rgb(200, 200, 200)',
+						Math.floor(dimensions[1] * 0.6),
+						false,
+						'center',
+						'center'
+					)
 
-		// special button types
-		if (drawStyle.style == 'pageup') {
-			draw_style = 'pageup'
-
-			img.fillColor(colorDarkGrey)
-
-			if (options.page_plusminus) {
-				img.drawTextLine(31, 20, options.page_direction_flipped ? '–' : '+', colorWhite, 18)
-			} else {
-				img.drawPath(
-					[
-						[46, 30],
-						[36, 20],
-						[26, 30],
-					],
-					colorWhite,
-					2
-				) // Arrow up path
-			}
-
-			img.drawTextLineAligned(36, 39, 'UP', colorButtonYellow, 10, 'center', 'top')
-		} else if (drawStyle.style == 'pagedown') {
-			draw_style = 'pagedown'
-
-			img.fillColor(colorDarkGrey)
-
-			if (options.page_plusminus) {
-				img.drawTextLine(31, 36, options.page_direction_flipped ? '+' : '–', colorWhite, 18)
-			} else {
-				img.drawPath(
-					[
-						[46, 40],
-						[36, 50],
-						[26, 40],
-					],
-					colorWhite,
-					2
-				) // Arrow down path
-			}
-
-			img.drawTextLineAligned(36, 23, 'DOWN', colorButtonYellow, 10, 'center', 'top')
-		} else if (drawStyle.style == 'pagenum') {
-			draw_style = 'pagenum'
-
-			img.fillColor(colorDarkGrey)
-
-			if (location === undefined) {
-				// Preview (no location)
-				img.drawTextLineAligned(36, 18, 'PAGE', colorButtonYellow, 10, 'center', 'top')
-				img.drawTextLineAligned(36, 32, 'x', colorWhite, 18, 'center', 'top')
-			} else if (!pagename || pagename.toLowerCase() == 'page') {
-				img.drawTextLine(23, 18, 'PAGE', colorButtonYellow, 10)
-				img.drawTextLineAligned(36, 32, '' + location.pageNumber, colorWhite, 18, 'center', 'top')
-			} else {
-				img.drawAlignedText(0, 0, 72, 72, pagename, colorWhite, 18, 'center', 'center')
-			}
-		} else if (drawStyle.style === 'button') {
-			draw_style = 'button'
-
-			await GraphicsRenderer.#drawButtonMain(img, options, drawStyle, location)
-		}
-
-		// console.timeEnd('drawButtonImage')
-		return {
-			buffer: img.buffer(),
-			width: img.realwidth,
-			height: img.realheight,
-			dataUrl: img.toDataURLSync(),
-			draw_style,
-		}
-	}
-
-	/**
-	 * Draw the main button
-	 */
-	static async #drawButtonMain(
-		img: Image,
-		options: GraphicsOptions,
-		drawStyle: DrawStyleButtonModel,
-		location: ControlLocation | undefined
-	): Promise<void> {
-		let showTopbar = !!drawStyle.show_topbar
-		if (drawStyle.show_topbar === 'default' || drawStyle.show_topbar === undefined) {
-			showTopbar = !options.remove_topbar
-		}
-
-		// handle upgrade from pre alignment-support configuration
-		if (drawStyle.alignment === undefined) {
-			drawStyle.alignment = 'center:center'
-		}
-		if (drawStyle.pngalignment === undefined) {
-			drawStyle.pngalignment = 'center:center'
-		}
-
-		// Draw background color first
-		if (!showTopbar) {
-			img.box(0, 0, 72, 72, parseColor(drawStyle.bgcolor))
-		} else {
-			img.box(0, 14, 72, 72, parseColor(drawStyle.bgcolor))
-		}
-
-		// Draw background PNG if exists
-		if (drawStyle.png64 !== undefined && drawStyle.png64 !== null) {
-			try {
-				const png64 = drawStyle.png64.startsWith('data:image/png;base64,') ? drawStyle.png64.slice(22) : drawStyle.png64
-				const data = Buffer.from(png64, 'base64')
-				const [halign, valign] = ParseAlignment(drawStyle.pngalignment)
-
-				if (!showTopbar) {
-					await img.drawFromPngData(data, 0, 0, 72, 72, halign, valign, 'fit_or_shrink')
-				} else {
-					await img.drawFromPngData(data, 0, 14, 72, 58, halign, valign, 'fit_or_shrink')
+					return this.#RotateAndConvertImage(img, width, height, rotation, format)
 				}
-			} catch (e) {
-				console.error('error drawing image:', e)
-				img.box(0, 14, 71, 57, 'black')
-				if (!showTopbar) {
-					img.drawAlignedText(2, 2, 68, 68, 'PNG ERROR', 'red', 10, 'center', 'center')
-				} else {
-					img.drawAlignedText(2, 18, 68, 52, 'PNG ERROR', 'red', 10, 'center', 'center')
+			)
+		})
+	}
+
+	/**
+	 * Flatten an array of imagebuffers into a single base64 image
+	 */
+	static async drawImageBuffers(showTopBar: boolean, imageBuffers: DrawImageBuffer[]): Promise<string> {
+		const imageWidth = 72
+		const imageHeight = showTopBar ? 72 - ButtonDecorationRenderer.DEFAULT_HEIGHT : 72
+
+		return GraphicsRenderer.#getCachedImage(
+			imageWidth,
+			imageHeight,
+			computeOversampling(imageWidth, imageHeight),
+			async (img) => {
+				for (const imageBuffer of imageBuffers) {
+					if (imageBuffer.buffer) {
+						const x = imageBuffer.x ?? 0
+						const y = imageBuffer.y ?? 0
+						const width = imageBuffer.width || imageWidth
+						const height = imageBuffer.height || imageHeight
+
+						img.drawPixelBuffer(x, y, width, height, imageBuffer.buffer, imageBuffer.pixelFormat, imageBuffer.drawScale)
+					}
 				}
 
-				GraphicsRenderer.#drawTopbar(img, showTopbar, drawStyle, location)
-				return
+				return img.toDataURLSync()
 			}
-		}
-
-		// Draw images from feedbacks
-		try {
-			for (const image of drawStyle.imageBuffers || []) {
-				if (image.buffer) {
-					const yOffset = showTopbar ? 14 : 0
-
-					const x = image.x ?? 0
-					const y = yOffset + (image.y ?? 0)
-					const width = image.width || 72
-					const height = image.height || 72 - yOffset
-
-					img.drawPixelBuffer(x, y, width, height, image.buffer, image.pixelFormat, image.drawScale)
-				}
-			}
-		} catch (_e) {
-			img.fillColor('black')
-			if (!showTopbar) {
-				img.drawAlignedText(2, 2, 68, 68, 'IMAGE\\nDRAW\\nERROR', 'red', 10, 'center', 'center')
-			} else {
-				img.drawAlignedText(2, 18, 68, 52, 'IMAGE\\nDRAW\\nERROR', 'red', 10, 'center', 'center')
-			}
-
-			GraphicsRenderer.#drawTopbar(img, showTopbar, drawStyle, location)
-			return
-		}
-
-		// Draw button text
-		const [halign, valign] = ParseAlignment(drawStyle.alignment)
-
-		let fontSize: 'auto' | number = 'auto'
-		if (drawStyle.size == 'small') {
-			fontSize = 7 // compatibility with v1 database
-		} else if (drawStyle.size == 'large') {
-			fontSize = 14 // compatibility with v1 database
-		} else {
-			fontSize = Number(drawStyle.size) || 'auto'
-		}
-
-		if (!showTopbar) {
-			img.drawAlignedText(2, 1, 68, 70, drawStyle.text, parseColor(drawStyle.color), fontSize, halign, valign)
-		} else {
-			img.drawAlignedText(2, 15, 68, 57, drawStyle.text, parseColor(drawStyle.color), fontSize, halign, valign)
-		}
-
-		// At last draw Topbar on top
-		GraphicsRenderer.#drawTopbar(img, showTopbar, drawStyle, location)
-	}
-
-	/**
-	 * Draw the topbar onto an image for a button
-	 */
-	static #drawTopbar(
-		img: Image,
-		showTopbar: boolean,
-		drawStyle: DrawStyleButtonModel,
-		location: ControlLocation | undefined
-	) {
-		if (!showTopbar) {
-			if (drawStyle.pushed) {
-				img.drawBorder(3, colorButtonYellow)
-			}
-		} else {
-			let step = ''
-			img.box(0, 0, 72, 13.5, colorBlack)
-			img.horizontalLine(13.5, colorButtonYellow)
-
-			if (drawStyle.stepCount > 1 && location) {
-				step = `.${drawStyle.stepCurrent}`
-			}
-
-			if (location === undefined) {
-				// Preview (no location)
-				img.drawTextLine(4, 2, `x.x${step}`, colorButtonYellow, 9)
-			} else if (drawStyle.pushed) {
-				img.box(0, 0, 72, 14, colorButtonYellow)
-				img.drawTextLine(4, 2, `${formatLocation(location)}${step}`, colorBlack, 9)
-			} else {
-				img.drawTextLine(4, 2, `${formatLocation(location)}${step}`, colorButtonYellow, 9)
-			}
-		}
-
-		// Draw status icons from right to left
-		let rightMax = 72
-
-		// first the cloud icon if present
-		if (drawStyle.cloud_error && showTopbar) {
-			img.drawPixelBuffer(rightMax - 17, 3, 15, 8, internalIcons.cloudError)
-			rightMax -= 17
-		} else if (drawStyle.cloud && showTopbar) {
-			img.drawPixelBuffer(rightMax - 17, 3, 15, 8, internalIcons.cloud)
-			rightMax -= 17
-		}
-
-		// next error or warning icon
-		if (location) {
-			let statusColor: string | undefined
-			switch (drawStyle.button_status) {
-				case 'error':
-					statusColor = 'red'
-					break
-				case 'warning':
-					statusColor = 'rgb(255, 127, 0)'
-					break
-			}
-
-			if (statusColor) {
-				img.drawFilledPath(
-					[
-						[rightMax - 11, 11],
-						[rightMax - 2, 11],
-						[rightMax - 6.5, 2],
-					],
-					statusColor
-				)
-				img.drawTextLineAligned(rightMax - 6.5, 11, '!', colorBlack, 7, 'center', 'bottom', 'bold')
-				rightMax -= 11
-			}
-
-			// last running icon
-			if (drawStyle.action_running) {
-				//img.drawTextLine(55, 3, '►', 'rgb(0, 255, 0)', 8) // not as nice
-				let iconcolor = 'rgb(0, 255, 0)'
-				if (drawStyle.pushed) iconcolor = colorBlack
-				img.drawFilledPath(
-					[
-						[rightMax - 8, 3],
-						[rightMax - 2, 7],
-						[rightMax - 8, 11],
-					],
-					iconcolor
-				)
-				rightMax -= 8
-			}
-		}
-	}
-
-	/**
-	 * Draw pincode entry button for given number
-	 * @param num Display number
-	 */
-	static drawPincodeNumber(num: number): ImageResult {
-		const img = new Image(72, 72, 3)
-		img.fillColor(colorDarkGrey)
-		img.drawTextLineAligned(36, 36, `${num}`, colorWhite, 44, 'center', 'center')
-		return new ImageResult(img.buffer(), img.realwidth, img.realheight, img.toDataURLSync(), undefined)
-	}
-
-	/**
-	 * Draw pincode entry button
-	 */
-	static drawPincodeEntry(code: string | undefined): ImageResult {
-		const img = new Image(72, 72, 4)
-		img.fillColor(colorDarkGrey)
-		img.drawTextLineAligned(36, 30, 'Lockout', colorButtonYellow, 14, 'center', 'center')
-		if (code !== undefined) {
-			img.drawAlignedText(0, 15, 72, 72, code.replace(/[a-z0-9]/gi, '*'), colorWhite, 18, 'center', 'center')
-		}
-
-		return new ImageResult(img.buffer(), img.realwidth, img.realheight, img.toDataURLSync(), undefined)
+		)
 	}
 }

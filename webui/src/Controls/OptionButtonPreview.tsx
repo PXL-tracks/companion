@@ -1,11 +1,12 @@
-import React, { useState } from 'react'
-import { ButtonPreviewBase } from '~/Components/ButtonPreview.js'
 import { useSubscription } from '@trpc/tanstack-react-query'
+import { useState } from 'react'
+import type { ExpressionableOptionsObject } from '@companion-app/shared/Model/Options.js'
+import { ButtonPreviewBase } from '~/Components/ButtonPreview.js'
 import { trpc } from '~/Resources/TRPC'
 
 interface OptionButtonPreviewProps {
 	controlId: string
-	options: Record<string, any>
+	options: ExpressionableOptionsObject
 }
 
 /**

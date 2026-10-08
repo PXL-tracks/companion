@@ -1,29 +1,26 @@
-import { CreateExpressionVariableControlId } from '@companion-app/shared/ControlId.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import type { SomeControl } from './IControlFragments.js'
+import type EventEmitter from 'node:events'
 import { nanoid } from 'nanoid'
-import type { ControlChangeEvents, ControlDependencies } from './ControlDependencies.js'
 import z from 'zod'
-import type { DataStoreTableView } from '../Data/StoreBase.js'
-import type EventEmitter from 'events'
-import type { SomeControlModel } from '@companion-app/shared/Model/Controls.js'
-import type { ExpressionVariableCollections } from './ExpressionVariableCollections.js'
-import { ControlExpressionVariable } from './ControlTypes/ExpressionVariable.js'
-import { validateExpressionVariableControlId } from './Util.js'
+import { CreateExpressionVariableControlId } from '@companion-app/shared/ControlId.js'
+import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
 import type {
 	ClientExpressionVariableData,
 	ExpressionVariableUpdate,
 	ExpressionVariableUpdateInitOp,
 } from '@companion-app/shared/Model/ExpressionVariableModel.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
+import type { ControlChangeEvents, ControlDependencies } from './ControlDependencies.js'
+import type { ControlStore } from './ControlStore.js'
+import { ControlExpressionVariable } from './ControlTypes/ExpressionVariable.js'
+import type { ExpressionVariableCollections } from './ExpressionVariableCollections.js'
 import type { ExpressionVariableNameMap } from './ExpressionVariableNameMap.js'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
+import { validateExpressionVariableControlId } from './Util.js'
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export function createExpressionVariableTrpcRouter(
 	changeEvents: EventEmitter<ControlChangeEvents>,
 	expressionVariableCollections: ExpressionVariableCollections,
-	dbTable: DataStoreTableView<Record<string, SomeControlModel>>,
-	controlsMap: Map<string, SomeControl<any>>,
+	controlStore: ControlStore,
 	expressionVariableNamesMap: ExpressionVariableNameMap,
 	deps: ControlDependencies
 ) {
@@ -35,7 +32,7 @@ export function createExpressionVariableTrpcRouter(
 
 			const variables: Record<string, ClientExpressionVariableData> = {}
 
-			for (const [controlId, control] of controlsMap.entries()) {
+			for (const [controlId, control] of controlStore.controls.entries()) {
 				if (control instanceof ControlExpressionVariable) {
 					variables[controlId] = control.toClientJSON()
 				}
@@ -53,7 +50,8 @@ export function createExpressionVariableTrpcRouter(
 			const rootEntity = deps.instance.definitions.createEntityItem(
 				'internal',
 				EntityModelType.Feedback,
-				'expression_value'
+				'expression_value',
+				null
 			)
 			if (!rootEntity) throw new Error('Failed to get initial entity for expression variable')
 
@@ -64,11 +62,11 @@ export function createExpressionVariableTrpcRouter(
 				throw new Error('Failed to add feedback entity to expression variable')
 			}
 
-			controlsMap.set(controlId, newControl)
+			controlStore.controls.set(controlId, newControl)
 
 			// Add variable to the end of the list
 			const allExpressionVariables: ControlExpressionVariable[] = []
-			for (const control of controlsMap.values()) {
+			for (const control of controlStore.controls.values()) {
 				if (control instanceof ControlExpressionVariable) {
 					allExpressionVariables.push(control)
 				}
@@ -92,13 +90,11 @@ export function createExpressionVariableTrpcRouter(
 				return false
 			}
 
-			const control = controlsMap.get(controlId) as ControlExpressionVariable | undefined
+			const control = controlStore.controls.get(controlId) as ControlExpressionVariable | undefined
 			if (control) {
 				control.destroy()
 
-				controlsMap.delete(controlId)
-
-				dbTable.delete(controlId)
+				controlStore.deleteControl(controlId)
 
 				return true
 			}
@@ -115,7 +111,7 @@ export function createExpressionVariableTrpcRouter(
 
 			const newControlId = CreateExpressionVariableControlId(nanoid())
 
-			const fromControl = controlsMap.get(controlId)
+			const fromControl = controlStore.controls.get(controlId)
 			if (fromControl && fromControl instanceof ControlExpressionVariable) {
 				const controlJson = fromControl.toJSON(true)
 
@@ -126,7 +122,7 @@ export function createExpressionVariableTrpcRouter(
 					controlJson,
 					true
 				)
-				controlsMap.set(newControlId, newControl)
+				controlStore.controls.set(newControlId, newControl)
 
 				expressionVariableNamesMap.addExpressionVariable(newControlId, newControl.options.variableName)
 
@@ -147,7 +143,7 @@ export function createExpressionVariableTrpcRouter(
 			.mutation(({ input }) => {
 				const { collectionId, controlId, dropIndex } = input
 
-				const thisExpressionVariable = controlsMap.get(controlId)
+				const thisExpressionVariable = controlStore.controls.get(controlId)
 				if (!thisExpressionVariable || !(thisExpressionVariable instanceof ControlExpressionVariable)) return false
 
 				if (!expressionVariableCollections.doesCollectionIdExist(collectionId)) return false
@@ -158,13 +154,15 @@ export function createExpressionVariableTrpcRouter(
 				}
 
 				// find all the other triggers with the matching collectionId
-				const sortedExpressionVariables = Array.from(controlsMap.values())
+				const sortedExpressionVariables = controlStore.controls
+					.values()
 					.filter(
 						(control): control is ControlExpressionVariable =>
 							control.controlId !== controlId &&
 							control instanceof ControlExpressionVariable &&
 							((!control.options.collectionId && !collectionId) || control.options.collectionId === collectionId)
 					)
+					.toArray()
 					.sort((a, b) => (a.options.sortOrder || 0) - (b.options.sortOrder || 0))
 
 				if (dropIndex < 0) {

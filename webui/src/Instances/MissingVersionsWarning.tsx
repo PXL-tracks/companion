@@ -1,11 +1,12 @@
-import { CAlert, CButton } from '@coreui/react'
 import { faDownload } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import React, { useCallback, useContext } from 'react'
+import { useCallback, useContext } from 'react'
+import type { ClientInstanceConfigBase, ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { StaticAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
 import { useComputed } from '~/Resources/util.js'
-import type { ClientInstanceConfigBase, ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore'
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -24,15 +25,16 @@ export function useMissingVersionsCount(
 				continue
 			}
 
-			const module = modules.getModuleInfo(moduleType, instance.moduleId)
-			if (!module) {
+			const moduleInfo = modules.getModuleInfo(moduleType, instance.moduleId)
+			if (!moduleInfo) {
 				count++
 				continue
 			}
 
 			// check for version
-			if (module.devVersion && instance.moduleVersionId === 'dev') continue
-			if (module.installedVersions.find((v) => v.versionId === instance.moduleVersionId)) continue
+			if (moduleInfo.devVersion && instance.moduleVersionId === 'dev') continue
+			if (moduleInfo.builtinVersion && instance.moduleVersionId === 'builtin') continue
+			if (moduleInfo.installedVersions.find((v) => v.versionId === instance.moduleVersionId)) continue
 
 			// Not found
 			count++
@@ -64,13 +66,13 @@ export const MissingVersionsWarning = observer(function MissingVersionsWarning({
 	if (missingCount === 0) return null
 
 	return (
-		<CAlert color="info">
+		<StaticAlert color="info">
 			Some modules do not have versions specified, or are not installed.
 			<br />
-			<CButton color="info" className="mt-2" onClick={doInstallAllMissing}>
+			<Button color="info" className="mt-2" onClick={doInstallAllMissing}>
 				<FontAwesomeIcon icon={faDownload} />
 				&nbsp;Download &amp; Install missing versions
-			</CButton>
-		</CAlert>
+			</Button>
+		</StaticAlert>
 	)
 })

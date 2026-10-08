@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react'
 import classnames from 'classnames'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 
 // Single pixel of red
@@ -9,17 +9,23 @@ export const RedImage: string =
 
 export interface ButtonPreviewProps extends Omit<ButtonPreviewBaseProps, 'onClick'> {
 	onClick?: (location: ControlLocation, pressed: boolean) => void
+	onContextMenu?: (location: ControlLocation, x: number, y: number) => void
+	copySource?: boolean
+	contextMenuOpen?: boolean
 	location: ControlLocation
 }
 
-export const ButtonPreview = React.memo(function ButtonPreview(props: ButtonPreviewProps) {
+export const ButtonPreview = memo(function ButtonPreview(props: ButtonPreviewProps) {
 	const classes = {
 		'button-control': true,
-		fixed: !!props.fixedSize,
+		fixed: !!props.fixedSize && props.fixedSize !== 100,
+		'fixed-100': props.fixedSize === 100,
 		drophere: props.canDrop,
 		drophover: props.dropHover,
 		draggable: !!props.dragRef,
 		selected: props.selected,
+		'copy-source': !!props.copySource,
+		'context-menu-open': !!props.contextMenuOpen,
 		clickable: !!props.onClick,
 		right: !!props.right,
 	}
@@ -30,45 +36,108 @@ export const ButtonPreview = React.memo(function ButtonPreview(props: ButtonPrev
 
 	const rawOnClick = props.onClick
 	const rawLocation = props.location
+	const rawOnContextMenu = props.onContextMenu
+
+	// Tracks whether a press-down was actually fired, so we can ensure a matching release.
+	// Also guards against pointercancel (button=0) firing spuriously after right-click.
+	const isPressedRef = useRef(false)
+
+	// Merge our own ref onto the root element (alongside any dnd dropRef) so we can attach a native,
+	// non-passive touchstart listener below.
+	const rootElementRef = useRef<HTMLDivElement | null>(null)
+	const dropRef = props.dropRef
+	const setRootRef = useCallback(
+		(el: HTMLDivElement | null) => {
+			rootElementRef.current = el
+			dropRef?.(el)
+		},
+		[dropRef]
+	)
+
+	// On plain hold buttons (no context menu, e.g. the Surface Emulator and the Tablet/Web buttons
+	// page) suppress the browser's long-press gesture entirely: on a stationary touch Android Chrome
+	// otherwise fires a haptic buzz and a context-menu/pointercancel that releases the button early.
+	// This requires a native non-passive listener - React's synthetic onTouchStart is passive and its
+	// preventDefault() is a no-op. Grid buttons (with a context menu) intentionally keep the long-press.
+	useEffect(() => {
+		const el = rootElementRef.current
+		if (!el || rawOnContextMenu) return
+
+		const handleTouchStart = (e: TouchEvent) => {
+			e.preventDefault()
+		}
+		el.addEventListener('touchstart', handleTouchStart, { passive: false })
+		return () => el.removeEventListener('touchstart', handleTouchStart)
+	}, [rawOnContextMenu])
 
 	const doPress = useCallback(
 		(e: React.UIEvent) => {
 			if (e.type !== 'pointerdown' && e.type !== 'mousedown') e.preventDefault()
 			e.stopPropagation()
 
-			rawOnClick?.(rawLocation, true)
+			// Skip primary action for right-click/secondary pointer — context menu only
+			const isSecondaryButton = 'button' in e && (e as React.PointerEvent).button === 2
+			if (!isSecondaryButton) {
+				rawOnClick?.(rawLocation, true)
+				isPressedRef.current = true
+			}
 		},
 		[rawOnClick, rawLocation]
 	)
+
 	const doRelease = useCallback(
 		(e: React.UIEvent) => {
 			e.preventDefault()
 			e.stopPropagation()
 
-			rawOnClick?.(rawLocation, false)
+			if (isPressedRef.current) {
+				isPressedRef.current = false
+				rawOnClick?.(rawLocation, false)
+			}
 		},
 		[rawOnClick, rawLocation]
 	)
 
+	const handleNativeContextMenu = useCallback(
+		(e: React.MouseEvent) => {
+			if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+			e.preventDefault()
+			e.stopPropagation()
+
+			// Without a context menu (e.g. the Surface Emulator or the Tablet/Web buttons page) a
+			// long-press must not release the button - the press has to continue until the finger is
+			// lifted. Otherwise the browser's long-press gesture cancels a stationary hold (issue #4322).
+			if (!rawOnContextMenu) return
+
+			// A press was started (mobile long-press), release it before opening the menu
+			if (isPressedRef.current) {
+				isPressedRef.current = false
+				rawOnClick?.(rawLocation, false)
+			}
+			rawOnContextMenu(rawLocation, e.clientX, e.clientY)
+		},
+		[rawOnContextMenu, rawOnClick, rawLocation]
+	)
+
 	return (
 		<div
-			ref={props.dropRef}
+			ref={setRootRef}
 			className={classnames(classes)}
 			style={props.style}
 			// Prefer the newer pointer events
 			onPointerDown={hasPointerEvents ? doPress : undefined}
 			onPointerUp={hasPointerEvents ? doRelease : undefined}
+			// Only release on pointercancel when a context menu is present. For plain hold buttons
+			// (emulator/tablet), a stationary touch triggers a spurious pointercancel on Android Chrome
+			// that would release the button early; there we keep it held until pointerup (issue #4322).
+			onPointerCancel={hasPointerEvents && rawOnContextMenu ? doRelease : undefined}
 			// Setup the older mouse and touch events for compatibility
 			onMouseDown={!hasPointerEvents ? doPress : undefined}
 			onMouseUp={!hasPointerEvents ? doRelease : undefined}
 			onTouchStart={!hasPointerEvents ? doPress : undefined}
 			onTouchEnd={!hasPointerEvents ? doRelease : undefined}
 			onTouchCancel={!hasPointerEvents ? doRelease : undefined}
-			onContextMenu={(e) => {
-				e.preventDefault()
-				e.stopPropagation()
-				return false
-			}}
+			onContextMenu={handleNativeContextMenu}
 		>
 			<div
 				className="button-border"
@@ -85,7 +154,8 @@ export const ButtonPreview = React.memo(function ButtonPreview(props: ButtonPrev
 })
 
 export interface ButtonPreviewBaseProps {
-	fixedSize?: boolean
+	className?: string
+	fixedSize?: boolean | 100
 	canDrop?: boolean
 	dropHover?: boolean
 	dragRef?: React.RefCallback<HTMLDivElement>
@@ -99,10 +169,11 @@ export interface ButtonPreviewBaseProps {
 	title?: string
 }
 
-export const ButtonPreviewBase = React.memo(function ButtonPreview(props: ButtonPreviewBaseProps) {
+export const ButtonPreviewBase = memo(function ButtonPreview(props: ButtonPreviewBaseProps) {
 	const classes = {
 		'button-control': true,
-		fixed: !!props.fixedSize,
+		fixed: !!props.fixedSize && props.fixedSize !== 100,
+		'fixed-100': props.fixedSize === 100,
 		drophere: props.canDrop,
 		drophover: props.dropHover,
 		draggable: !!props.dragRef,
@@ -115,8 +186,12 @@ export const ButtonPreviewBase = React.memo(function ButtonPreview(props: Button
 
 	return (
 		<div
-			ref={props.dropRef}
-			className={classnames(classes)}
+			// dnd-kit clones the element holding the drag ref into a top-layer popover as the drag
+			// feedback. It must be the outer .button-control (which carries the `.fixed` sizing for
+			// its child .button-border) - putting it on the inner element detaches it from `.fixed`
+			// and the `padding-bottom: 100%` aspect hack then resolves against the viewport.
+			ref={props.dragRef ?? props.dropRef}
+			className={classnames(classes, props.className)}
 			style={props.style}
 			onMouseDown={() => props.onClick?.(true)}
 			onMouseUp={() => props.onClick?.(false)}
@@ -142,7 +217,6 @@ export const ButtonPreviewBase = React.memo(function ButtonPreview(props: Button
 		>
 			<div
 				className="button-border"
-				ref={props.dragRef}
 				style={{
 					backgroundImage: preloadedImage ? `url(${preloadedImage})` : undefined,
 				}}

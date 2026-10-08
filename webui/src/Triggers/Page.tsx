@@ -1,10 +1,3 @@
-import React, { useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { CButton, CButtonGroup, CCol, CFormSwitch, CRow, CInputGroup, CFormInput } from '@coreui/react'
-import { makeAbsolutePath, useComputed } from '~/Resources/util.js'
-import { single as fuzzySingle } from 'fuzzysort'
-import dayjs from 'dayjs'
-import sanitizeHtml from 'sanitize-html'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
 	faAdd,
 	faClone,
@@ -12,25 +5,40 @@ import {
 	faFileExport,
 	faLayerGroup,
 	faList,
-	faTimes,
 	faTrash,
+	faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { CreateTriggerControlId, ParseControlId } from '@companion-app/shared/ControlId.js'
-import { ConfirmExportModal, type ConfirmExportModalRef } from '~/Components/ConfirmExportModal.js'
-import type { ClientTriggerData, TriggerCollection } from '@companion-app/shared/Model/TriggerModel.js'
-import { observer } from 'mobx-react-lite'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { NonIdealState } from '~/Components/NonIdealState.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { Outlet, useMatchRoute, useNavigate } from '@tanstack/react-router'
-import { useTriggerCollectionsApi } from './TriggerCollectionsApi'
-import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper'
+import classnames from 'classnames'
+import dayjs from 'dayjs'
+import { single as fuzzySingle } from 'fuzzysort'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { CreateTriggerControlId, ParseControlId } from '@companion-app/shared/ControlId.js'
+import type { ClientTriggerData, TriggerCollection } from '@companion-app/shared/Model/TriggerModel.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { Button, ButtonGroup, LinkButtonExternal } from '~/Components/Button'
 import { CollectionsNestingTable } from '~/Components/CollectionsNestingTable/CollectionsNestingTable'
-import { TriggersTableContextProvider, useTriggersTableContext } from './TriggersTableContext'
+import { ConfirmExportModal, type ConfirmExportModalRef } from '~/Components/ConfirmExportModal.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { NonIdealState } from '~/Components/NonIdealState.js'
+import { SearchBox } from '~/Components/SearchBox'
+import { SwitchInputField } from '~/Components/SwitchInputField'
+import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper'
+import { useTwoPanelMode } from '~/Hooks/useLayoutMode'
+import { CloseButton, ContextHelpButton } from '~/Layout/PanelIcons'
+import { sanitizeHtmlString } from '~/Resources/SanitizeHtml.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { makeAbsolutePath, useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { useTriggerCollectionsApi } from './TriggerCollectionsApi'
+import { TriggersTableContextProvider, useTriggersTableContext } from './TriggersTableContext'
 
 export const TriggersPage = observer(function Triggers() {
 	const { triggersList } = useContext(RootAppStoreContext)
+	const twoPanelMode = useTwoPanelMode()
 
 	const navigate = useNavigate({ from: '/triggers' })
 
@@ -73,14 +81,12 @@ export const TriggersPage = observer(function Triggers() {
 	}, [triggersList.triggers])
 
 	const [filter, setFilter] = useState('')
-	const clearFilter = useCallback(() => setFilter(''), [])
-	const updateFilter = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setFilter(e.currentTarget.value), [])
 
 	const TriggerItemRow = (item: TriggerDataWithId) => {
 		// Perform a fuzzy filter to hide irrelevant items
 		if (filter) {
 			const search = fuzzySingle(filter, item.name)
-			if (!search || search.score < -10000) return null
+			if (!search || search.score < 0.5) return null
 		}
 		return <TriggersTableRow item={item} />
 	}
@@ -109,48 +115,43 @@ export const TriggersPage = observer(function Triggers() {
 		void navigate({ to: '/triggers' })
 	}, [navigate])
 
-	const showPrimaryPanel = !selectedTriggerId
-	const showSecondaryPanel = !!selectedTriggerId
+	const showPrimaryPanel = twoPanelMode || !selectedTriggerId
+	const showSecondaryPanel = twoPanelMode || !!selectedTriggerId
 
 	return (
-		<CRow className="triggers-page split-panels">
+		<Grid.Row className="triggers-page split-panels">
 			<GenericConfirmModal ref={confirmModalRef} />
 			<ConfirmExportModal ref={exportModalRef} title="Export Triggers" />
 
-			<CCol xs={12} xl={6} className={`primary-panel ${showPrimaryPanel ? '' : 'd-xl-block d-none'}`}>
+			<Grid.Col
+				xs={twoPanelMode ? 6 : 12}
+				className={classnames('primary-panel', showPrimaryPanel ? 'd-block' : 'd-none')}
+			>
 				<div className="flex-column-layout">
 					<div className="fixed-header">
-						<h4>Triggers</h4>
+						<h4 className="button-inline">
+							Triggers
+							<ContextHelpButton action="/user-guide/config/triggers" />
+						</h4>
 						<p style={{ marginBottom: '0.5rem' }}>
 							Triggers allow you to automate Companion by running actions when certain events occur, such as feedback or
 							variable updates.
 						</p>
 
 						<div className="mb-2">
-							<CButtonGroup>
-								<CButton color="primary" onClick={doAddNew} size="sm">
+							<ButtonGroup>
+								<Button color="primary" onClick={doAddNew} size="sm">
 									<FontAwesomeIcon icon={faAdd} /> Add Trigger
-								</CButton>
+								</Button>
 								<CreateCollectionButton />
-							</CButtonGroup>
+							</ButtonGroup>
 
-							<CButton color="secondary" className="right" size="sm" onClick={showExportModal}>
+							<Button color="secondary" className="right" size="sm" onClick={showExportModal}>
 								<FontAwesomeIcon icon={faFileExport} /> Export all
-							</CButton>
+							</Button>
 						</div>
 
-						<CInputGroup className="variables-table-filter mt-2">
-							<CFormInput
-								type="text"
-								placeholder="Filter ..."
-								onChange={updateFilter}
-								value={filter}
-								style={{ fontSize: '1.2em' }}
-							/>
-							<CButton color="danger" onClick={clearFilter}>
-								<FontAwesomeIcon icon={faTimes} />
-							</CButton>
-						</CInputGroup>
+						<SearchBox placeholder="Filter ..." filter={filter} setFilter={setFilter} className="mb-1 mt-2" />
 					</div>
 
 					<div className="scrollable-content">
@@ -176,15 +177,17 @@ export const TriggersPage = observer(function Triggers() {
 						</PanelCollapseHelperProvider>
 					</div>
 				</div>
-			</CCol>
+			</Grid.Col>
 
-			<CCol xs={12} xl={6} className={`secondary-panel ${showSecondaryPanel ? '' : 'd-xl-block d-none'}`}>
+			<Grid.Col xs={twoPanelMode ? 6 : 12} className={`secondary-panel ${showSecondaryPanel ? 'd-block' : 'd-none'}`}>
 				<div className="secondary-panel-simple">
-					{!!selectedTriggerId && <TriggerEditPanelHeading doCloseTrigger={doCloseTrigger} />}
+					{!!selectedTriggerId && (
+						<TriggerEditPanelHeading doCloseTrigger={doCloseTrigger} twoPanelMode={twoPanelMode} />
+					)}
 					<Outlet />
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })
 
@@ -205,25 +208,23 @@ function TriggerGroupHeaderContent({ collection }: { collection: TriggerCollecti
 	const setEnabledMutation = useMutationExt(trpc.controls.triggers.collections.setEnabled.mutationOptions())
 
 	const setEnabled = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const enabled = e.target.checked
-
-			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e: any) => {
-				console.error('Failed to reorder collection', e)
+		(enabled: boolean) => {
+			setEnabledMutation.mutateAsync({ collectionId: collection.id, enabled }).catch((e) => {
+				console.error('Failed to reorder collection', stringifyError(e))
 			})
 		},
 		[setEnabledMutation, collection.id]
 	)
 
 	return (
-		<CFormSwitch
-			className="ms-1"
-			color="success"
-			checked={collection.metaData.enabled}
-			onChange={setEnabled}
-			title={collection.metaData.enabled ? 'Disable collection' : 'Enable collection'}
-			size="xl"
-		/>
+		<div className="ms-1">
+			<SwitchInputField
+				id={undefined}
+				value={collection.metaData.enabled}
+				setValue={setEnabled}
+				tooltip={collection.metaData.enabled ? 'Disable collection' : 'Enable collection'}
+			/>
+		</div>
 	)
 }
 
@@ -239,17 +240,21 @@ const TriggersTableRow = observer(function TriggersTableRow2({ item }: TriggersT
 
 	const setOptionsFieldMutation = useMutationExt(trpc.controls.setOptionsField.mutationOptions())
 
-	const doEnableDisable = useCallback(() => {
-		setOptionsFieldMutation
-			.mutateAsync({
-				controlId: CreateTriggerControlId(item.id),
-				key: 'enabled',
-				value: !item.enabled,
-			})
-			.catch((e) => {
-				console.error('failed to toggle trigger state', e)
-			})
-	}, [setOptionsFieldMutation, item.id, item.enabled])
+	const doEnableDisable = useCallback(
+		(enabled: boolean) => {
+			setOptionsFieldMutation
+				.mutateAsync({
+					controlId: CreateTriggerControlId(item.id),
+					key: 'enabled',
+					value: enabled,
+				})
+				.catch((e) => {
+					console.error('failed to toggle trigger state', e)
+				})
+		},
+		[setOptionsFieldMutation, item.id]
+	)
+
 	const doDelete = useCallback(() => {
 		tableContext.deleteModalRef.current?.show(
 			'Delete trigger',
@@ -278,47 +283,57 @@ const TriggersTableRow = observer(function TriggersTableRow2({ item }: TriggersT
 
 	const descriptionHtml = useMemo(
 		() => ({
-			__html: sanitizeHtml(item.description || 'No events', {
-				allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img']),
-				disallowedTagsMode: 'escape',
-			}),
+			__html: sanitizeHtmlString(item.description || 'No events'),
 		}),
 		[item.description]
 	)
 
+	const collectionDisabled = !(item.collectionEnabled ?? true)
+	const triggerOrCollectionDisabled = !item.enabled || collectionDisabled
+
 	return (
 		<div className="flex flex-row align-items-center gap-2 hand">
-			<div className="flex flex-column grow" style={{ minWidth: 0 }} onClick={doEdit}>
-				<b>{item.name}</b>
+			<div
+				className={classnames('flex flex-column grow', { disabled: triggerOrCollectionDisabled })}
+				style={{ minWidth: 0 }}
+				onClick={doEdit}
+			>
+				<b>
+					{item.name}
+					{item.isRateLimited ? (
+						<span
+							className="ms-2 text-warning"
+							title="This trigger is firing very rapidly and is being rate-limited. This is often caused by an accidental feedback loop, where the trigger's actions change a variable that re-triggers it."
+						>
+							<FontAwesomeIcon icon={faTriangleExclamation} /> Rate limited
+						</span>
+					) : null}
+				</b>
 				<span className="auto-ellipsis" dangerouslySetInnerHTML={descriptionHtml} />
 				{item.lastExecuted ? <small>Last run: {dayjs(item.lastExecuted).format(tableDateFormat)}</small> : ''}
 			</div>
 			<div className="action-buttons w-auto">
-				<CButtonGroup>
-					<CFormSwitch
-						className="ms-1"
-						color="success"
-						checked={item.enabled}
-						onChange={doEnableDisable}
-						title={item.enabled ? 'Disable trigger' : 'Enable trigger'}
-						size="xl"
+				<ButtonGroup className="ms-1">
+					<SwitchInputField
+						id={undefined}
+						value={item.enabled}
+						setValue={doEnableDisable}
+						tooltip={
+							(item.enabled ? 'Disable trigger' : 'Enable trigger') +
+							(collectionDisabled ? ' when collection is enabled.' : '')
+						}
 					/>
 
-					<CButton
-						color="white"
-						href={makeAbsolutePath(`/int/export/triggers/single/${item.id}`)}
-						target="_blank"
-						title="Export"
-					>
+					<LinkButtonExternal href={makeAbsolutePath(`/int/export/triggers/single/${item.id}`)} title="Export">
 						<FontAwesomeIcon icon={faDownload} />
-					</CButton>
-					<CButton color="white" onClick={doClone} title="Clone">
+					</LinkButtonExternal>
+					<Button onClick={doClone} title="Clone">
 						<FontAwesomeIcon icon={faClone} />
-					</CButton>
-					<CButton color="gray" onClick={doDelete} title="Delete">
+					</Button>
+					<Button onClick={doDelete} title="Delete">
 						<FontAwesomeIcon icon={faTrash} />
-					</CButton>
-				</CButtonGroup>
+					</Button>
+				</ButtonGroup>
 			</div>
 		</div>
 	)
@@ -334,24 +349,26 @@ function CreateCollectionButton() {
 	}, [createMutation])
 
 	return (
-		<CButton color="info" size="sm" onClick={doCreateCollection}>
+		<Button color="info" size="sm" onClick={doCreateCollection}>
 			<FontAwesomeIcon icon={faLayerGroup} /> Create Collection
-		</CButton>
+		</Button>
 	)
 }
 
 interface TriggerEditPanelHeadingProps {
 	doCloseTrigger: () => void
+	twoPanelMode: boolean
 }
 
-function TriggerEditPanelHeading({ doCloseTrigger }: TriggerEditPanelHeadingProps) {
+function TriggerEditPanelHeading({ doCloseTrigger, twoPanelMode }: TriggerEditPanelHeadingProps) {
 	return (
 		<div className="secondary-panel-simple-header">
 			<h4 className="panel-title">Edit Trigger</h4>
 			<div className="header-buttons">
-				<div className="float_right ms-1" onClick={doCloseTrigger} title="Close">
-					<FontAwesomeIcon icon={faTimes} size="lg" />
-				</div>
+				<ContextHelpButton action="/user-guide/config/triggers#configuring">
+					Define your trigger here.
+				</ContextHelpButton>
+				{!twoPanelMode && <CloseButton closeFn={doCloseTrigger} />}
 			</div>
 		</div>
 	)

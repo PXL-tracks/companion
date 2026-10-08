@@ -1,6 +1,6 @@
 import type { SurfaceConfig, SurfacePanelConfig } from '@companion-app/shared/Model/Surfaces.js'
-import type { SurfacePanel } from './Types.js'
 import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
+import type { SurfacePanel } from './Types.js'
 
 export const PanelDefaults: SurfacePanelConfig = {
 	// defaults from the panel - TODO properly
@@ -8,10 +8,22 @@ export const PanelDefaults: SurfacePanelConfig = {
 	rotation: 0,
 
 	// companion owned defaults
-	never_lock: false,
 	xOffset: 0,
 	yOffset: 0,
 	groupId: null,
+}
+
+export function createDefaultSurfacePanelConfig(panel: SurfacePanel): SurfacePanelConfig {
+	const panelConfig = structuredClone(PanelDefaults)
+
+	// Add properties and defaults from the panel UI definitions
+	for (const cfield of panel.info.configFields) {
+		if (!(cfield.id in panelConfig) || 'default' in cfield) {
+			panelConfig[cfield.id] = cfield.default
+		}
+	}
+
+	return panelConfig
 }
 
 export function createOrSanitizeSurfaceHandlerConfig(
@@ -20,28 +32,20 @@ export function createOrSanitizeSurfaceHandlerConfig(
 	existingConfig: SurfaceConfig | undefined,
 	gridSize: UserConfigGridSize
 ): SurfaceConfig {
+	const panelDefaultConfig = createDefaultSurfacePanelConfig(panel)
+
 	// Retrieve or create the panel config
 	let panelConfig = existingConfig?.config
 	if (!panelConfig) {
-		panelConfig = structuredClone(PanelDefaults)
-		// add properties & defaults from their UI definitions (so a redundant `getDefaultConfig()` is not needed)
-		for (const cfield of panel.info.configFields) {
-			if (!(cfield.id in panelConfig) || 'default' in cfield) {
-				Object.assign(panelConfig, { [cfield.id]: cfield.default })
-			}
-		}
-		// if `panel.getDefaultConfig() is present, let it override the previous sources...
-		if (typeof panel.getDefaultConfig === 'function') {
-			Object.assign(panelConfig, panel.getDefaultConfig())
-		}
+		panelConfig = panelDefaultConfig
 
 		panelConfig.xOffset = Math.max(0, gridSize.minColumn)
 		panelConfig.yOffset = Math.max(0, gridSize.minRow)
 	} else {
 		// check for new properties but don't change existing fields
-		for (const cfield of panel.info.configFields) {
-			if (!(cfield.id in panelConfig)) {
-				Object.assign(panelConfig, { [cfield.id]: cfield.default })
+		for (const [key, value] of Object.entries(panelDefaultConfig)) {
+			if (!(key in panelConfig)) {
+				panelConfig[key] = structuredClone(value)
 			}
 		}
 	}
@@ -63,13 +67,16 @@ export function createOrSanitizeSurfaceHandlerConfig(
 			use_last_page: panelConfig.use_last_page ?? panelConfig.page === undefined,
 		},
 
+		// Default enabled to true (existing configs without this field are treated as enabled)
+		enabled: true,
+
 		// Use existing config
 		...existingConfig,
 
 		config: panelConfig,
 
 		// Persist some values in the db for use when it is disconnected
-		type: panel.info.type || 'Unknown',
+		type: panel.info.description || 'Unknown',
 		integrationType,
 		gridSize: panel.gridSize,
 	}

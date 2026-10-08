@@ -1,21 +1,22 @@
-import { EmberServer, Model as EmberModel } from 'emberplus-connection'
+import debounceFn from 'debounce-fn'
+import { Model as EmberModel, EmberServer } from 'emberplus-connection'
 // eslint-disable-next-line n/no-missing-import
 import { getPath } from 'emberplus-connection/dist/Ember/Lib/util.js'
-import { ServiceBase } from './Base.js'
-import { formatLocation, xyToOldBankIndex } from '@companion-app/shared/ControlId.js'
-import { pad } from '@companion-app/shared/Util.js'
-import { parseColorToNumber } from '../Resources/Util.js'
-import { LEGACY_MAX_BUTTONS } from '../Resources/Constants.js'
-import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
 // eslint-disable-next-line n/no-missing-import
 import type { EmberValue } from 'emberplus-connection/dist/types/types.js'
-import type { ImageResult } from '../Graphics/ImageResult.js'
+import { formatLocation, oldBankIndexToXY, xyToOldBankIndex } from '@companion-app/shared/ControlId.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import type { ServiceApi } from './ServiceApi.js'
+import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
+import { stringifyVariableValue, type VariableValue } from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { pad } from '@companion-app/shared/Util.js'
 import type { DataUserConfig } from '../Data/UserConfig.js'
+import type { ImageResult } from '../Graphics/ImageResult.js'
 import type { IPageStore } from '../Page/Store.js'
-import debounceFn from 'debounce-fn'
-import type { CompanionVariableValue } from '@companion-module/base'
+import { LEGACY_MAX_BUTTONS } from '../Resources/Constants.js'
+import { parseColorToNumber } from '../Resources/Util.js'
+import { ServiceBase } from './Base.js'
+import type { ServiceApi } from './ServiceApi.js'
 
 // const LOCATION_NODE_CONTROLID = 0
 const LOCATION_NODE_PRESSED = 1
@@ -155,7 +156,7 @@ export class ServiceEmberPlus extends ServiceBase {
 						this.logger.debug(`New custom variable: ${name} restarting server`)
 						this.debounceRestart()
 					} else {
-						const value = this.#serviceApi.getCustomVariableValue(name)?.toString()
+						const value = stringifyVariableValue(this.#serviceApi.getCustomVariableValue(name))
 						if (value === undefined) return
 						this.#updateNodePath(path, value)
 					}
@@ -169,7 +170,7 @@ export class ServiceEmberPlus extends ServiceBase {
 					} else {
 						const value = this.#serviceApi.getConnectionVariableValue('internal', name)
 						if (value === undefined) return
-						this.#updateNodePath(path, value)
+						this.#updateNodePath(path, value as EmberValue)
 					}
 				}
 			})
@@ -207,11 +208,8 @@ export class ServiceEmberPlus extends ServiceBase {
 		for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
 			const children: Record<number, EmberModel.NumberedTreeNodeImpl<any>> = {}
 			for (let bank = 1; bank <= LEGACY_MAX_BUTTONS; bank++) {
-				const controlId = this.#pageStore.getControlIdAtOldBankIndex(pageNumber, bank)
-				const control = controlId ? this.#serviceApi.getControl(controlId) : undefined
-
-				let drawStyle = control?.getDrawStyle?.() || null
-				if (drawStyle?.style !== 'button') drawStyle = null
+				const xy = oldBankIndexToXY(bank)
+				const drawStyle = xy && this.#serviceApi.getCachedRender({ pageNumber, column: xy[0], row: xy[1] })?.style
 
 				children[bank] = new EmberModel.NumberedTreeNodeImpl(
 					bank,
@@ -235,7 +233,7 @@ export class ServiceEmberPlus extends ServiceBase {
 								EmberModel.ParameterType.String,
 								'Label',
 								undefined,
-								drawStyle?.text || '',
+								drawStyle?.text?.text || '',
 								undefined,
 								undefined,
 								EmberModel.ParameterAccess.ReadWrite
@@ -247,7 +245,7 @@ export class ServiceEmberPlus extends ServiceBase {
 								EmberModel.ParameterType.String,
 								'Text_Color',
 								undefined,
-								formatColorAsHex(drawStyle?.color || 0),
+								formatColorAsHex(drawStyle?.text?.color || 0),
 								undefined,
 								undefined,
 								EmberModel.ParameterAccess.ReadWrite
@@ -259,7 +257,7 @@ export class ServiceEmberPlus extends ServiceBase {
 								EmberModel.ParameterType.String,
 								'Background_Color',
 								undefined,
-								formatColorAsHex(drawStyle?.bgcolor || 0),
+								formatColorAsHex(drawStyle?.color?.color || 0),
 								undefined,
 								undefined,
 								EmberModel.ParameterAccess.ReadWrite
@@ -305,16 +303,13 @@ export class ServiceEmberPlus extends ServiceBase {
 				for (let colI = 0; colI < columnCount; colI++) {
 					const column = gridSize.minColumn + colI
 
-					const location = {
+					const location: ControlLocation = {
 						pageNumber,
 						row,
 						column,
 					}
-					const controlId = this.#pageStore.getControlIdAt(location)
-					const control = controlId ? this.#serviceApi.getControl(controlId) : undefined
 
-					let drawStyle = control?.getDrawStyle?.() || null
-					if (drawStyle?.style !== 'button') drawStyle = null
+					const drawStyle = this.#serviceApi.getCachedRender(location)?.style
 
 					rowColumns[colI] = new EmberModel.NumberedTreeNodeImpl(
 						colI,
@@ -342,7 +337,7 @@ export class ServiceEmberPlus extends ServiceBase {
 									EmberModel.ParameterType.String,
 									'Label',
 									undefined,
-									drawStyle?.text || '',
+									drawStyle?.text?.text || '',
 									undefined,
 									undefined,
 									EmberModel.ParameterAccess.ReadWrite
@@ -354,7 +349,7 @@ export class ServiceEmberPlus extends ServiceBase {
 									EmberModel.ParameterType.String,
 									'Text_Color',
 									undefined,
-									formatColorAsHex(drawStyle?.color || 0),
+									formatColorAsHex(drawStyle?.text?.color || 0),
 									undefined,
 									undefined,
 									EmberModel.ParameterAccess.ReadWrite
@@ -366,7 +361,7 @@ export class ServiceEmberPlus extends ServiceBase {
 									EmberModel.ParameterType.String,
 									'Background_Color',
 									undefined,
-									formatColorAsHex(drawStyle?.bgcolor || 0),
+									formatColorAsHex(drawStyle?.color?.color || 0),
 									undefined,
 									undefined,
 									EmberModel.ParameterAccess.ReadWrite
@@ -428,7 +423,7 @@ export class ServiceEmberPlus extends ServiceBase {
 							id,
 							this.#serviceApi.getConnectionVariableDescription('internal', this.#internalVars[i]) ??
 								`Internal variable: ${this.#internalVars[i]}`,
-							value,
+							value as EmberValue,
 							undefined,
 							undefined,
 							EmberModel.ParameterAccess.Read
@@ -452,7 +447,7 @@ export class ServiceEmberPlus extends ServiceBase {
 							EmberModel.ParameterType.String,
 							'string',
 							this.#serviceApi.getCustomVariableDescription(this.#customVars[i]),
-							value?.toString() ?? '',
+							stringifyVariableValue(value) ?? '',
 							undefined,
 							undefined,
 							EmberModel.ParameterAccess.ReadWrite
@@ -566,15 +561,15 @@ export class ServiceEmberPlus extends ServiceBase {
 				.then(() => {
 					this.logger.info('Listening on port ' + this.port)
 				})
-				.catch((e: any) => {
-					this.logger.error(`Could not launch: ${e.message}`)
+				.catch((e) => {
+					this.logger.error(`Could not launch: ${stringifyError(e)}`)
 					this.#server = undefined
 					this.currentState = false
 				})
 
 			this.currentState = true
-		} catch (e: any) {
-			this.logger.error(`Could not launch: ${e.message}`)
+		} catch (e) {
+			this.logger.error(`Could not launch: ${stringifyError(e)}`)
 		}
 	}
 
@@ -613,7 +608,7 @@ export class ServiceEmberPlus extends ServiceBase {
 
 					const control = this.#serviceApi.getControl(controlId)
 					if (control && control.setStyleFields) {
-						control.setStyleFields({ text: value })
+						control.setStyleFields({ text: String(value) })
 
 						// Note: this will be replaced shortly after with the value with feedbacks applied
 						this.#server?.update(parameter, { value })
@@ -678,7 +673,7 @@ export class ServiceEmberPlus extends ServiceBase {
 
 					const control = this.#serviceApi.getControl(controlId)
 					if (control && control.setStyleFields) {
-						control.setStyleFields({ text: value })
+						control.setStyleFields({ text: String(value) })
 
 						// Note: this will be replaced shortly after with the value with feedbacks applied
 						this.#server?.update(parameter, { value })
@@ -723,7 +718,7 @@ export class ServiceEmberPlus extends ServiceBase {
 		) {
 			const customVar = this.#customVars[parseInt(pathInfo[3])]
 			if (value !== undefined && value !== null) {
-				this.#serviceApi.setCustomVariableValue(customVar, value as CompanionVariableValue)
+				this.#serviceApi.setCustomVariableValue(customVar, value as VariableValue)
 			}
 		} else if (pathInfo[0] === '0' && pathInfo[1] === ACTION_RECORDER_NODE.toString()) {
 			switch (pathInfo[2]) {
@@ -785,19 +780,19 @@ export class ServiceEmberPlus extends ServiceBase {
 		if (!this.#server) return
 		//this.logger.info(`Updating ${page}.${bank} label ${this.banks[page][bank].text}`)
 
-		const style = typeof render.style !== 'string' ? render.style : undefined
+		const style = render.style
 
 		// New 'location' path
 		const gridSize = this.userconfig.getKey('gridSize')
 		if (gridSize) {
-			this.#updateNodePath(buildPathForLocation(gridSize, location, LOCATION_NODE_TEXT), style?.text || '')
+			this.#updateNodePath(buildPathForLocation(gridSize, location, LOCATION_NODE_TEXT), style?.text?.text || '')
 			this.#updateNodePath(
 				buildPathForLocation(gridSize, location, LOCATION_NODE_TEXT_COLOR),
-				formatColorAsHex(style?.color || 0)
+				formatColorAsHex(style?.text?.color || 0)
 			)
 			this.#updateNodePath(
 				buildPathForLocation(gridSize, location, LOCATION_NODE_BG_COLOR),
-				formatColorAsHex(style?.bgcolor || 0)
+				formatColorAsHex(style?.color?.color || 0)
 			)
 		}
 
@@ -806,14 +801,14 @@ export class ServiceEmberPlus extends ServiceBase {
 		if (bank === null) return
 
 		// Update ember+ with internal state of button
-		this.#updateNodePath(buildPathForButton(location.pageNumber, bank, LEGACY_NODE_TEXT), style?.text || '')
+		this.#updateNodePath(buildPathForButton(location.pageNumber, bank, LEGACY_NODE_TEXT), style?.text?.text || '')
 		this.#updateNodePath(
 			buildPathForButton(location.pageNumber, bank, LEGACY_NODE_TEXT_COLOR),
-			formatColorAsHex(style?.color || 0)
+			formatColorAsHex(style?.text?.color || 0)
 		)
 		this.#updateNodePath(
 			buildPathForButton(location.pageNumber, bank, LEGACY_NODE_BG_COLOR),
-			formatColorAsHex(style?.bgcolor || 0)
+			formatColorAsHex(style?.color?.color || 0)
 		)
 	}
 

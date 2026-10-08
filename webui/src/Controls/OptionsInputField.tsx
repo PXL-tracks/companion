@@ -1,36 +1,46 @@
-import { CCol, CFormLabel, CInputGroupText } from '@coreui/react'
-import React, { useCallback } from 'react'
-import {
-	CheckboxInputField,
-	ColorInputField,
-	DropdownInputField,
-	MultiDropdownInputField,
-	NumberInputField,
-	TextInputField,
-} from '~/Components/index.js'
-import { InternalCustomVariableDropdown, InternalModuleField } from './InternalModuleField.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faDollarSign, faGlobe, faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
-import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
 import classNames from 'classnames'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
-import { StaticTextFieldText } from './StaticTextField.js'
-import type { LocalVariablesStore } from './LocalVariablesStore.js'
 import { observer } from 'mobx-react-lite'
-import { validateInputValue } from '~/Helpers/validateInputValue.js'
-import { InlineHelp } from '~/Components/InlineHelp.js'
-import { ExpressionInputField } from '~/Components/ExpressionInputField.js'
+import { useCallback, useId } from 'react'
+import type { JsonValue } from 'type-fest'
+import type { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
+import {
+	colorFieldExpressionHint,
+	type ExpressionableOptionsObject,
+	type ExpressionOrValue,
+	type SomeCompanionInputField,
+} from '@companion-app/shared/Model/Options.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { buildContextResolutionForPreview, ExpressionValuePreview } from '~/Components/ExpressionValuePreview.js'
+import { FieldOrExpression } from '~/Components/FieldOrExpression.js'
+import { FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { InlineHelpIcon } from '~/Components/InlineHelp.js'
+import { ListInputField } from '~/Components/ListInputField.js'
+import { TableInputField } from '~/Components/TableInputField.js'
+import { useOptionalEntityEditorContext } from './Components/EntityEditorContext.js'
+import {
+	ExpressionModeFeatures,
+	getInputFeatures,
+	InputFeatureIcons,
+	type InputFeatureIconsProps,
+} from './InputFeatures.js'
+import { DeferredParsingContextVariables, type LocalVariablesStore } from './LocalVariablesStore.js'
+import { OptionsInputControl } from './OptionsInputControl.js'
 
 interface OptionsInputFieldProps {
-	connectionId: string
+	allowInternalFields: boolean
+	controlId?: string | null
 	isLocatedInGrid: boolean
 	entityType: EntityModelType | null
 	option: SomeCompanionInputField
-	value: any
-	setValue: (key: string, value: any) => void
+	value: ExpressionOrValue<JsonValue | undefined> | undefined
+	setValue: (key: string, value: ExpressionOrValue<JsonValue | undefined>) => void
 	visibility: boolean
 	readonly?: boolean
 	localVariablesStore: LocalVariablesStore | null
+	fieldSupportsExpression: boolean
+	/** Full options object for the entity — used to resolve sibling field values for deferred-parsing fields */
+	allRawOptions?: ExpressionableOptionsObject
 }
 
 function OptionLabel({ option, features }: { option: SomeCompanionInputField; features?: InputFeatureIconsProps }) {
@@ -38,186 +48,136 @@ function OptionLabel({ option, features }: { option: SomeCompanionInputField; fe
 		<>
 			{option.label}
 			<InputFeatureIcons {...features} />
-			{option.tooltip && (
-				<InlineHelp help={option.tooltip}>
-					<FontAwesomeIcon icon={faQuestionCircle} />
-				</InlineHelp>
-			)}
+			{option.tooltip && <InlineHelpIcon className="ms-1">{option.tooltip}</InlineHelpIcon>}
 		</>
 	)
 }
 
 export const OptionsInputField = observer(function OptionsInputField({
-	connectionId,
+	allowInternalFields,
+	controlId,
 	isLocatedInGrid,
 	entityType,
 	option,
-	value,
+	value: rawValue,
 	setValue,
 	visibility,
 	readonly,
 	localVariablesStore,
+	fieldSupportsExpression,
+	allRawOptions,
 }: Readonly<OptionsInputFieldProps>): React.JSX.Element {
-	const checkValid = useCallback((value: any) => validateInputValue(option, value) === undefined, [option])
-	const setValue2 = useCallback((val: any) => setValue(option.id, val), [option.id, setValue])
+	const features = getInputFeatures(option)
 
-	if (!option) {
-		return <p>Bad option</p>
+	const previewStatusOnly = useOptionalEntityEditorContext()?.previewStatusOnly ?? false
+
+	const isExpression = option.type === 'expression'
+	let isInExpressionMode = isExpression
+
+	const setControlValue = useCallback(
+		(val: JsonValue) =>
+			setValue(option.id, {
+				isExpression: isExpression,
+				value: val as any,
+			} satisfies ExpressionOrValue<JsonValue>),
+		[option.id, setValue, isExpression]
+	)
+
+	const inputId = useId()
+
+	if (option.type === 'internal:list') {
+		return (
+			<ListInputField
+				definition={option}
+				value={rawValue?.value as Record<string, any>[] | undefined}
+				setValue={(val) => setValue(option.id, { isExpression: false, value: val })}
+				disabled={!!readonly}
+				localVariablesStore={localVariablesStore}
+				entityType={entityType}
+				isLocatedInGrid={isLocatedInGrid}
+				fieldSupportsExpression={fieldSupportsExpression && !option.disableAutoExpression}
+				visibility={visibility}
+			/>
+		)
 	}
 
-	const isInternal = connectionId === 'internal'
-
-	let control: JSX.Element | string | undefined = undefined
-	let features: InputFeatureIconsProps | undefined = undefined
-	switch (option.type) {
-		case 'textinput': {
-			features = {
-				variables: !!option.useVariables,
-				local: typeof option.useVariables === 'object' && !!option.useVariables?.local,
-			}
-
-			const localVariables = features.local
-				? localVariablesStore?.getOptions(entityType, isInternal, isLocatedInGrid)
-				: undefined
-
-			control = option.isExpression ? (
-				<ExpressionInputField value={value} localVariables={localVariables} disabled={readonly} setValue={setValue2} />
-			) : (
-				<TextInputField
-					value={value}
-					placeholder={option.placeholder}
-					useVariables={features.variables}
-					localVariables={localVariables}
-					disabled={readonly}
-					setValue={setValue2}
-					checkValid={checkValid}
-					multiline={option.multiline}
-				/>
-			)
-			break
-		}
-		case 'dropdown': {
-			control = (
-				<DropdownInputField
-					value={value}
-					choices={option.choices}
-					allowCustom={option.allowCustom}
-					minChoicesForSearch={option.minChoicesForSearch}
-					regex={option.regex}
-					disabled={readonly}
-					setValue={setValue2}
-					checkValid={checkValid}
-				/>
-			)
-			break
-		}
-		case 'multidropdown': {
-			control = (
-				<MultiDropdownInputField
-					value={value}
-					choices={option.choices}
-					allowCustom={option.allowCustom}
-					minSelection={option.minSelection}
-					minChoicesForSearch={option.minChoicesForSearch}
-					maxSelection={option.maxSelection}
-					regex={option.regex}
-					disabled={readonly}
-					setValue={setValue2}
-					checkValid={checkValid}
-				/>
-			)
-			break
-		}
-		case 'checkbox': {
-			control = <CheckboxInputField value={value} disabled={readonly} setValue={setValue2} />
-			break
-		}
-		case 'colorpicker': {
-			control = (
-				<ColorInputField
-					value={value}
-					disabled={readonly}
-					setValue={setValue2}
-					enableAlpha={option.enableAlpha ?? false}
-					returnType={option.returnType ?? 'number'}
-					presetColors={option.presetColors}
-				/>
-			)
-			break
-		}
-		case 'number': {
-			control = (
-				<NumberInputField
-					value={value}
-					min={option.min}
-					max={option.max}
-					step={option.step}
-					range={option.range}
-					disabled={readonly}
-					setValue={setValue2}
-					checkValid={checkValid}
-					showMinAsNegativeInfinity={option.showMinAsNegativeInfinity}
-					showMaxAsPositiveInfinity={option.showMaxAsPositiveInfinity}
-				/>
-			)
-			break
-		}
-		case 'static-text': {
-			control = <StaticTextFieldText {...option} />
-			break
-		}
-		case 'custom-variable': {
-			if (entityType === EntityModelType.Action) {
-				control = (
-					<InternalCustomVariableDropdown disabled={!!readonly} value={value} setValue={setValue2} includeNone={true} />
-				)
-			}
-			break
-		}
-		case 'bonjour-device':
-		case 'secret-text':
-			// Not supported here
-			break
-		default:
-			// The 'internal module' is allowed to use some special input fields, to minimise when it reacts to changes elsewhere in the system
-			if (isInternal) {
-				control =
-					InternalModuleField(option, isLocatedInGrid, localVariablesStore, !!readonly, value, setValue2) ?? undefined
-			}
-			// Use default below
-			break
+	if (option.type === 'internal:table') {
+		return (
+			<TableInputField
+				definition={option}
+				value={rawValue?.value as Record<string, JsonValue>[] | undefined}
+				setValue={(val) => setValue(option.id, { isExpression: false, value: val })}
+				disabled={!!readonly}
+				localVariablesStore={localVariablesStore}
+				entityType={entityType}
+				isLocatedInGrid={isLocatedInGrid}
+			/>
+		)
 	}
 
-	if (control === undefined) {
-		control = <CInputGroupText>Unknown type "{option.type}"</CInputGroupText>
+	let control = (
+		<OptionsInputControl
+			inputId={inputId}
+			allowInternalFields={allowInternalFields}
+			isLocatedInGrid={isLocatedInGrid}
+			entityType={entityType}
+			option={option}
+			value={rawValue?.value}
+			setValue={setControlValue}
+			readonly={readonly}
+			localVariablesStore={localVariablesStore}
+			features={features}
+		/>
+	)
+
+	if (fieldSupportsExpression && option.type !== 'expression') {
+		const rawExpressionValue = rawValue || { isExpression: false, value: undefined }
+
+		control = (
+			<FieldOrExpression
+				inputId={inputId}
+				localVariablesStore={localVariablesStore}
+				value={rawExpressionValue}
+				setValue={(val) => setValue(option.id, val)}
+				disabled={!!readonly}
+				entityType={entityType}
+				isLocatedInGrid={isLocatedInGrid}
+				extraLocalVariables={option.contextVariableResolution ? DeferredParsingContextVariables : undefined}
+			>
+				{control}
+			</FieldOrExpression>
+		)
+
+		if (rawExpressionValue?.isExpression) {
+			isInExpressionMode = true
+		}
 	}
+
+	const description = isInExpressionMode
+		? (option.expressionDescription ?? option.description ?? colorFieldExpressionHint(option))
+		: option.description
 
 	return (
 		<>
-			<CFormLabel
-				htmlFor="colFormConnection"
+			<FormLabel
+				htmlFor={inputId}
 				className={classNames('col-sm-4 col-form-label col-form-label-sm', { displayNone: !visibility })}
 			>
-				<OptionLabel option={option} features={features} />
-			</CFormLabel>
-			<CCol sm={8} className={classNames({ displayNone: !visibility })}>
+				<OptionLabel option={option} features={isInExpressionMode ? ExpressionModeFeatures : features} />
+				{isInExpressionMode && (
+					<ExpressionValuePreview
+						expression={stringifyVariableValue(rawValue?.value) ?? ''}
+						controlId={controlId ?? null}
+						fieldDefinition={option}
+						contextResolution={buildContextResolutionForPreview(option.contextVariableResolution, allRawOptions)}
+						statusOnly={previewStatusOnly}
+					/>
+				)}
+			</FormLabel>
+			<Grid.Col sm={8} className={classNames({ displayNone: !visibility })}>
 				{control}
-				{option.description && <div className="form-text">{option.description}</div>}
-			</CCol>
+				{description && <div className="form-text">{description}</div>}
+			</Grid.Col>
 		</>
 	)
 })
-
-export interface InputFeatureIconsProps {
-	variables?: boolean
-	local?: boolean
-}
-
-export function InputFeatureIcons(props: InputFeatureIconsProps): JSX.Element | null {
-	const featureIcons: JSX.Element[] = []
-	if (props.variables)
-		featureIcons.push(<FontAwesomeIcon key="variables" icon={faDollarSign} title={'Supports global variables'} />)
-	if (props.local) featureIcons.push(<FontAwesomeIcon key="local" icon={faGlobe} title={'Supports local variables'} />)
-
-	return featureIcons.length ? <span className="feature-icons">{featureIcons}</span> : null
-}

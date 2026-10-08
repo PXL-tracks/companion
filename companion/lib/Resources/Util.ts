@@ -1,10 +1,7 @@
 import * as imageRs from '@julusian/image-rs'
 import { colord } from 'colord'
-import type { ImageResult } from '../Graphics/ImageResult.js'
-import type { ButtonStyleProperties } from '@companion-app/shared/Model/StyleModel.js'
-import type { CompanionAlignment } from '@companion-module/base'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
 import type { SurfaceRotation } from '@companion-app/shared/Model/Surfaces.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
 
 /**
  * Combine rgba components to a 32bit value
@@ -69,41 +66,6 @@ export const rgb = (r: number | string, g: number | string, b: number | string, 
 }
 
 /**
- * Convert a 24bit/32bit number itno rgb components
- */
-export const rgbRev = (dec: number): { a: number; r: number; g: number; b: number } => {
-	dec = Math.floor(dec)
-	return {
-		a: dec > 0xffffff ? (255 - ((dec & 0xff000000) >>> 24)) / 255 : 1,
-		r: (dec & 0xff0000) >>> 16,
-		g: (dec & 0x00ff00) >>> 8,
-		b: dec & 0x0000ff,
-	}
-}
-
-/**
- * parse a Companion color number or a css color string and return a css color string
- * @param color
- * @param skipValidation defaults to false
- * @returns a css color string
- */
-export const parseColor = (color: number | string, skipValidation = false): string => {
-	if (typeof color === 'number' || (typeof color === 'string' && !isNaN(Number(color)))) {
-		const col = rgbRev(Number(color))
-		return `rgba(${col.r}, ${col.g}, ${col.b}, ${col.a})`
-	}
-	if (typeof color === 'string') {
-		if (skipValidation) return color
-		if (colord(color).isValid()) {
-			return color
-		} else {
-			return 'rgba(0, 0, 0, 0)'
-		}
-	}
-	return 'rgba(0, 0, 0, 0)'
-}
-
-/**
  * Parse a css color string to a number
  */
 export const parseColorToNumber = (color: string | number | Uint8Array): number | false => {
@@ -126,6 +88,14 @@ export const parseColorToNumber = (color: string | number | Uint8Array): number 
  */
 export const delay = async (milliseconds: number): Promise<void> => {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds || 0))
+}
+
+/**
+ * Yield control back to the event loop, allowing queued I/O (IPC responses, websocket keepalive, ...)
+ * to be processed. Use this to break up long synchronous bursts of work so they don't block the loop.
+ */
+export const yieldToEventLoop = async (): Promise<void> => {
+	return new Promise((resolve) => setImmediate(resolve))
 }
 
 export const getTimestamp = (): string => {
@@ -153,8 +123,7 @@ export const convert2Digit = (num: number): string => {
 /**
  * Check if Satellite API value is falsey
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export const isFalsey = (val: any): boolean => {
+export const isFalsey = (val: unknown): boolean => {
 	// eslint-disable-next-line no-extra-boolean-cast
 	return (typeof val === 'string' && val.toLowerCase() == 'false') || val == '0' || !Boolean(val)
 }
@@ -162,8 +131,7 @@ export const isFalsey = (val: any): boolean => {
 /**
  * Check if Satellite API value is truthy
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export const isTruthy = (val: any): boolean => {
+export const isTruthy = (val: unknown): boolean => {
 	return (
 		!isFalsey(val) &&
 		((typeof val === 'string' && (val.toLowerCase() == 'true' || val.toLowerCase() == 'yes')) || Number(val) >= 1)
@@ -207,7 +175,7 @@ export function parseLineParameters(line: string): ParsedParams {
 			if (c == '\\') {
 				// If char is a slash, the character following it is of interest
 				// Future: does this consider non \" chars?
-				fragments[fragments.length - 1] += line[o + 1]
+				fragments[fragments.length - 1] += line[o + 1] ?? ''
 
 				i = o + 2
 			} else {
@@ -225,11 +193,23 @@ export function parseLineParameters(line: string): ParsedParams {
 		}
 	}
 
-	const res: ParsedParams = {}
+	const res: ParsedParams = Object.create(null)
 
 	for (const fragment of fragments) {
-		const [key, value] = fragment.split('=', 2)
-		res[key] = value === undefined ? true : value
+		// Split on the first `=` only, keeping the rest of the value intact. A plain
+		// `split('=', 2)` would truncate at the first `=`, which corrupts values that
+		// legitimately contain it - e.g. the base64 `=` padding of a `data:` url bitmap,
+		// breaking image decoding.
+		const splitIndex = fragment.indexOf('=')
+		if (splitIndex === -1) {
+			// Skip empty fragments (from consecutive/leading/trailing spaces) and dangerous keys
+			if (fragment === '' || BANNED_PROPS.has(fragment)) continue
+			res[fragment] = true
+		} else {
+			const key = fragment.substring(0, splitIndex)
+			if (key === '' || BANNED_PROPS.has(key)) continue
+			res[key] = fragment.substring(splitIndex + 1)
+		}
 	}
 
 	return res
@@ -273,52 +253,30 @@ export function translateRotation(rotation: SurfaceRotation | null): imageRs.Rot
 }
 
 /**
- * Offset a SurfaceRotation by a given amount in 90° steps
- * @param rotation - the rotation to apply the offset to
- * @param offset - the amount to offset by, will be rounded to full quarters
+ * Rotate a resolution based on a SurfaceRotation
  */
-export function offsetRotation(rotation: SurfaceRotation | null, offset: number): SurfaceRotation | null {
-	let orig: string | number | null = rotation
-	let surface = false
-	if (orig === null) return null
-	if (typeof orig === 'string' && orig.startsWith('surface')) {
-		orig = parseInt(orig.replace('surface', ''))
-		surface = true
-	}
-
-	const quarter = (Number(orig) / 90 + Math.round(offset / 90)) % 4
-
-	let newRotation: SurfaceRotation
-	if (quarter == 0) {
-		newRotation = 0
-	} else if (quarter == 1 || quarter == -3) {
-		newRotation = 90
-	} else if (quarter == 2 || quarter == -2) {
-		newRotation = 180
-	} else if (quarter == 3 || quarter == -1) {
-		newRotation = -90
+export function rotateResolution(width: number, height: number, rotation: SurfaceRotation | null): [number, number] {
+	if (rotation === 90 || rotation === 'surface90' || rotation === -90 || rotation === 'surface-90') {
+		return [height, width]
 	} else {
-		return null
-	}
-
-	if (surface) {
-		return `surface${newRotation}`
-	} else {
-		return newRotation
+		return [width, height]
 	}
 }
 
 /**
  * Transform a button image render to the format needed for a surface integration
+ * Note: input is assumed to be straight alpha RGBA
  */
 export async function transformButtonImage(
-	render: ImageResult,
+	buffer: Buffer,
+	bufferWidth: number,
+	bufferHeight: number,
 	rotation: SurfaceRotation | null,
 	targetWidth: number,
 	targetHeight: number,
 	targetFormat: imageRs.PixelFormat
 ): Promise<Buffer> {
-	let image = imageRs.ImageTransformer.fromBuffer(render.buffer, render.bufferWidth, render.bufferHeight, 'rgba')
+	let image = imageRs.ImageTransformer.fromBuffer(buffer, bufferWidth, bufferHeight, 'rgba')
 
 	const imageRsRotation = translateRotation(rotation)
 	if (imageRsRotation !== null) image = image.rotate(imageRsRotation)
@@ -336,8 +294,14 @@ export async function transformButtonImage(
 		alpha: 255,
 	})
 
-	const computedImage = await image.toBuffer(targetFormat)
+	const computedImage = await image.toBuffer(targetFormat, {
+		premultiplyAlpha: targetFormat.length === 3, // eg rgb/bgr
+	})
 	return computedImage.buffer
+}
+
+export function uint8ArrayToBuffer(arr: Uint8Array | Uint8ClampedArray): Buffer {
+	return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength)
 }
 
 /**
@@ -379,68 +343,47 @@ export function sendOverIpc(data: any): void {
 }
 
 /**
- * Whether the application is packaged with webpack
+ * Whether the application is running as a bundled package
  */
 export function isPackaged(): boolean {
-	return typeof __webpack_require__ === 'function'
+	// process.env.COMPANION_BUNDLED is replaced with '"1"' at compile time via esbuild define
+	return process.env.COMPANION_BUNDLED === '1'
 }
 
 /**
- * Get the size of the bitmap for a button
+ * Whether Companion is running under the desktop Electron launcher (which has a settings UI).
+ * The launcher sets the COMPANION_IPC_PARENT env var when spawning the Companion process.
  */
-export function GetButtonBitmapSize(
-	userConfig: DataUserConfig,
-	style: ButtonStyleProperties
-): { width: number; height: number } {
-	let removeTopBar = !style.show_topbar
-	if (style.show_topbar === 'default' || style.show_topbar === undefined) {
-		removeTopBar = userConfig.getKey('remove_topbar') === true
-	}
-
-	if (removeTopBar) {
-		return {
-			width: 72,
-			height: 72,
-		}
-	} else {
-		return {
-			width: 72,
-			height: 58,
-		}
-	}
+export function isRunningUnderLauncher(): boolean {
+	return !!process.env.COMPANION_IPC_PARENT
 }
 
-export type HorizontalAlignment = 'left' | 'right' | 'center'
-export type VerticalAlignment = 'top' | 'bottom' | 'center'
+/**
+ * Build a message describing how to enable one of the "dangerous features", tailored to how
+ * Companion is being run - either via the desktop launcher (which has a settings UI), or headless
+ * (where the cli flag / env var must be used).
+ */
+export function describeHowToEnableDangerousFeature(cliFlag: string, envVar: string): string {
+	if (isRunningUnderLauncher()) {
+		return `You can enable it in the Companion launcher settings, under "Dangerous Features".`
+	}
+	return `You can enable it by starting Companion with ${cliFlag}, or by setting the ${envVar} environment variable.`
+}
 
 /**
- * Parse an alignment value
- * @param alignment
- * @param validate Throw if value is invalid
+ * Lazy compute a value
+ * @param fn Function to compute the value
+ * @returns Function that returns the computed value, only computed once
  */
-export function ParseAlignment(
-	alignment: string,
-	validate?: boolean
-): [horizontal: HorizontalAlignment, vertical: VerticalAlignment, full: CompanionAlignment] {
-	const [halignRaw, valignRaw] = alignment.toLowerCase().split(':', 2)
+export function lazy<T>(fn: () => T): () => T {
+	let value: T | undefined
+	let valueSet = false
 
-	let halign: 'left' | 'right' | 'center'
-	if (halignRaw !== 'left' && halignRaw !== 'right' && halignRaw !== 'center') {
-		if (validate) throw new Error(`Invalid horizontal component: "${halignRaw}"`)
-
-		halign = 'center'
-	} else {
-		halign = halignRaw
+	return () => {
+		if (!valueSet) {
+			value = fn()
+			valueSet = true
+		}
+		return value as T
 	}
-
-	let valign: 'top' | 'bottom' | 'center'
-	if (valignRaw !== 'top' && valignRaw !== 'bottom' && valignRaw !== 'center') {
-		if (validate) throw new Error(`Invalid vertical component: "${valignRaw}"`)
-
-		valign = 'center'
-	} else {
-		valign = valignRaw
-	}
-
-	return [halign, valign, `${halign}:${valign}`]
 }

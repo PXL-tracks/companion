@@ -1,13 +1,13 @@
-import { observable, action } from 'mobx'
-import { assertNever } from '~/Resources/util.js'
+import { action, observable } from 'mobx'
 import type {
-	ClientConnectionsUpdate,
 	ClientConnectionConfig,
+	ClientConnectionsUpdate,
 	ConnectionCollection,
 	ConnectionCollectionData,
 } from '@companion-app/shared/Model/Connections.js'
-import type { GenericCollectionsStore } from './GenericCollectionsStore'
+import { assertNever } from '~/Resources/util.js'
 import { updateObjectInPlace } from './ApplyDiffToMap'
+import type { GenericCollectionsStore } from './GenericCollectionsStore'
 
 export class ConnectionsStore implements GenericCollectionsStore<ConnectionCollectionData> {
 	readonly connections = observable.map<string, ClientConnectionConfig>()
@@ -44,8 +44,8 @@ export class ConnectionsStore implements GenericCollectionsStore<ConnectionColle
 		return this.connections.get(connectionId)?.label
 	}
 
-	public getAllOfModuleId(moduleId: string): [id: string, info: ClientConnectionConfig][] {
-		return Array.from(this.connections.entries()).filter(([_id, info]) => info && info.moduleId === moduleId)
+	public getAllOfModuleId(moduleId: string): ClientConnectionConfig[] {
+		return this.sortedConnections().filter((info) => info && info.moduleId === moduleId)
 	}
 
 	public updateConnections = action((changes: ClientConnectionsUpdate[] | null) => {

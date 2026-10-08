@@ -1,7 +1,7 @@
 import type { Operation as JsonPatchOperation } from 'fast-json-patch'
-import type { EventInstance } from './EventModel.js'
-import type { SomeEntityModel } from './EntityModel.js'
 import type { CollectionBase } from './Collections.js'
+import type { SomeEntityModel } from './EntityModel.js'
+import type { EventInstance } from './EventModel.js'
 
 export interface TriggerModel {
 	readonly type: 'trigger'
@@ -14,24 +14,28 @@ export interface TriggerModel {
 	localVariables: SomeEntityModel[]
 }
 
-export interface TriggerOptions {
+export type TriggerOptions = {
 	name: string
 	enabled: boolean
 	sortOrder: number
 	collectionId?: string
+	notes?: string
 }
 
 export interface ClientTriggerData extends TriggerOptions {
 	type: 'trigger'
 	lastExecuted: number | null
 	description: string
+	collectionEnabled?: boolean
+	/**
+	 * Whether this trigger is currently being rate-limited because it is firing too rapidly
+	 * from variable changes (e.g. an accidental feedback loop). Best-effort UI hint.
+	 */
+	isRateLimited?: boolean
 }
 
 export type TriggersUpdate =
-	| TriggersUpdateInitOp
-	| TriggersUpdateRemoveOp
-	| TriggersUpdateAddOp
-	| TriggersUpdateUpdateOp
+	TriggersUpdateInitOp | TriggersUpdateRemoveOp | TriggersUpdateAddOp | TriggersUpdateUpdateOp
 
 export interface TriggersUpdateInitOp {
 	type: 'init'

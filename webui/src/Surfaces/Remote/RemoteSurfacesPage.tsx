@@ -1,10 +1,9 @@
-import React from 'react'
-import { CCol, CRow } from '@coreui/react'
-import { MyErrorBoundary } from '~/Resources/Error.js'
-import { observer } from 'mobx-react-lite'
 import { Outlet, useMatchRoute } from '@tanstack/react-router'
-import { RemoteSurfacesList } from './RemoteSurfaces/RemoteSurfacesList.js'
+import { observer } from 'mobx-react-lite'
+import { Grid } from '~/Components/Grid'
+import { MyErrorBoundary } from '~/Resources/Error.js'
 import { SurfaceDiscoveryContextProvider } from '../Discovery/SurfaceDiscoveryContext.js'
+import { RemoteSurfacesList } from './RemoteSurfaces/RemoteSurfacesList.js'
 
 export const RemoteSurfacesPage = observer(function RemoteSurfacesPage(): React.JSX.Element {
 	const matchRoute = useMatchRoute()
@@ -16,20 +15,20 @@ export const RemoteSurfacesPage = observer(function RemoteSurfacesPage(): React.
 	const showSecondaryPanel = !!routeMatch
 
 	return (
-		<CRow className="split-panels">
-			<CCol xl={6} className={`primary-panel ${showPrimaryPanel ? 'd-block' : 'd-xl-block d-none'}`}>
+		<Grid.Row className="split-panels">
+			<Grid.Col xl={6} className={`primary-panel ${showPrimaryPanel ? 'd-block' : 'd-xl-block d-none'}`}>
 				<MyErrorBoundary>
 					<RemoteSurfacesList selectedRemoteConnectionId={selectedRemoteConnectionId} />
 				</MyErrorBoundary>
-			</CCol>
+			</Grid.Col>
 
-			<CCol xl={6} className={`secondary-panel ${showSecondaryPanel ? 'd-block' : 'd-xl-block d-none'}`}>
+			<Grid.Col xl={6} className={`secondary-panel ${showSecondaryPanel ? 'd-block' : 'd-xl-block d-none'}`}>
 				<div className="secondary-panel-simple">
 					<SurfaceDiscoveryContextProvider>
 						<Outlet />
 					</SurfaceDiscoveryContextProvider>
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })

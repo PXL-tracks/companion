@@ -1,11 +1,13 @@
-import { CButton, CButtonGroup, CCallout, CFormCheck } from '@coreui/react'
-import React, { useCallback, useEffect, useState, useContext } from 'react'
-import { ImportRemap } from './Page.js'
-import type { ClientImportObject } from '@companion-app/shared/Model/ImportExport.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faFileCircleExclamation, faFileCirclePlus } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useCallback, useContext, useEffect, useState } from 'react'
+import type { ClientImportObject } from '@companion-app/shared/Model/ImportExport.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { Callout } from '~/Components/Callout.js'
+import { CheckboxInputField } from '~/Components/CheckboxInputField.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ImportRemap } from './Page.js'
 
 interface ImportTriggersTabProps {
 	snapshot: ClientImportObject
@@ -40,18 +42,14 @@ export function ImportTriggersTab({
 
 	useEffect(() => selectAllTriggers(), [selectAllTriggers])
 
-	const toggleTrigger = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-		const id = e.target.getAttribute('data-id')
-		const checked = e.target.checked
-		if (id) {
-			setSelectedTriggers((oldTriggers) => {
-				if (checked) {
-					return [...oldTriggers, id]
-				} else {
-					return oldTriggers.filter((v) => v !== id)
-				}
-			})
-		}
+	const toggleTrigger = useCallback((id: string, checked: boolean) => {
+		setSelectedTriggers((oldTriggers) => {
+			if (checked) {
+				return [...oldTriggers, id]
+			} else {
+				return oldTriggers.filter((v) => v !== id)
+			}
+		})
 	}, [])
 
 	const importTriggersMutation = useMutationExt(trpc.importExport.importTriggers.mutationOptions())
@@ -100,7 +98,11 @@ export function ImportTriggersTab({
 						<tr key={id}>
 							<td className="compact text-center">
 								<div className="form-check form-check-inline mr-1 mt-1">
-									<CFormCheck data-id={id} checked={selectedTriggers.includes(id)} onChange={toggleTrigger} />
+									<CheckboxInputField
+										id={undefined} // TODO - link up with a label
+										value={selectedTriggers.includes(id)}
+										setValue={(value) => toggleTrigger(id, value)}
+									/>
 								</div>
 							</td>
 							<td>{info.name}</td>
@@ -108,35 +110,35 @@ export function ImportTriggersTab({
 					))}
 				</tbody>
 			</table>
-			<CButtonGroup className="mb-3">
-				<CButton
+			<ButtonGroup className="mb-3">
+				<Button
 					color="info"
 					onClick={selectAllTriggers}
 					disabled={selectedTriggers.length === Object.keys(snapshot.triggers || {}).length}
 				>
 					Select all
-				</CButton>
-				<CButton color="info" onClick={unselectAllTriggers} disabled={selectedTriggers.length === 0}>
+				</Button>
+				<Button color="info" onClick={unselectAllTriggers} disabled={selectedTriggers.length === 0}>
 					Unselect all
-				</CButton>
-			</CButtonGroup>
+				</Button>
+			</ButtonGroup>
 
 			<ImportRemap snapshot={snapshot} connectionRemap={connectionRemap} setConnectionRemap={setConnectionRemap2} />
 
-			<CCallout color="success">
+			<Callout color="success">
 				<h5>Import to Existing Triggers</h5>
 				<p>This will import the selected triggers, while keeping your existing triggers.</p>
-				<CButton color="success" data-replace={false} onClick={doImport} disabled={selectedTriggers.length === 0}>
+				<Button color="success" data-replace={false} onClick={doImport} disabled={selectedTriggers.length === 0}>
 					<FontAwesomeIcon icon={faFileCirclePlus} /> Add to existing triggers
-				</CButton>
-			</CCallout>
-			<CCallout color="warning">
+				</Button>
+			</Callout>
+			<Callout color="warning">
 				<h5>Reset & Import Triggers</h5>
 				<p>This will remove all existing triggers and replace them with the selected ones.</p>
-				<CButton color="warning" data-replace={true} onClick={doImport} disabled={selectedTriggers.length === 0}>
+				<Button color="warning" data-replace={true} onClick={doImport} disabled={selectedTriggers.length === 0}>
 					<FontAwesomeIcon icon={faFileCircleExclamation} /> Reset and import triggers
-				</CButton>
-			</CCallout>
+				</Button>
+			</Callout>
 		</>
 	)
 }

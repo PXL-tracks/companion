@@ -1,16 +1,14 @@
-import { formatLocation } from '@companion-app/shared/ControlId.js'
-import { ButtonPreview } from '~/Components/ButtonPreview.js'
-import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { useDrop } from 'react-dnd'
+import { useDragOperation, useDroppable } from '@dnd-kit/react'
 import classNames from 'classnames'
-import useScrollPosition from '~/Hooks/useScrollPosition.js'
-import useElementInnerSize from '~/Hooks/useElementInnerSize.js'
-import { useButtonImageForLocation } from '~/Hooks/useButtonImageForLocation.js'
-import { CButton, CFormInput } from '@coreui/react'
+import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { formatLocation } from '@companion-app/shared/ControlId.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
 import type { UserConfigGridSize } from '@companion-app/shared/Model/UserConfigModel.js'
-import type { PresetDragItem } from './Presets/PresetDragItem.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { ButtonPreview } from '~/Components/ButtonPreview.js'
+import { useButtonImageForLocation } from '~/Hooks/useButtonImageForLocation.js'
+import useElementInnerSize from '~/Hooks/useElementClientSize.js'
+import useScrollPosition from '~/Hooks/useScrollPosition.js'
+import { makeGridButtonDroppableId } from './GridButtonDroppableId.js'
 
 export interface ButtonInfiniteGridRef {
 	resetPosition(): void
@@ -25,6 +23,8 @@ export interface ButtonInfiniteGridButtonProps {
 	left: number
 	top: number
 	style: React.CSSProperties
+	onContextMenu?: (location: ControlLocation, x: number, y: number) => void
+	copySource?: boolean
 }
 
 interface ButtonInfiniteGridProps {
@@ -32,11 +32,14 @@ interface ButtonInfiniteGridProps {
 	pageNumber: number
 	buttonClick?: (location: ControlLocation, pressed: boolean) => void
 	selectedButton?: ControlLocation | null
+	copySourceButton?: ControlLocation | null
+	contextMenuButton?: ControlLocation | null
+	onButtonContextMenu?: (location: ControlLocation, x: number, y: number) => void
 	gridSize: UserConfigGridSize
-	doGrow?: (direction: 'left' | 'right' | 'top' | 'bottom', amount: number) => void
-	buttonIconFactory: React.ClassType<ButtonInfiniteGridButtonProps, any, any>
+	ButtonIconFactory: React.ClassType<ButtonInfiniteGridButtonProps, any, any> // TODO - this type is flawed
 	drawScale: number
 	maxHeightToMatchCanvas?: boolean
+	setViewportMinHeight?: React.Dispatch<React.SetStateAction<number>>
 }
 
 export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfiniteGridProps>(
@@ -46,11 +49,14 @@ export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfini
 			pageNumber,
 			buttonClick,
 			selectedButton,
+			copySourceButton,
+			contextMenuButton,
+			onButtonContextMenu,
 			gridSize,
-			doGrow,
-			buttonIconFactory,
+			ButtonIconFactory,
 			drawScale,
 			maxHeightToMatchCanvas,
+			setViewportMinHeight,
 		},
 		ref
 	) {
@@ -61,20 +67,53 @@ export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfini
 		const tileInnerSize = 72 * (drawScale ?? 1)
 		const tilePadding = Math.min(6, tileInnerSize * 0.05)
 		const tileSize = tileInnerSize + tilePadding * 2
-		const growWidth = doGrow ? 90 : 0
-		const growHeight = doGrow ? 60 : 0
+		const SCROLLBAR_PADDING = 15
 
-		const [setSizeElement, windowSize] = useElementInnerSize()
-		const { scrollX, scrollY, setRef: setScrollRef } = useScrollPosition<HTMLDivElement>()
+		const [setSizeElement, windowSizeRaw] = useElementInnerSize()
+		const { scrollX: scrollXRaw, scrollY: scrollYRaw, setRef: setScrollRef } = useScrollPosition<HTMLDivElement>()
+
+		// Freeze visible area when hidden: keep last known valid (non-zero) size/scroll
+		// This prevents visible buttons from being unmounted when the grid is hidden (e.g., tab switch)
+		const lastValidWindowSize = useRef<{ width: number; height: number } | null>(null)
+		const lastValidScroll = useRef<{ x: number; y: number } | null>(null)
+
+		useEffect(() => {
+			if (setViewportMinHeight) {
+				setViewportMinHeight(2 * tileSize + SCROLLBAR_PADDING)
+			}
+		}, [setViewportMinHeight, tileSize])
+
+		// Update last valid values only when we have non-trivial sizes (grid is actually visible)
+		useEffect(() => {
+			if (windowSizeRaw.width > 10 && windowSizeRaw.height > 10) {
+				lastValidWindowSize.current = windowSizeRaw
+			}
+		}, [windowSizeRaw])
+
+		useEffect(() => {
+			if (
+				lastValidWindowSize.current &&
+				lastValidWindowSize.current.width > 10 &&
+				lastValidWindowSize.current.height > 10
+			) {
+				lastValidScroll.current = { x: scrollXRaw, y: scrollYRaw }
+			}
+		}, [scrollXRaw, scrollYRaw])
+
+		// Use frozen values if current size is zero/tiny (grid is hidden), otherwise use live values
+		const isHidden = windowSizeRaw.width <= 10 || windowSizeRaw.height <= 10
+		const windowSize = isHidden && lastValidWindowSize.current ? lastValidWindowSize.current : windowSizeRaw
+		const scrollX = isHidden && lastValidScroll.current ? lastValidScroll.current.x : scrollXRaw
+		const scrollY = isHidden && lastValidScroll.current ? lastValidScroll.current.y : scrollYRaw
 
 		// Reposition the window to have 0/0 in the top left
 		const [scrollerRef, setScrollerRef] = useState<HTMLDivElement | null>(null)
 		const resetScrollPosition = useCallback(() => {
 			if (scrollerRef) {
-				scrollerRef.scrollTop = -minRow * tileSize + growHeight
-				scrollerRef.scrollLeft = -minColumn * tileSize + growWidth
+				scrollerRef.scrollTop = -minRow * tileSize
+				scrollerRef.scrollLeft = -minColumn * tileSize
 			}
-		}, [scrollerRef, minColumn, minRow, tileSize, growWidth, growHeight])
+		}, [scrollerRef, minColumn, minRow, tileSize])
 
 		// Make the scroll position sticky when zooming
 		const tmpScrollerPosition = useRef<{ left: number; top: number }>()
@@ -145,65 +184,38 @@ export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfini
 		for (let row = drawMinRow; row <= drawMaxRow; row++) {
 			for (let column = drawMinColumn; column <= drawMaxColumn; column++) {
 				visibleButtons.push(
-					React.createElement(buttonIconFactory, {
-						key: `${column}_${row}`,
-
-						fixedSize: true,
-						row,
-						column,
-						pageNumber,
-						onClick: buttonClick,
-						selected:
+					<ButtonIconFactory
+						key={`${column}_${row}`}
+						fixedSize={true}
+						row={row}
+						column={column}
+						pageNumber={pageNumber}
+						onClick={buttonClick}
+						onContextMenu={onButtonContextMenu}
+						selected={
 							selectedButton?.pageNumber === pageNumber &&
 							selectedButton?.column === column &&
-							selectedButton?.row === row,
-						left: (column - minColumn) * tileSize + growWidth,
-						top: (row - minRow) * tileSize + growHeight,
-					})
+							selectedButton?.row === row
+						}
+						copySource={
+							copySourceButton?.pageNumber === pageNumber &&
+							copySourceButton?.column === column &&
+							copySourceButton?.row === row
+						}
+						contextMenuOpen={
+							contextMenuButton?.pageNumber === pageNumber &&
+							contextMenuButton?.column === column &&
+							contextMenuButton?.row === row
+						}
+						left={(column - minColumn) * tileSize}
+						top={(row - minRow) * tileSize}
+					/>
 				)
 			}
 		}
 
-		const growTopRef = useRef<HTMLInputElement>(null)
-		const growBottomRef = useRef<HTMLInputElement>(null)
-		const growLeftRef = useRef<HTMLInputElement>(null)
-		const growRightRef = useRef<HTMLInputElement>(null)
-
-		const doGrowLeft = useCallback(() => {
-			if (!doGrow || !growLeftRef.current) return
-
-			const amount = Number(growLeftRef.current.value)
-			if (isNaN(amount)) return
-
-			doGrow('left', amount)
-		}, [doGrow])
-		const doGrowRight = useCallback(() => {
-			if (!doGrow || !growRightRef.current) return
-
-			const amount = Number(growRightRef.current.value)
-			if (isNaN(amount)) return
-
-			doGrow('right', amount)
-		}, [doGrow])
-		const doGrowTop = useCallback(() => {
-			if (!doGrow || !growTopRef.current) return
-
-			const amount = Number(growTopRef.current.value)
-			if (isNaN(amount)) return
-
-			doGrow('top', amount)
-		}, [doGrow])
-		const doGrowBottom = useCallback(() => {
-			if (!doGrow || !growBottomRef.current) return
-
-			const amount = Number(growBottomRef.current.value)
-			if (isNaN(amount)) return
-
-			doGrow('bottom', amount)
-		}, [doGrow])
-
-		const canvasWidth = Math.max(countColumns * tileSize, windowSize.width) + growWidth * 2
-		const canvasHeight = Math.max(countRows * tileSize, windowSize.height) + growHeight * 2
+		const canvasWidth = countColumns * tileSize
+		const canvasHeight = countRows * tileSize
 
 		const gridCanvasStyle = useMemo(
 			() => ({
@@ -216,9 +228,10 @@ export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfini
 		)
 		const gridWrapperStyle = useMemo(
 			() => ({
-				maxHeight: maxHeightToMatchCanvas ? countRows * tileSize + 30 : 'none', // Pad for possible scrollbar
+				maxHeight: maxHeightToMatchCanvas ? countRows * tileSize + 2 * SCROLLBAR_PADDING : 'none', // Pad for possible scrollbar
+				maxWidth: canvasWidth + SCROLLBAR_PADDING,
 			}),
-			[maxHeightToMatchCanvas, countRows, tileSize]
+			[maxHeightToMatchCanvas, countRows, tileSize, canvasWidth]
 		)
 
 		return (
@@ -230,39 +243,6 @@ export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfini
 				style={gridWrapperStyle}
 			>
 				<div className="button-grid-canvas" style={gridCanvasStyle}>
-					{doGrow && (
-						<>
-							<div className="expand left">
-								<div className="sticky-center">
-									<CButton onClick={doGrowLeft}>Add</CButton>
-									<CFormInput ref={growLeftRef} type="number" min={1} defaultValue={2} />
-									&nbsp;&nbsp;columns
-								</div>
-							</div>
-							<div className="expand right">
-								<div className="sticky-center">
-									<CButton onClick={doGrowRight}>Add</CButton>
-									<CFormInput ref={growRightRef} type="number" min={1} defaultValue={2} />
-									&nbsp;&nbsp;columns
-								</div>
-							</div>
-							<div className="expand top">
-								<div className="sticky-center">
-									<CButton onClick={doGrowTop}>Add</CButton>
-									<CFormInput ref={growTopRef} type="number" min={1} defaultValue={2} />
-									&nbsp;&nbsp;rows
-								</div>
-							</div>
-							<div className="expand bottom">
-								<div className="sticky-center">
-									<CButton onClick={doGrowBottom}>Add</CButton>
-									<CFormInput ref={growBottomRef} type="number" min={1} defaultValue={2} />
-									&nbsp;&nbsp;rows
-								</div>
-							</div>
-						</>
-					)}
-
 					{visibleButtons}
 				</div>
 			</div>
@@ -270,35 +250,17 @@ export const ButtonInfiniteGrid = forwardRef<ButtonInfiniteGridRef, ButtonInfini
 	}
 )
 
-interface PresetDragState {
-	isOver: boolean
-	canDrop: boolean
-}
-
 export const PrimaryButtonGridIcon = memo(function PrimaryButtonGridIcon({ ...props }: ButtonInfiniteGridButtonProps) {
-	const importPresetMutation = useMutationExt(trpc.controls.importPreset.mutationOptions())
-
-	const [{ isOver, canDrop }, drop] = useDrop<PresetDragItem, unknown, PresetDragState>({
+	const { ref: drop, isDropTarget } = useDroppable({
+		id: makeGridButtonDroppableId(props.pageNumber, props.column, props.row),
 		accept: 'preset',
-		drop: (dropData) => {
-			console.log('preset drop', dropData)
-			importPresetMutation
-				.mutateAsync({
-					connectionId: dropData.connectionId,
-					presetId: dropData.presetId,
-					location: { pageNumber: props.pageNumber, column: props.column, row: props.row },
-				})
-				.catch(() => {
-					console.error('Preset import failed')
-				})
-		},
-		collect: (monitor) => ({
-			isOver: !!monitor.isOver(),
-			canDrop: !!monitor.canDrop(),
-		}),
 	})
 
-	return <ButtonGridIcon {...props} dropRef={drop} dropHover={isOver} canDrop={canDrop} />
+	// A preset is being dragged somewhere within the provider - highlight all valid targets
+	const { source } = useDragOperation()
+	const canDrop = source?.type === 'preset'
+
+	return <ButtonGridIcon {...props} dropRef={drop} dropHover={isDropTarget} canDrop={canDrop} />
 })
 
 type ButtonGridIconProps = ButtonGridIconBaseProps
@@ -325,6 +287,9 @@ interface ButtonGridIconBaseProps {
 	dropRef?: React.RefCallback<HTMLDivElement>
 	dropHover?: boolean
 	canDrop?: boolean
+	onContextMenu?: (location: ControlLocation, x: number, y: number) => void
+	copySource?: boolean
+	contextMenuOpen?: boolean
 }
 
 export const ButtonGridIconBase = memo(function ButtonGridIcon({

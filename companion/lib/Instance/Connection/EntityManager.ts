@@ -1,23 +1,27 @@
 import debounceFn from 'debounce-fn'
-import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
-import type {
-	FeedbackInstance as ModuleFeedbackInstance,
-	HostToModuleEventsV0,
-	ModuleToHostEventsV0,
-	UpdateActionInstancesMessage,
-	UpdateFeedbackInstancesMessage,
-	UpgradeActionAndFeedbackInstancesMessage,
-} from '@companion-module/base/dist/host-api/api.js'
-import { assertNever } from '@companion-app/shared/Util.js'
-import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
-import type { IpcWrapper } from '@companion-module/base/dist/host-api/ipc-wrapper.js'
 import { nanoid } from 'nanoid'
-import type { ControlsController } from '../../Controls/Controller.js'
-import type { ClientEntityDefinition } from '@companion-app/shared/Model/EntityDefinitionModel.js'
-import type { OptionsObject } from '@companion-module/base/dist/util.js'
+import {
+	EntityModelType,
+	type ActionEntityModel,
+	type FeedbackEntityModel,
+	type ReplaceableActionEntityModel,
+	type ReplaceableFeedbackEntityModel,
+	type SomeReplaceableEntityModel,
+} from '@companion-app/shared/Model/EntityModel.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
+import type { CompanionOptionValues } from '@companion-module/base'
+import type { ControlEntityInstance } from '../../Controls/Entities/EntityInstance.js'
+import type { IControlStore } from '../../Controls/IControlStore.js'
 import LogController, { type Logger } from '../../Log/Controller.js'
 
 const MAX_UPDATE_PER_BATCH = 50 // Arbitrary limit to avoid sending too much data in one go
+
+// The maximum number of update/upgrade IPC batches to have in flight to the module at once.
+// Each IPC call has its own timeout that starts ticking when it is sent, so firing every batch at
+// once (as a large import does) makes the later batches time out while they wait their turn. Limiting
+// the concurrency spreads those timers out and keeps the module from being flooded.
+const MAX_INFLIGHT_BATCHES = 5
 
 enum EntityState {
 	UNLOADED = 'UNLOADED',
@@ -37,6 +41,32 @@ interface EntityWrapper {
 	lastReferencedVariableIds?: ReadonlySet<string>
 }
 
+export interface EntityManagerActionEntity {
+	controlId: string
+	entity: ActionEntityModel
+	parsedOptions: CompanionOptionValues
+}
+export interface EntityManagerFeedbackEntity {
+	controlId: string
+	entity: FeedbackEntityModel
+	parsedOptions: CompanionOptionValues
+}
+
+export interface EntityManagerAdapter {
+	updateActions: (actions: Map<string, EntityManagerActionEntity | null>) => Promise<void>
+	updateFeedbacks: (feedbacks: Map<string, EntityManagerFeedbackEntity | null>) => Promise<void>
+
+	upgradeActions: (
+		actions: Omit<EntityManagerActionEntity, 'parsedOptions'>[],
+		currentUpgradeIndex: number
+	) => Promise<ReplaceableActionEntityModel[]>
+
+	upgradeFeedbacks: (
+		feedbacks: Omit<EntityManagerFeedbackEntity, 'parsedOptions'>[],
+		currentUpgradeIndex: number
+	) => Promise<ReplaceableFeedbackEntityModel[]>
+}
+
 /**
  * This class is responsible for managing the entities that are tracked by the module
  * With this, it will ensure that the entities are run through the upgrade scripts as needed, and also
@@ -45,8 +75,8 @@ interface EntityWrapper {
 export class ConnectionEntityManager {
 	readonly #logger: Logger
 
-	readonly #ipcWrapper: IpcWrapper<HostToModuleEventsV0, ModuleToHostEventsV0>
-	readonly #controlsController: ControlsController
+	readonly #adapter: EntityManagerAdapter
+	readonly controlsStore: IControlStore
 
 	readonly #entities = new Map<string, EntityWrapper>()
 
@@ -54,87 +84,74 @@ export class ConnectionEntityManager {
 	#ready = false
 	#currentUpgradeIndex = 0
 
-	constructor(
-		ipcWrapper: IpcWrapper<HostToModuleEventsV0, ModuleToHostEventsV0>,
-		controlsController: ControlsController,
-		connectionId: string
-	) {
+	// Queue of update/upgrade batches waiting to be sent, and the number currently in flight.
+	// This bounds how many IPC calls are outstanding at once, see MAX_INFLIGHT_BATCHES.
+	readonly #batchQueue: Array<() => Promise<void>> = []
+	#inflightBatches = 0
+
+	constructor(adapter: EntityManagerAdapter, controlsStore: IControlStore, connectionId: string) {
 		this.#logger = LogController.createLogger(`Instance/Connection/EntityManager/${connectionId}`)
-		this.#ipcWrapper = ipcWrapper
-		this.#controlsController = controlsController
+		this.#adapter = adapter
+		this.controlsStore = controlsStore
 	}
 
 	readonly #debounceProcessPending = debounceFn(
 		() => {
 			if (!this.#ready) return
 
-			let entityIdsInThisBatch = new Map<string, string>()
-			let upgradePayload: UpgradeActionAndFeedbackInstancesMessage = {
-				actions: [],
-				feedbacks: [],
-				defaultUpgradeIndex: 0, // TODO - remove this!
-			}
-			let updateActionsPayload: UpdateActionInstancesMessage = {
-				actions: {},
-			}
-			let updateFeedbacksPayload: UpdateFeedbackInstancesMessage = {
-				feedbacks: {},
-			}
+			let actionIdsInThisBatch = new Map<string, string>()
+			let feedbackIdsInThisBatch = new Map<string, string>()
+			let upgradeActions: Omit<EntityManagerActionEntity, 'parsedOptions'>[] = []
+			let upgradeFeedbacks: Omit<EntityManagerFeedbackEntity, 'parsedOptions'>[] = []
+
+			let updateActionsPayload = new Map<string, EntityManagerActionEntity | null>()
+			let updateFeedbacksPayload = new Map<string, EntityManagerFeedbackEntity | null>()
 
 			const pushEntityToUpgrade = (wrapper: EntityWrapper, entity: ControlEntityInstance) => {
 				this.#logger.silly(
 					`Pushing entity ${entity.id} in control ${wrapper.controlId} for upgrade from ${entity.upgradeIndex} to ${this.#currentUpgradeIndex}`
 				)
 
-				entityIdsInThisBatch.set(entity.id, wrapper.wrapperId)
 				const entityModel = entity.asEntityModel(false)
 				switch (entityModel.type) {
 					case EntityModelType.Action:
-						upgradePayload.actions.push({
-							id: entityModel.id,
+						actionIdsInThisBatch.set(entity.id, wrapper.wrapperId)
+						upgradeActions.push({
 							controlId: wrapper.controlId,
-							actionId: entityModel.definitionId,
-							options: entityModel.options,
-
-							upgradeIndex: entityModel.upgradeIndex ?? null,
-							disabled: !!entityModel.disabled,
+							entity: entityModel,
 						})
 						break
 					case EntityModelType.Feedback:
-						upgradePayload.feedbacks.push({
-							id: entityModel.id,
+						feedbackIdsInThisBatch.set(entity.id, wrapper.wrapperId)
+						upgradeFeedbacks.push({
 							controlId: wrapper.controlId,
-							feedbackId: entityModel.definitionId,
-							options: entityModel.options,
-
-							isInverted: !!entityModel.isInverted,
-
-							upgradeIndex: entityModel.upgradeIndex ?? null,
-							disabled: !!entityModel.disabled,
+							entity: entityModel,
 						})
 						break
 					default:
 						assertNever(entityModel)
 						this.#logger.warn('Unknown entity type', entity.type)
+						return
 				}
 
 				// If the payloads are getting large, send them now and reset
 				// We do this to avoid sending too much data in one go, which can cause issues with IPC
 				// The exact limits here are somewhat arbitrary, but should be sufficient for most use cases
-				if (entityIdsInThisBatch.size > MAX_UPDATE_PER_BATCH) {
-					this.#sendUpgradeBatch(entityIdsInThisBatch, upgradePayload)
+				if (actionIdsInThisBatch.size > MAX_UPDATE_PER_BATCH) {
+					this.#sendUpgradeActionsBatch(actionIdsInThisBatch, upgradeActions)
 
 					// Start a new batch
-					entityIdsInThisBatch = new Map()
-					upgradePayload = {
-						actions: [],
-						feedbacks: [],
-						defaultUpgradeIndex: 0, // TODO - remove this!
-					}
+					actionIdsInThisBatch = new Map()
+					upgradeActions = []
+				}
+				if (feedbackIdsInThisBatch.size > MAX_UPDATE_PER_BATCH) {
+					this.#sendUpgradeFeedbacksBatch(feedbackIdsInThisBatch, upgradeFeedbacks)
+
+					// Start a new batch
+					feedbackIdsInThisBatch = new Map()
+					upgradeFeedbacks = []
 				}
 			}
-
-			const controlImageSizeCache = new Map<string, ModuleFeedbackInstance['image']>()
 
 			// First, look over all the entiites and figure out what needs to be done to each
 			for (const [entityId, wrapper] of this.#entities) {
@@ -151,6 +168,11 @@ export class ConnectionEntityManager {
 						if (entity.upgradeIndex === undefined || entity.upgradeIndex === this.#currentUpgradeIndex) {
 							wrapper.state = EntityState.READY
 
+							if (entity.disabled) {
+								// Disabled entities should not be subscribed to the module
+								continue
+							}
+
 							const entityDefinition = entity.getEntityDefinition()
 							if (!entityDefinition || !entityDefinition.hasLifecycleFunctions) {
 								// The entity does not have lifecycle functions, so we can skip informing the module about it
@@ -159,49 +181,49 @@ export class ConnectionEntityManager {
 
 							const entityModel = entity.asEntityModel(false)
 
-							// Parse the options and track the variables referenced
-							const { parsedOptions, referencedVariableIds } = this.parseOptionsObject(
-								entityDefinition,
-								entityModel.options,
-								wrapper.controlId
-							)
-							wrapper.lastReferencedVariableIds = referencedVariableIds
+							let updateOptions: CompanionOptionValues | undefined
+							try {
+								// Parse the options and track the variables referenced
+								const parser = this.controlsStore.createVariablesAndExpressionParser(wrapper.controlId, null)
+								const parseRes = parser.parseEntityOptions(entityDefinition, entityModel.options)
+								if (!parseRes.ok) {
+									this.#logger.warn(
+										`Failed to parse options for entity ${entity.id} in control ${wrapper.controlId}: ${JSON.stringify(parseRes.optionErrors)}`
+									)
+								} else {
+									updateOptions = parseRes.parsedOptions
+								}
+								wrapper.lastReferencedVariableIds = parseRes.referencedVariableIds
+							} catch (e) {
+								this.#logger.warn(
+									`Error parsing options for entity ${entity.id} in control ${wrapper.controlId}, marking as inactive: ${stringifyError(e, false)}`
+								)
+							}
 
 							switch (entityModel.type) {
 								case EntityModelType.Action:
-									updateActionsPayload.actions[entityId] = {
-										id: entityModel.id,
-										controlId: wrapper.controlId,
-										actionId: entityModel.definitionId,
-										options: parsedOptions,
-
-										upgradeIndex: entityModel.upgradeIndex ?? null,
-										disabled: !!entityModel.disabled,
-									}
+									updateActionsPayload.set(
+										entityId,
+										updateOptions
+											? {
+													controlId: wrapper.controlId,
+													entity: entityModel,
+													parsedOptions: updateOptions,
+												}
+											: null
+									)
 									break
 								case EntityModelType.Feedback: {
-									let imageSize: ModuleFeedbackInstance['image'] | undefined
-									if (controlImageSizeCache.has(wrapper.controlId)) {
-										imageSize = controlImageSizeCache.get(wrapper.controlId)
-									} else {
-										const control = this.#controlsController.getControl(wrapper.controlId)
-										imageSize = control?.getBitmapSize() ?? undefined
-										controlImageSizeCache.set(wrapper.controlId, imageSize)
-									}
-
-									updateFeedbacksPayload.feedbacks[entityId] = {
-										id: entityModel.id,
-										controlId: wrapper.controlId,
-										feedbackId: entityModel.definitionId,
-										options: parsedOptions,
-
-										image: imageSize,
-
-										isInverted: !!entityModel.isInverted,
-
-										upgradeIndex: entityModel.upgradeIndex ?? null,
-										disabled: !!entityModel.disabled,
-									}
+									updateFeedbacksPayload.set(
+										entityId,
+										updateOptions
+											? {
+													controlId: wrapper.controlId,
+													entity: entityModel,
+													parsedOptions: updateOptions,
+												}
+											: null
+									)
 									break
 								}
 								default:
@@ -230,10 +252,10 @@ export class ConnectionEntityManager {
 						if (entity) {
 							switch (entity.type) {
 								case EntityModelType.Action:
-									updateActionsPayload.actions[entityId] = null
+									updateActionsPayload.set(entityId, null)
 									break
 								case EntityModelType.Feedback:
-									updateFeedbacksPayload.feedbacks[entityId] = null
+									updateFeedbacksPayload.set(entityId, null)
 									break
 								default:
 									assertNever(entity.type)
@@ -250,39 +272,34 @@ export class ConnectionEntityManager {
 				// If the payloads are getting large, send them now and reset
 				// We do this to avoid sending too much data in one go, which can cause issues with IPC
 				// The exact limits here are somewhat arbitrary, but should be sufficient for most use cases
-				if (Object.keys(updateActionsPayload.actions).length > MAX_UPDATE_PER_BATCH) {
-					this.#ipcWrapper.sendWithCb('updateActions', updateActionsPayload).catch((e) => {
-						this.#logger.error('Error sending updateActions', e)
-					})
+				if (updateActionsPayload.size > MAX_UPDATE_PER_BATCH) {
+					this.#queueUpdateActionsBatch(updateActionsPayload)
 
 					// Start a new batch
-					updateActionsPayload = { actions: {} }
+					updateActionsPayload = new Map()
 				}
-				if (Object.keys(updateFeedbacksPayload.feedbacks).length > MAX_UPDATE_PER_BATCH) {
-					this.#ipcWrapper.sendWithCb('updateFeedbacks', updateFeedbacksPayload).catch((e) => {
-						this.#logger.error('Error sending updateFeedbacks', e)
-					})
+				if (updateFeedbacksPayload.size > MAX_UPDATE_PER_BATCH) {
+					this.#queueUpdateFeedbacksBatch(updateFeedbacksPayload)
 
 					// Start a new batch
-					updateFeedbacksPayload = { feedbacks: {} }
+					updateFeedbacksPayload = new Map()
 				}
 			}
 
 			// Start by sending the simple payloads
-			if (Object.keys(updateActionsPayload.actions).length > 0) {
-				this.#ipcWrapper.sendWithCb('updateActions', updateActionsPayload).catch((e) => {
-					this.#logger.error('Error sending updateActions', e)
-				})
+			if (updateActionsPayload.size > 0) {
+				this.#queueUpdateActionsBatch(updateActionsPayload)
 			}
-			if (Object.keys(updateFeedbacksPayload.feedbacks).length > 0) {
-				this.#ipcWrapper.sendWithCb('updateFeedbacks', updateFeedbacksPayload).catch((e) => {
-					this.#logger.error('Error sending updateFeedbacks', e)
-				})
+			if (updateFeedbacksPayload.size > 0) {
+				this.#queueUpdateFeedbacksBatch(updateFeedbacksPayload)
 			}
 
 			// Now we need to send the upgrades
-			if (entityIdsInThisBatch.size > 0) {
-				this.#sendUpgradeBatch(entityIdsInThisBatch, upgradePayload)
+			if (actionIdsInThisBatch.size > 0) {
+				this.#sendUpgradeActionsBatch(actionIdsInThisBatch, upgradeActions)
+			}
+			if (feedbackIdsInThisBatch.size > 0) {
+				this.#sendUpgradeFeedbacksBatch(feedbackIdsInThisBatch, upgradeFeedbacks)
 			}
 		},
 		{
@@ -293,129 +310,165 @@ export class ConnectionEntityManager {
 		}
 	)
 
-	#sendUpgradeBatch(
+	/**
+	 * Add a batch to the send queue, and start it if there is capacity.
+	 * This bounds the number of IPC calls in flight at once, so that the per-call timeouts don't all
+	 * start ticking simultaneously when a large number of entities is processed in one go.
+	 */
+	#queueBatch(fn: () => Promise<void>): void {
+		this.#batchQueue.push(fn)
+		this.#pumpBatchQueue()
+	}
+	#pumpBatchQueue(): void {
+		while (this.#inflightBatches < MAX_INFLIGHT_BATCHES && this.#batchQueue.length > 0) {
+			const fn = this.#batchQueue.shift()!
+			this.#inflightBatches++
+			void fn().finally(() => {
+				this.#inflightBatches--
+				this.#pumpBatchQueue()
+			})
+		}
+	}
+
+	#queueUpdateActionsBatch(updateActionsPayload: Map<string, EntityManagerActionEntity | null>): void {
+		this.#queueBatch(async () =>
+			this.#adapter.updateActions(updateActionsPayload).catch((e) => {
+				this.#logger.error('Error sending updateActions', e)
+			})
+		)
+	}
+	#queueUpdateFeedbacksBatch(updateFeedbacksPayload: Map<string, EntityManagerFeedbackEntity | null>): void {
+		this.#queueBatch(async () =>
+			this.#adapter.updateFeedbacks(updateFeedbacksPayload).catch((e) => {
+				this.#logger.error('Error sending updateFeedbacks', e)
+			})
+		)
+	}
+
+	#sendUpgradeActionsBatch(
 		entityIdsInThisBatch: ReadonlyMap<string, string>,
-		upgradePayload: UpgradeActionAndFeedbackInstancesMessage
+		upgradeActions: Omit<EntityManagerActionEntity, 'parsedOptions'>[]
 	): void {
-		this.#ipcWrapper
-			.sendWithCb('upgradeActionsAndFeedbacks', upgradePayload)
-			.then((upgraded) => {
-				if (!this.#ready) return
+		this.#queueBatch(async () =>
+			this.#adapter
+				.upgradeActions(upgradeActions, this.#currentUpgradeIndex)
+				.then((upgradedEntities) => {
+					this.#upgradeBatchResolve(entityIdsInThisBatch, upgradedEntities)
+				})
+				.catch((e) => {
+					this.#logger.error('Error sending upgradeActions', e)
 
-				// We have the upgraded entities, lets patch the tracked entities
+					this.#upgradeBatchRetry(entityIdsInThisBatch)
+				})
+		)
+	}
+	#sendUpgradeFeedbacksBatch(
+		entityIdsInThisBatch: ReadonlyMap<string, string>,
+		upgradeFeedbacks: Omit<EntityManagerFeedbackEntity, 'parsedOptions'>[]
+	): void {
+		this.#queueBatch(async () =>
+			this.#adapter
+				.upgradeFeedbacks(upgradeFeedbacks, this.#currentUpgradeIndex)
+				.then((upgradedEntities) => {
+					this.#upgradeBatchResolve(entityIdsInThisBatch, upgradedEntities)
+				})
+				.catch((e) => {
+					this.#logger.error('Error sending upgradeFeedbacks', e)
 
-				const upgradedActions = new Map(upgraded.updatedActions.map((act) => [act.id, act]))
-				const upgradedFeedbacks = new Map(upgraded.updatedFeedbacks.map((fb) => [fb.id, fb]))
+					this.#upgradeBatchRetry(entityIdsInThisBatch)
+				})
+		)
+	}
 
-				// Loop through what we sent, as we don't get a response for all of them
-				for (const [entityId, wrapperId] of entityIdsInThisBatch) {
-					const wrapper = this.#entities.get(entityId)
-					// Entity may have been deleted or recreated, if so we can ignore it
-					if (!wrapper || wrapper.wrapperId !== wrapperId) continue
+	#upgradeBatchResolve(
+		entityIdsInThisBatch: ReadonlyMap<string, string>,
+		rawUpgradedEntities: SomeReplaceableEntityModel[]
+	): void {
+		if (!this.#ready) return
 
-					const entity = wrapper.entity.deref()
-					if (!entity) {
-						this.#logger.warn(`Entity ${wrapper.wrapperId} has been garbage collected, terminating upgrade`)
-						this.#entities.delete(entityId)
+		// We have the upgraded entities, lets patch the tracked entities
+		const upgradedEntities = new Map(rawUpgradedEntities.map((ent) => [ent.id, ent]))
+
+		// Loop through what we sent, as we don't get a response for all of them
+		for (const [entityId, wrapperId] of entityIdsInThisBatch) {
+			const wrapper = this.#entities.get(entityId)
+			// Entity may have been deleted or recreated, if so we can ignore it
+			if (!wrapper || wrapper.wrapperId !== wrapperId) continue
+
+			const entity = wrapper.entity.deref()
+			if (!entity) {
+				this.#logger.warn(`Entity ${wrapper.wrapperId} has been garbage collected, terminating upgrade`)
+				this.#entities.delete(entityId)
+				continue
+			}
+
+			this.#logger.silly(`Processing entity ${entityId} in control ${wrapper.controlId} with state ${wrapper.state}`)
+
+			switch (wrapper.state) {
+				case EntityState.UPGRADING_INVALIDATED:
+					// It has been invalidated, it needs to be re-run
+					wrapper.state = EntityState.UNLOADED
+					break
+				case EntityState.UPGRADING: {
+					// It has been upgraded, so we can update the entity
+
+					// We need to do this via the EntityPool method, so that it gets persisted correctly
+					const control = this.controlsStore.getControl(wrapper.controlId)
+					if (!control || !control.supportsEntities) {
+						this.#logger.warn(`Control ${wrapper.controlId} not found`)
 						continue
 					}
 
-					this.#logger.silly(
-						`Processing entity ${entityId} in control ${wrapper.controlId} with state ${wrapper.state}`
-					)
+					const upgradedEntity = upgradedEntities.get(entity.id)
+					if (!upgradedEntity) continue
 
-					switch (wrapper.state) {
-						case EntityState.UPGRADING_INVALIDATED:
-							// It has been invalidated, it needs to be re-run
-							wrapper.state = EntityState.UNLOADED
-							break
-						case EntityState.UPGRADING: {
-							// It has been upgraded, so we can update the entity
-
-							// We need to do this via the EntityPool method, so that it gets persisted correctly
-							const control = this.#controlsController.getControl(wrapper.controlId)
-							if (!control || !control.supportsEntities) {
-								this.#logger.warn(`Control ${wrapper.controlId} not found`)
-								continue
-							}
-
-							try {
-								switch (entity.type) {
-									case EntityModelType.Action: {
-										const action = upgradedActions.get(entity.id)
-										if (action) {
-											control.entities.entityReplace({
-												id: action.id,
-												type: EntityModelType.Action,
-												definitionId: action.actionId,
-												options: action.options,
-												upgradeIndex: this.#currentUpgradeIndex,
-											})
-										}
-										break
-									}
-									case EntityModelType.Feedback: {
-										const feedback = upgradedFeedbacks.get(entity.id)
-										if (feedback) {
-											control.entities.entityReplace({
-												id: feedback.id,
-												type: EntityModelType.Feedback,
-												definitionId: feedback.feedbackId,
-												options: feedback.options,
-												style: feedback.style,
-												isInverted: feedback.isInverted,
-												upgradeIndex: this.#currentUpgradeIndex,
-											})
-										}
-										break
-									}
-									default:
-										assertNever(entity.type)
-										break
-								}
-							} catch (e) {
-								this.#logger.error(`Error replacing entity ${entity.id} in control ${wrapper.controlId}`, e)
-								// If we fail to replace the entity, we can just ignore it
-								continue
-							}
-
-							break
-						}
-						case EntityState.READY:
-						case EntityState.UNLOADED:
-							// Shouldn't happen, lets pretend it didnt
-							break
-						case EntityState.PENDING_DELETE:
-							// About to be deleted, so we can ignore it
-							break
-
-						default:
-							assertNever(wrapper.state)
-							break
+					if (upgradedEntity.type !== entity.type) {
+						this.#logger.error(`Upgraded entity ${entity.id} in control ${wrapper.controlId} has mismatched type`)
+						continue
 					}
-				}
 
-				this.#debounceProcessPending()
-			})
-			.catch((e) => {
-				this.#logger.error('Error sending upgradeActionsAndFeedbacks', e)
-
-				// There isn't much we can do to retry the upgrade, the best we can do is pretend it was fine and progress the entities through the process
-				for (const [entityId, wrapperId] of entityIdsInThisBatch) {
-					const wrapper = this.#entities.get(entityId)
-					if (!wrapper || wrapper.wrapperId !== wrapperId) continue
-					if (wrapper.state === EntityState.UPGRADING) {
-						// Pretend it was fine
-						wrapper.state = EntityState.READY
-					} else if (wrapper.state === EntityState.UPGRADING_INVALIDATED) {
-						// This can be retried
-						wrapper.state = EntityState.UNLOADED
+					try {
+						control.entities.entityReplaceForUpgrade(upgradedEntity)
+					} catch (e) {
+						// If we fail to replace the entity, we can just ignore it
+						this.#logger.error(`Error replacing entity ${entity.id} in control ${wrapper.controlId}`, e)
 					}
-				}
 
-				// Make sure anything pending is processed
-				this.#debounceProcessPending()
-			})
+					break
+				}
+				case EntityState.READY:
+				case EntityState.UNLOADED:
+					// Shouldn't happen, lets pretend it didnt
+					break
+				case EntityState.PENDING_DELETE:
+					// About to be deleted, so we can ignore it
+					break
+
+				default:
+					assertNever(wrapper.state)
+					break
+			}
+		}
+
+		this.#debounceProcessPending()
+	}
+
+	#upgradeBatchRetry(entityIdsInThisBatch: ReadonlyMap<string, string>): void {
+		// There isn't much we can do to retry the upgrade, the best we can do is pretend it was fine and progress the entities through the process
+		for (const [entityId, wrapperId] of entityIdsInThisBatch) {
+			const wrapper = this.#entities.get(entityId)
+			if (!wrapper || wrapper.wrapperId !== wrapperId) continue
+			if (wrapper.state === EntityState.UPGRADING) {
+				// Pretend it was fine
+				wrapper.state = EntityState.READY
+			} else if (wrapper.state === EntityState.UPGRADING_INVALIDATED) {
+				// This can be retried
+				wrapper.state = EntityState.UNLOADED
+			}
+		}
+
+		// Make sure anything pending is processed
+		this.#debounceProcessPending()
 	}
 
 	/**
@@ -435,6 +488,7 @@ export class ConnectionEntityManager {
 	 */
 	destroy(): void {
 		this.#debounceProcessPending.cancel()
+		this.#batchQueue.length = 0
 		this.#entities.clear()
 		this.#ready = false
 	}
@@ -507,54 +561,10 @@ export class ConnectionEntityManager {
 	}
 
 	/**
-	 * Parse any variables in the options object for an entity.
-	 * Note: this will drop any options that are not defined in the entity definition.
-	 */
-	parseOptionsObject(
-		entityDefinition: ClientEntityDefinition | undefined,
-		options: OptionsObject,
-		controlId: string
-	): {
-		parsedOptions: OptionsObject
-		referencedVariableIds: Set<string>
-	} {
-		if (!entityDefinition)
-			// If we don't know what fields need parsing, we can't do anything
-			return { parsedOptions: options, referencedVariableIds: new Set() }
-
-		const parsedOptions: OptionsObject = {}
-		const referencedVariableIds = new Set<string>()
-
-		const parser = this.#controlsController.createVariablesAndExpressionParser(controlId, null)
-
-		for (const field of entityDefinition.options) {
-			if (field.type !== 'textinput' || !field.useVariables) {
-				// Field doesn't support variables, pass unchanged
-				parsedOptions[field.id] = options[field.id]
-				continue
-			}
-
-			// Field needs parsing
-			// Note - we don't need to care about the granularity given in `useVariables`,
-			const parseResult = parser.parseVariables(String(options[field.id]))
-			parsedOptions[field.id] = parseResult.text
-
-			// Track the variables referenced in this field
-			if (!entityDefinition.optionsToIgnoreForSubscribe.includes(field.id)) {
-				for (const variable of parseResult.variableIds) {
-					referencedVariableIds.add(variable)
-				}
-			}
-		}
-
-		return { parsedOptions, referencedVariableIds }
-	}
-
-	/**
 	 * Inform the entity manager that some variables have changed.
 	 * This will cause any entities that reference those variables to be re-parsed and sent to the module.
 	 */
-	onVariablesChanged(variableIds: Set<string>): void {
+	onVariablesChanged(variableIds: ReadonlySet<string>, fromControlId: string | null): void {
 		let anyInvalidated = false
 
 		for (const wrapper of this.#entities.values()) {
@@ -565,6 +575,11 @@ export class ConnectionEntityManager {
 				wrapper.state === EntityState.PENDING_DELETE
 			) {
 				// Nothing to do, the entity is not in the ready state
+				continue
+			}
+
+			if (fromControlId && wrapper.controlId !== fromControlId) {
+				// The change came from a specific control, and this entity is not in that control
 				continue
 			}
 

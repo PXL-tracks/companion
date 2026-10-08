@@ -1,14 +1,13 @@
-import React, { forwardRef, useCallback, useContext, useImperativeHandle, useMemo, useState } from 'react'
-import { CModalBody, CModalHeader, CModalFooter, CButton } from '@coreui/react'
-import sanitizeHtml from 'sanitize-html'
 import { Marked } from 'marked'
 import { baseUrl } from 'marked-base-url'
 import { observer } from 'mobx-react-lite'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { CModalExt } from '~/Components/CModalExt.js'
+import { forwardRef, useCallback, useContext, useImperativeHandle, useMemo, useState } from 'react'
 import semver from 'semver'
-import { makeAbsolutePath } from '~/Resources/util.js'
 import type { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { Modal } from '~/Components/Modal'
+import { sanitizeHtmlString } from '~/Resources/SanitizeHtml.js'
+import { makeAbsolutePath } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 export interface HelpModalRef {
 	showFromUrl(moduleType: ModuleInstanceType, moduleId: string, versionDisplayName: string, url: string): void
@@ -28,9 +27,6 @@ export const HelpModal = observer(
 
 		const [show, setShow] = useState(false)
 		const [content, setContent] = useState<HelpDisplayInfo | null>(null)
-
-		const doClose = useCallback(() => setShow(false), [])
-		const onClosed = useCallback(() => setContent(null), [])
 
 		useImperativeHandle(
 			ref,
@@ -72,6 +68,12 @@ export const HelpModal = observer(
 			[]
 		)
 
+		const onOpenChangeComplete = useCallback((open: boolean) => {
+			if (!open) {
+				setContent(null)
+			}
+		}, [])
+
 		const contentBaseUrl = content?.baseUrl
 		const marked = useMemo(() => {
 			const marked = new Marked()
@@ -81,36 +83,30 @@ export const HelpModal = observer(
 
 		const html = content
 			? {
-					__html: sanitizeHtml(marked.parse(content.markdown) as string, {
-						allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img']),
-						disallowedTagsMode: 'escape',
-						transformTags: {
-							a: (tagName, attribs) => {
-								return { tagName, attribs: { ...attribs, target: '_blank', rel: 'noopener noreferrer' } }
-							},
-						},
-					}),
+					__html: sanitizeHtmlString(marked.parse(content.markdown) as string, { allowImages: true }),
 				}
 			: undefined
 
 		const moduleInfo = content && modules.getModuleInfo(content.moduleType, content.moduleId)
 
 		return (
-			<CModalExt visible={show} onClose={doClose} onClosed={onClosed} size="lg">
-				<CModalHeader closeButton>
-					<h5>
-						Help for {moduleInfo?.display?.name || content?.moduleId} {content?.versionDisplayName ?? ''}
-					</h5>
-				</CModalHeader>
-				<CModalBody>
-					<div dangerouslySetInnerHTML={html} />
-				</CModalBody>
-				<CModalFooter>
-					<CButton color="secondary" onClick={doClose}>
-						Close
-					</CButton>
-				</CModalFooter>
-			</CModalExt>
+			<Modal.Root open={show} onOpenChange={setShow} onOpenChangeComplete={onOpenChangeComplete}>
+				<Modal.Portal>
+					<Modal.Backdrop />
+					<Modal.Viewport>
+						<Modal.Popup size="lg" scrollable>
+							<Modal.Header closeButton>
+								<Modal.Title>
+									Help for {moduleInfo?.display?.name || content?.moduleId} {content?.versionDisplayName ?? ''}
+								</Modal.Title>
+							</Modal.Header>
+							<Modal.Body>
+								<div dangerouslySetInnerHTML={html} />
+							</Modal.Body>
+						</Modal.Popup>
+					</Modal.Viewport>
+				</Modal.Portal>
+			</Modal.Root>
 		)
 	})
 )

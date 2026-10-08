@@ -1,15 +1,76 @@
-import { ControlBase } from '../ControlBase.js'
+import type { LayeredButtonModel, PageNumberButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import { exprExpr, exprVal } from '@companion-app/shared/Model/Options.js'
 import type {
-	ControlWithoutActionSets,
-	ControlWithoutActions,
-	ControlWithoutEvents,
-	ControlWithoutOptions,
-	ControlWithoutPushed,
-	ControlWithoutStyle,
-} from '../IControlFragments.js'
-import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
-import type { PageNumberButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+	ButtonGraphicsBoxElement,
+	ButtonGraphicsGroupElement,
+	ButtonGraphicsTextElement,
+	SomeButtonGraphicsElement,
+} from '@companion-app/shared/Model/StyleLayersModel.js'
+import {
+	ButtonGraphicsDecorationType,
+	ButtonGraphicsElementUsage,
+	ButtonGraphicsShowStatusIcons,
+} from '@companion-app/shared/Model/StyleModel.js'
 import type { ControlDependencies } from '../ControlDependencies.js'
+import { CreateElementOfType } from './Button/LayerDefaults.js'
+import { ControlButtonPage } from './PageButton.js'
+
+export const pageNumberElements: SomeButtonGraphicsElement[] = [
+	{
+		type: 'canvas',
+		id: 'canvas',
+		name: 'Canvas',
+		decoration: exprVal(ButtonGraphicsDecorationType.None),
+		showStatusIcons: exprVal(ButtonGraphicsShowStatusIcons.None),
+		usage: ButtonGraphicsElementUsage.Automatic,
+	},
+	{
+		...(CreateElementOfType('box') as ButtonGraphicsBoxElement),
+		color: exprVal(0x0f0f0f), // Grey background
+	},
+
+	{
+		// If page has a name
+		...(CreateElementOfType('group') as ButtonGraphicsGroupElement),
+		enabled: exprExpr('!!$(this:page_name) && toLowerCase($(this:page_name)) != "page" && $(this:page_name) != "$NA"'),
+		children: [
+			{
+				...(CreateElementOfType('text') as ButtonGraphicsTextElement),
+				text: exprVal('$(this:page_name)'),
+				color: exprVal(0xffffff),
+				fontsize: exprVal(30),
+				fontsizeAllowShrink: exprVal(false),
+			},
+		],
+	},
+
+	{
+		// No name, default display
+		...(CreateElementOfType('group') as ButtonGraphicsGroupElement),
+		enabled: exprExpr('!$(this:page_name) || toLowerCase($(this:page_name)) == "page" || $(this:page_name) == "$NA"'),
+		children: [
+			{
+				...(CreateElementOfType('text') as ButtonGraphicsTextElement),
+				text: exprVal('PAGE'),
+				color: exprVal(0xffc600), // Yellow color
+				fontsize: exprVal(41.25),
+				fontsizeAllowShrink: exprVal(false),
+				valign: exprVal('bottom'),
+				height: exprVal(40),
+			},
+			{
+				...(CreateElementOfType('text') as ButtonGraphicsTextElement),
+				text: exprExpr('getVariable("this:page") || "x"'),
+				color: exprVal(0xffffff),
+				fontsize: exprVal(54.5),
+				fontsizeAllowShrink: exprVal(true),
+				valign: exprVal('top'),
+				y: exprVal(45),
+				height: exprVal(55),
+			},
+		],
+	},
+]
 
 /**
  * Class for a pagenum button control.
@@ -26,25 +87,8 @@ import type { ControlDependencies } from '../ControlDependencies.js'
  * Individual Contributor License Agreement for Companion along with
  * this program.
  */
-export class ControlButtonPageNumber
-	extends ControlBase<PageNumberButtonModel>
-	implements
-		ControlWithoutActions,
-		ControlWithoutStyle,
-		ControlWithoutEvents,
-		ControlWithoutActionSets,
-		ControlWithoutOptions,
-		ControlWithoutPushed
-{
+export class ControlButtonPageNumber extends ControlButtonPage<PageNumberButtonModel> {
 	readonly type = 'pagenum'
-
-	readonly supportsActions = false
-	readonly supportsEntities = false
-	readonly supportsStyle = false
-	readonly supportsEvents = false
-	readonly supportsActionSets = false
-	readonly supportsOptions = false
-	readonly supportsPushed = false
 
 	/**
 	 * @param registry - the application core
@@ -70,35 +114,11 @@ export class ControlButtonPageNumber
 		}
 	}
 
-	/**
-	 * Get the complete style object of a button
-	 * @returns the processed style of the button
-	 */
-	getDrawStyle(): DrawStyleModel {
+	protected getDrawElements(): ReturnType<ControlButtonPage<any>['getDrawElements']> {
 		return {
-			style: 'pagenum',
+			drawType: 'pagenum',
+			elements: pageNumberElements,
 		}
-	}
-
-	/**
-	 * Collect the connection ids, labels, and variables referenced by this control
-	 * @param foundConnectionIds - connection ids being referenced
-	 * @param foundConnectionLabels - connection labels being referenced
-	 * @param foundVariables - variables being referenced
-	 */
-	collectReferencedConnectionsAndVariables(
-		_foundConnectionIds: Set<string>,
-		_foundConnectionLabels: Set<string>,
-		_foundVariables: Set<string>
-	): void {
-		// Nothing being referenced
-	}
-
-	/**
-	 * Inform the control that it has been moved, and anything relying on its location must be invalidated
-	 */
-	triggerLocationHasChanged(): void {
-		// Nothing to do
 	}
 
 	/**
@@ -108,7 +128,12 @@ export class ControlButtonPageNumber
 	 */
 	pressControl(pressed: boolean, surfaceId: string | undefined): void {
 		if (pressed && surfaceId) {
-			this.deps.surfaces.devicePageSet(surfaceId, this.deps.pageStore.getFirstPageId())
+			const startupPageId = this.deps.surfaces.devicePageGetConfiguredStartup(surfaceId)
+			const pageId =
+				startupPageId && this.deps.pageStore.isPageIdValid(startupPageId)
+					? startupPageId
+					: this.deps.pageStore.getFirstPageId()
+			this.deps.surfaces.devicePageSet(surfaceId, pageId)
 		}
 	}
 
@@ -123,10 +148,13 @@ export class ControlButtonPageNumber
 		}
 	}
 
-	getBitmapSize(): { width: number; height: number } | null {
-		return null
-	}
-	renameVariables(_labelFrom: string, _labelTo: string): void {
-		// Nothing to do
+	convertControl(): LayeredButtonModel {
+		return this.buildConvertedControl(pageNumberElements, {
+			definitionId: 'set_page',
+			options: {
+				surfaceId: exprVal('self'),
+				page: exprVal('startup'),
+			},
+		})
 	}
 }

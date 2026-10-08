@@ -9,10 +9,10 @@
  * this program.
  */
 
-import { Server as HttpServer } from 'http'
+import { Server as HttpServer } from 'node:http'
+import type express from 'express'
 import LogController from '../Log/Controller.js'
 import { sendOverIpc } from '../Resources/Util.js'
-import type express from 'express'
 
 export class UIServer extends HttpServer {
 	readonly #logger = LogController.createLogger('UI/Server')
@@ -46,11 +46,13 @@ export class UIServer extends HttpServer {
 				const address0 = this.address()
 				const address = typeof address0 === 'object' ? address0 : undefined
 
-				this.#logger.info(`new url: http://${address?.address}:${address?.port}/`)
+				const isBindGlobal = bindIp == '0.0.0.0' || bindIp == '::'
 
-				const ip = bindIp == '0.0.0.0' ? '127.0.0.1' : bindIp
+				const ip = isBindGlobal ? '127.0.0.1' : bindIp
 				const url = `http://${ip}:${address?.port}/`
-				const info = bindIp == '0.0.0.0' ? `All Interfaces: e.g. ${url}` : url
+				setTimeout(() => this.#logger.info(`new url: ${url}`), 2000)
+
+				const info = isBindGlobal ? `All Interfaces: e.g. ${url}` : url
 				sendOverIpc({
 					messageType: 'http-bind-status',
 					appStatus: 'Running',
@@ -59,7 +61,7 @@ export class UIServer extends HttpServer {
 				})
 			})
 		} catch (e) {
-			this.#logger.error(`http bind error: ${e}`)
+			setTimeout(() => this.#logger.error(`http bind error: ${e}`), 2000)
 		}
 	}
 }

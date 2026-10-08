@@ -1,39 +1,47 @@
-import React, { useContext, useState, useCallback, useRef } from 'react'
-import { CAlert, CButton, CButtonGroup } from '@coreui/react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faGithub } from '@fortawesome/free-brands-svg-icons'
 import {
 	faCog,
 	faExclamationTriangle,
 	faExternalLink,
 	faPlug,
 	faQuestionCircle,
-	faTimes,
 } from '@fortawesome/free-solid-svg-icons'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
-import { SearchBox } from '~/Components/SearchBox.js'
-import { AddInstanceModal, type AddInstanceModalRef } from './AddInstanceModal.js'
-import { RefreshModulesList } from '~/Modules/RefreshModulesList.js'
-import { LastUpdatedTimestamp } from '~/Modules/LastUpdatedTimestamp.js'
-import { NonIdealState } from '~/Components/NonIdealState.js'
-import { useTableVisibilityHelper } from '~/Components/TableVisibility.js'
-import { WindowLinkOpen } from '~/Helpers/Window.js'
-import { faGithub } from '@fortawesome/free-brands-svg-icons'
-import { filterProducts, useAllModuleProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { Link } from '@tanstack/react-router'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useRef, useState } from 'react'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button, ButtonGroup } from '~/Components/Button.js'
+import { InlineHelpCustom } from '~/Components/InlineHelp.js'
+import { NonIdealState } from '~/Components/NonIdealState.js'
+import { SearchBox } from '~/Components/SearchBox.js'
+import { useTableVisibilityHelper } from '~/Components/TableVisibility.js'
+import { Tooltip } from '~/Components/Tooltip.js'
+import { WindowLinkOpen } from '~/Helpers/Window.js'
+import { filterProducts, useAllModuleProducts, type FuzzyProduct } from '~/Hooks/useFilteredProducts.js'
+import { CloseButton, ContextHelpButton, type ContextHelpButtonProps } from '~/Layout/PanelIcons.js'
+import { LastUpdatedTimestamp } from '~/Modules/LastUpdatedTimestamp.js'
+import { RefreshModulesList } from '~/Modules/RefreshModulesList.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { AddInstanceModal, type AddInstanceModalRef } from './AddInstanceModal.js'
 import type { AddInstanceService } from './AddInstanceService.js'
 
 interface AddInstancePanelProps {
 	service: AddInstanceService
 
 	title: string
-	description: (storeCount: number) => React.ReactNode
+	helpAction: ContextHelpButtonProps['action']
+	description: (modulesCount: number) => React.ReactNode
+	isSubpanel?: boolean
 }
 
 export const AddInstancePanel = observer(function AddInstancePanel({
 	service,
 	title,
+	helpAction,
 	description,
+	isSubpanel,
 }: AddInstancePanelProps) {
 	const { modules } = useContext(RootAppStoreContext)
 
@@ -48,8 +56,10 @@ export const AddInstancePanel = observer(function AddInstancePanel({
 		available: true,
 	})
 
+	// The number of modules (see next comment)
 	const storeModulesOfTypeCount = modules.countStoreModulesOfType(service.moduleType)
 
+	// A module can support several devices: useAllModuleProducts returns the list of devices, so some modules are represented by several entries here.
 	const allProducts = useAllModuleProducts(service.moduleType)
 	const typeProducts = allProducts.filter(
 		(p) => storeModulesOfTypeCount === 0 || !!p.installedInfo || typeFilter.visibility.available
@@ -57,7 +67,7 @@ export const AddInstancePanel = observer(function AddInstancePanel({
 
 	let candidates: JSX.Element[] = []
 	try {
-		const searchResults = filterProducts(typeProducts, filter)
+		const searchResults = filterProducts(typeProducts, filter, false)
 
 		const candidatesObj: Record<string, JSX.Element> = {}
 		for (const moduleInfo of searchResults) {
@@ -84,11 +94,11 @@ export const AddInstancePanel = observer(function AddInstancePanel({
 
 		candidates = []
 		candidates.push(
-			<CAlert color="warning" role="alert">
+			<StaticAlert color="warning" role="alert">
 				Failed to build list of modules:
 				<br />
 				{e?.toString()}
-			</CAlert>
+			</StaticAlert>
 		)
 	}
 
@@ -105,47 +115,48 @@ export const AddInstancePanel = observer(function AddInstancePanel({
 			<div className="secondary-panel-simple-header">
 				<h4 className="panel-title">{title}</h4>
 				<div className="header-buttons">
-					<div className="float_right d-xl-none" onClick={service.closeAddInstance} title="Close">
-						<FontAwesomeIcon icon={faTimes} size="lg" />
-					</div>
+					<ContextHelpButton action={helpAction} />
+					<CloseButton closeFn={service.closeAddInstance} visibilityClass={isSubpanel ? '' : 'd-xl-none'} />
 				</div>
 			</div>
 
 			<div className="secondary-panel-simple-body">
 				<AddInstanceModal ref={addRef} service={service} openConfigureInstance={service.openConfigureInstance} />
-				<div style={{ clear: 'both' }} className="row-heading">
+				<div style={{ clear: 'both' }} className="sticky-heading">
 					<div className="add-connection-intro-section mb-3">
 						{storeModulesOfTypeCount > 0 ? (
 							<div className="intro-grid">
 								{description(storeModulesOfTypeCount)}
 								<div className="intro-filter">
-									<CButtonGroup role="group" aria-label="Module visibility filter">
-										<CButton
+									<ButtonGroup aria-label="Module visibility filter">
+										<Button
 											size="sm"
-											color={!typeFilter.visibility.available ? 'info' : 'outline-info'}
+											color="info"
+											variant={typeFilter.visibility.available ? 'outline' : undefined}
 											onClick={() => typeFilter.toggleVisibility('available')}
 											disabled={!typeFilter.visibility.available}
 										>
 											Installed Only
-										</CButton>
-										<CButton
+										</Button>
+										<Button
 											size="sm"
-											color={typeFilter.visibility.available ? 'info' : 'outline-info'}
+											color="info"
+											variant={!typeFilter.visibility.available ? 'outline' : undefined}
 											onClick={() => typeFilter.toggleVisibility('available')}
 											disabled={typeFilter.visibility.available}
 										>
 											All Available
-										</CButton>
-									</CButtonGroup>
+										</Button>
+									</ButtonGroup>
 								</div>
 							</div>
 						) : (
-							<CAlert color="info" className="mb-0">
+							<StaticAlert color="info" className="mb-0">
 								<div className="d-flex align-items-center gap-2">
 									<FontAwesomeIcon icon={faPlug} className="text-info" />
 									{description(0)}
 								</div>
-							</CAlert>
+							</StaticAlert>
 						)}
 					</div>
 
@@ -155,7 +166,7 @@ export const AddInstancePanel = observer(function AddInstancePanel({
 							<LastUpdatedTimestamp timestamp={modules.storeUpdateInfo.lastUpdated} />
 						</div>
 
-						<SearchBox filter={filter} setFilter={setFilter} />
+						<SearchBox filter={filter} setFilter={setFilter} className="mb-2" />
 					</div>
 				</div>
 				<div id="connection_add_search_results">
@@ -192,16 +203,19 @@ interface AddInstanceEntryProps {
 	addInstance: (module: FuzzyProduct) => void
 }
 
-function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
-	const { helpViewer } = useContext(RootAppStoreContext)
+const AddInstanceEntry = observer(function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
+	const { helpViewer, surfaceInstances } = useContext(RootAppStoreContext)
 
 	const addInstanceClick = useCallback(() => addInstance(moduleInfo), [addInstance, moduleInfo])
 	const showHelpForVersion =
 		moduleInfo.installedInfo?.devVersion ??
 		moduleInfo.installedInfo?.stableVersion ??
 		moduleInfo.installedInfo?.betaVersion ??
+		moduleInfo.installedInfo?.builtinVersion ??
 		moduleInfo.installedInfo?.installedVersions?.[0] ??
-		(moduleInfo.storeInfo ? { helpPath: moduleInfo.storeInfo.helpUrl, versionId: '' } : undefined)
+		(moduleInfo.storeInfo
+			? { helpPath: moduleInfo.storeInfo.helpUrl, versionId: '', allowMultipleInstances: true }
+			: undefined)
 
 	const showHelpClick = useCallback(
 		() =>
@@ -221,22 +235,41 @@ function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
 		]
 	)
 
+	const alreadyAddedCount =
+		moduleInfo.moduleType === ModuleInstanceType.Surface
+			? surfaceInstances.getAllOfModuleId(moduleInfo.moduleId).length
+			: 0
+	// If it is installed, we know if it supports multiple instances.
+	// If it isn't installed, count will be 0, so it doesn't matter
+	const isLimitReached = alreadyAddedCount > 0 && !(showHelpForVersion?.allowMultipleInstances ?? false)
+
 	return (
 		<div className="flex">
-			<CButton color="primary" onClick={addInstanceClick}>
-				Add
-			</CButton>
+			{isLimitReached ? (
+				<Tooltip.Root>
+					<Tooltip.Trigger render={<span />}>
+						<Button color="primary" disabled>
+							Add
+						</Button>
+					</Tooltip.Trigger>
+					<Tooltip.Popup arrow>This module is limited to one instance</Tooltip.Popup>
+				</Tooltip.Root>
+			) : (
+				<Button color="primary" onClick={addInstanceClick}>
+					Add
+				</Button>
+			)}
 			&nbsp;
 			{moduleInfo.installedInfo?.stableVersion?.isLegacy && (
-				<>
+				<InlineHelpCustom help="This module has not been updated for Companion 3.0, and may not work fully.">
 					<FontAwesomeIcon
 						icon={faExclamationTriangle}
 						color="#ff6600"
 						size={'xl'}
-						title="This module has not been updated for Companion 3.0, and may not work fully"
+						aria-label="This module has not been updated for Companion 3.0, and may not work fully."
 					/>
 					&nbsp;
-				</>
+				</InlineHelpCustom>
 			)}
 			<div className="grow" style={{ alignContent: 'center' }}>
 				{moduleInfo.name}
@@ -273,4 +306,4 @@ function AddInstanceEntry({ moduleInfo, addInstance }: AddInstanceEntryProps) {
 			</div>
 		</div>
 	)
-}
+})

@@ -1,10 +1,11 @@
-import React, { useCallback, useContext, useState } from 'react'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { CAlert, CButton } from '@coreui/react'
 import { faSync } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useState } from 'react'
+import { StaticAlert } from '~/Components/Alert'
+import { Button } from '~/Components/Button'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 export const RefreshModulesList = observer(function RefreshModulesList({ btnSize }: { btnSize?: 'sm' | 'lg' }) {
 	const { moduleStoreRefreshProgress } = useContext(RootAppStoreContext)
@@ -24,18 +25,18 @@ export const RefreshModulesList = observer(function RefreshModulesList({ btnSize
 
 	return (
 		<div>
-			{refreshError ? <CAlert color="warning">{refreshError}</CAlert> : ''}
+			{refreshError ? <StaticAlert color="warning">{refreshError}</StaticAlert> : ''}
 
 			{refreshProgress !== 1 ? (
-				<CButton color="primary" disabled size={btnSize}>
+				<Button color="primary" disabled size={btnSize}>
 					<FontAwesomeIcon icon={faSync} spin={true} />
 					&nbsp;Refreshing modules list {Math.round(refreshProgress * 100)}%
-				</CButton>
+				</Button>
 			) : (
-				<CButton color="primary" onClick={doRefreshModules} size={btnSize}>
+				<Button color="primary" onClick={doRefreshModules} size={btnSize}>
 					<FontAwesomeIcon icon={faSync} />
 					&nbsp;Refresh modules list
-				</CButton>
+				</Button>
 			)}
 		</div>
 	)

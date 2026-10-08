@@ -1,25 +1,30 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react'
-import { CForm, CFormSelect, CCol, CFormLabel, CFormSwitch } from '@coreui/react'
-import { PreventDefaultHandler } from '~/Resources/util.js'
-import { LoadingRetryOrError } from '~/Resources/Loading.js'
-import { faQuestionCircle, faTimes } from '@fortawesome/free-solid-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { InternalPageIdDropdown } from '~/Controls/InternalModuleField.js'
+import { faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
+import { useNavigate } from '@tanstack/react-router'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useEffect, useId, useState } from 'react'
+import type { JsonValue } from 'type-fest'
+import type { DropdownChoice } from '@companion-app/shared/Model/Common.js'
 import type {
 	ClientDevicesListItem,
 	ClientSurfaceItem,
 	SurfaceGroupConfig,
 	SurfacePanelConfig,
 } from '@companion-app/shared/Model/Surfaces.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
-import { TextInputField } from '~/Components/TextInputField.js'
-import { EditPanelConfigField } from './EditPanelConfigField'
+import { SimpleDropdownInputField } from '~/Components/DropdownInputFieldSimple'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { Grid } from '~/Components/Grid'
+import { InlineHelpIcon } from '~/Components/InlineHelp'
 import { NonIdealState } from '~/Components/NonIdealState'
+import { SwitchInputField } from '~/Components/SwitchInputField'
+import { TextInputFieldSimple } from '~/Components/TextInputField.js'
+import { InternalPageIdDropdown } from '~/Controls/InternalModuleField.js'
+import { CloseButton } from '~/Layout/PanelIcons.js'
+import { LoadingRetryOrError } from '~/Resources/Loading.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
-import { useSubscription } from '@trpc/tanstack-react-query'
-import { useNavigate } from '@tanstack/react-router'
-import { InlineHelp } from '~/Components/InlineHelp'
+import { PreventDefaultHandler, useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { EditPanelConfigField } from './EditPanelConfigField'
 
 type SurfaceInfo = ClientSurfaceItem & { groupId: string | null }
 
@@ -36,7 +41,7 @@ export const SurfaceEditPanel = observer<SurfaceEditPanelProps>(function Surface
 	const navigate = useNavigate()
 
 	const doCloseSurface = useCallback(() => {
-		void navigate({ to: '/surfaces/configured' })
+		void navigate({ to: '/surfaces' })
 	}, [navigate])
 
 	let surfaceInfo: SurfaceInfo | null = null
@@ -74,9 +79,7 @@ export const SurfaceEditPanel = observer<SurfaceEditPanelProps>(function Surface
 					Settings for {surfaceInfo?.displayName ?? surfaceInfo?.type ?? groupInfo?.displayName}
 				</h4>
 				<div className="header-buttons">
-					<div className="float_right d-xl-none" onClick={doCloseSurface} title="Close">
-						<FontAwesomeIcon icon={faTimes} size="lg" />
-					</div>
+					<CloseButton closeFn={doCloseSurface} />
 				</div>
 			</div>
 
@@ -86,6 +89,46 @@ export const SurfaceEditPanel = observer<SurfaceEditPanelProps>(function Surface
 		</>
 	)
 })
+
+interface SurfaceEnabledToggleProps {
+	surfaceId: string
+	enabled: boolean
+	canChangeEnabled: boolean
+}
+
+/**
+ * Toggle for enabling/disabling a surface.
+ */
+function SurfaceEnabledToggle({ surfaceId, enabled, canChangeEnabled }: SurfaceEnabledToggleProps) {
+	const setEnabledMutation = useMutationExt(trpc.surfaces.surfaceSetEnabled.mutationOptions())
+
+	const handleToggle = useCallback(
+		(value: boolean) => {
+			if (!canChangeEnabled) return
+			setEnabledMutation.mutateAsync({ surfaceId, enabled: value }).catch((err) => {
+				console.error('Failed to set surface enabled', err)
+			})
+		},
+		[setEnabledMutation, surfaceId, canChangeEnabled]
+	)
+
+	const inputId = useId()
+
+	return (
+		<>
+			<FormLabel htmlFor={inputId} className="col-sm-4 col-form-label col-form-label-sm">
+				Enabled
+				<InlineHelpIcon className="ms-1">When disabled, Companion will not open this surface.</InlineHelpIcon>
+			</FormLabel>
+			<Grid.Col sm={8}>
+				<div className="mx-2">
+					<SwitchInputField id={inputId} value={enabled} setValue={handleToggle} disabled={!canChangeEnabled} />
+				</div>
+				<div className="form-text">Only surfaces connected locally can be disabled here</div>
+			</Grid.Col>
+		</>
+	)
+}
 
 interface SurfaceEditPanelContentProps {
 	surfaceInfo: SurfaceInfo | null
@@ -195,7 +238,7 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 
 	const surfaceSetConfigKeyMutation = useMutationExt(trpc.surfaces.surfaceSetConfigKey.mutationOptions())
 	const setSurfaceConfigValue = useCallback(
-		(key: string, value: any) => {
+		(key: string, value: JsonValue | undefined) => {
 			console.log('update surface', key, value)
 			if (surfaceId) {
 				surfaceSetConfigKeyMutation
@@ -219,7 +262,7 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 
 	const setGroupConfigKeyMutation = useMutationExt(trpc.surfaces.groupSetConfigKey.mutationOptions())
 	const setGroupConfigValue = useCallback(
-		(key: string, value: any) => {
+		(key: string, value: JsonValue) => {
 			console.log('update group', key, value)
 			if (groupId) {
 				setGroupConfigKeyMutation
@@ -263,6 +306,30 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 		[setNameMutation]
 	)
 
+	const surfaceGroupChoices = useComputed(() => {
+		const choices: DropdownChoice[] = [
+			{ id: 'null', label: 'Standalone (Default)' },
+			...surfaces.store
+				.values()
+				.filter((group): group is ClientDevicesListItem => !!group && !group.isAutoGroup)
+				.map((group) => ({
+					id: group.id,
+					label: group.displayName,
+				})),
+		]
+		return choices
+	}, [surfaces])
+
+	const nameFieldId = useId()
+	const groupFieldId = useId()
+	const groupNameFieldId = useId()
+	const useLastPageFieldId = useId()
+	const startupPageFieldId = useId()
+	const currentPageFieldId = useId()
+	const restrictPagesFieldId = useId()
+	const allowedPagesFieldId = useId()
+	const neverLockFieldId = useId()
+
 	// Show loading or error state
 	const dataReady = (!surfaceId || !!surfaceConfig.config) && (!groupId || groupConfig.config !== null)
 	if (!dataReady || surfaceConfig.error || groupConfig.error) {
@@ -280,39 +347,43 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 
 	return (
 		<>
-			<CForm className="row g-sm-2" onSubmit={PreventDefaultHandler}>
+			<Form className="row g-sm-2" onSubmit={PreventDefaultHandler}>
 				{surfaceInfo && (
 					<>
-						<CFormLabel htmlFor="colFormSurfaceName" className="col-sm-4 col-form-label col-form-label-sm">
+						<FormLabel htmlFor={nameFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 							Surface Name
-						</CFormLabel>
-						<CCol sm={8}>
-							<TextInputField value={surfaceInfo.name} setValue={(name) => updateName(surfaceInfo.id, name)} />
-						</CCol>
+						</FormLabel>
+						<Grid.Col sm={8}>
+							<TextInputFieldSimple
+								id={nameFieldId}
+								value={surfaceInfo.name}
+								setValue={(name) => updateName(surfaceInfo.id, name)}
+							/>
+						</Grid.Col>
 
-						<CFormLabel htmlFor="colFormGroupId" className="col-sm-4 col-form-label col-form-label-sm">
-							Surface Group&nbsp;
-							<InlineHelp help="When in a group, surfaces will follow the page number of that group">
-								<FontAwesomeIcon icon={faQuestionCircle} />
-							</InlineHelp>
-						</CFormLabel>
-						<CCol sm={8}>
-							<CFormSelect
-								name="colFormGroupId"
+						{/* Show enabled toggle for all surfaces, but disable it for non-local ones */}
+						{surfaceInfo.integrationType !== 'emulator' && surfaceInfo.integrationType !== 'elgato-plugin' && (
+							<SurfaceEnabledToggle
+								surfaceId={surfaceInfo.id}
+								enabled={surfaceInfo.enabled}
+								canChangeEnabled={surfaceInfo.canChangeEnabled}
+							/>
+						)}
+
+						<FormLabel htmlFor={groupFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+							Surface Group
+							<InlineHelpIcon className="ms-1">
+								When in a group, surfaces will follow the page number of that group
+							</InlineHelpIcon>
+						</FormLabel>
+						<Grid.Col sm={8}>
+							<SimpleDropdownInputField
+								id={groupFieldId}
 								value={surfaceInfo.groupId || 'null'}
-								onChange={(e) => setSurfaceGroupId(e.currentTarget.value)}
-							>
-								<option value="null">Standalone (Default)</option>
-
-								{Array.from(surfaces.store.values())
-									.filter((group): group is ClientDevicesListItem => !!group && !group.isAutoGroup)
-									.map((group) => (
-										<option key={group.id} value={group.id}>
-											{group.displayName}
-										</option>
-									))}
-							</CFormSelect>
-						</CCol>
+								setValue={(value) => setSurfaceGroupId(value as string)}
+								choices={surfaceGroupChoices}
+							/>
+						</Grid.Col>
 					</>
 				)}
 
@@ -320,78 +391,85 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 					<>
 						{!groupInfo.isAutoGroup && (
 							<>
-								<CFormLabel htmlFor="colFormGroupName" className="col-sm-4 col-form-label col-form-label-sm">
+								<FormLabel htmlFor={groupNameFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 									Group Name
-								</CFormLabel>
-								<CCol sm={8}>
-									<TextInputField value={groupInfo.displayName} setValue={(name) => updateName(groupInfo.id, name)} />
-								</CCol>
+								</FormLabel>
+								<Grid.Col sm={8}>
+									<TextInputFieldSimple
+										id={groupNameFieldId}
+										value={groupInfo.displayName}
+										setValue={(name) => updateName(groupInfo.id, name)}
+									/>
+								</Grid.Col>
 							</>
 						)}
 
-						<CFormLabel htmlFor="colFormUseLastPage" className="col-sm-4 col-form-label col-form-label-sm">
+						<FormLabel htmlFor={useLastPageFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 							Use Last Page At Startup
-						</CFormLabel>
-						<CCol sm={8}>
-							<CFormSwitch
-								name="colFormUseLastPage"
-								className="mx-2"
-								size="xl"
-								checked={!!groupConfig.config.use_last_page}
-								onChange={(e) => setGroupConfigValue('use_last_page', !!e.currentTarget.checked)}
-							/>
-						</CCol>
+						</FormLabel>
+						<Grid.Col sm={8}>
+							<div className="mx-2">
+								<SwitchInputField
+									id={useLastPageFieldId}
+									value={!!groupConfig.config.use_last_page}
+									setValue={(value) => setGroupConfigValue('use_last_page', !!value)}
+								/>
+							</div>
+						</Grid.Col>
 
-						<CFormLabel htmlFor="colFormStartupPage" className="col-sm-4 col-form-label col-form-label-sm">
+						<FormLabel htmlFor={startupPageFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 							{groupConfig.config.use_last_page ? 'Home Page' : 'Startup Page'}
-						</CFormLabel>
-						<CCol sm={8}>
+						</FormLabel>
+						<Grid.Col sm={8}>
 							<InternalPageIdDropdown
+								id={startupPageFieldId}
 								disabled={false}
 								includeDirection={false}
 								includeStartup={false}
 								value={groupConfig.config.startup_page_id}
 								setValue={(val) => setGroupConfigValue('startup_page_id', val)}
 							/>
-						</CCol>
+						</Grid.Col>
 
 						{(surfaceInfo === null || !!surfaceInfo.isConnected || !!groupConfig.config.use_last_page) && (
 							<>
-								<CFormLabel htmlFor="colFormCurrentPage" className="col-sm-4 col-form-label col-form-label-sm">
+								<FormLabel htmlFor={currentPageFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 									{surfaceInfo === null || surfaceInfo?.isConnected ? 'Current Page' : 'Last Page'}
-								</CFormLabel>
-								<CCol sm={8}>
+								</FormLabel>
+								<Grid.Col sm={8}>
 									<InternalPageIdDropdown
+										id={currentPageFieldId}
 										disabled={false}
 										includeDirection={false}
 										includeStartup={false}
 										value={groupConfig.config.last_page_id}
 										setValue={(val) => setGroupConfigValue('last_page_id', val)}
 									/>
-								</CCol>
+								</Grid.Col>
 							</>
 						)}
 
-						<CFormLabel htmlFor="colFormRestrictPages" className="col-sm-4 col-form-label col-form-label-sm">
+						<FormLabel htmlFor={restrictPagesFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 							Restrict pages accessible to this {surfaceId === null ? 'group' : 'surface'}
-						</CFormLabel>
-						<CCol sm={8}>
-							<CFormSwitch
-								name="colFormRestrictPages"
-								className="mx-2"
-								size="xl"
-								checked={!!groupConfig.config.restrict_pages}
-								onChange={(e) => setGroupConfigValue('restrict_pages', !!e.currentTarget.checked)}
-							/>
-						</CCol>
+						</FormLabel>
+						<Grid.Col sm={8}>
+							<div className="mx-2">
+								<SwitchInputField
+									id={restrictPagesFieldId}
+									value={!!groupConfig.config.restrict_pages}
+									setValue={(value) => setGroupConfigValue('restrict_pages', !!value)}
+								/>
+							</div>
+						</Grid.Col>
 
 						{!!groupConfig.config.restrict_pages && (
 							<>
-								<CFormLabel htmlFor="colFormAllowedPages" className="col-sm-4 col-form-label col-form-label-sm">
+								<FormLabel htmlFor={allowedPagesFieldId} className="col-sm-4 col-form-label col-form-label-sm">
 									Allowed pages:
-								</CFormLabel>
-								<CCol sm={8}>
+								</FormLabel>
+								<Grid.Col sm={8}>
 									<InternalPageIdDropdown
+										id={allowedPagesFieldId}
 										disabled={false}
 										includeDirection={false}
 										includeStartup={false}
@@ -399,9 +477,22 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 										value={groupConfig.config.allowed_page_ids}
 										setValue={(val) => setGroupConfigValue('allowed_page_ids', val)}
 									/>
-								</CCol>
+								</Grid.Col>
 							</>
 						)}
+
+						<FormLabel htmlFor={neverLockFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+							Never pin code lock
+						</FormLabel>
+						<Grid.Col sm={8}>
+							<div className="mx-2">
+								<SwitchInputField
+									id={neverLockFieldId}
+									value={!!groupConfig.config.never_lock}
+									setValue={(value) => setGroupConfigValue('never_lock', !!value)}
+								/>
+							</div>
+						</Grid.Col>
 					</>
 				)}
 
@@ -413,18 +504,19 @@ const SurfaceEditPanelContent = observer<SurfaceEditPanelContentProps>(function 
 							definition={field}
 							value={surfaceConfig.config?.[field.id]}
 							setValue={setSurfaceConfigValue}
+							isVisible
 						/>
 					))}
 
 				{surfaceConfig.config && surfaceInfo && !surfaceInfo.isConnected && (
-					<CCol sm={12}>
+					<Grid.Col sm={12}>
 						<NonIdealState
 							icon={faQuestionCircle}
 							text="This surface is currently offline. Some settings are not available."
 						/>
-					</CCol>
+					</Grid.Col>
 				)}
-			</CForm>
+			</Form>
 		</>
 	)
 })

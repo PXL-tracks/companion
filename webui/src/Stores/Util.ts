@@ -1,7 +1,7 @@
 import { useContext } from 'react'
-import { RootAppStoreContext } from './RootAppStore.js'
-import { useComputed } from '~/Resources/util.js'
 import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
+import { useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from './RootAppStore.js'
 
 export interface ClientConnectionConfigWithId extends ClientConnectionConfig {
 	id: string
@@ -11,15 +11,9 @@ export function useSortedConnectionsThatHaveVariables(): ClientConnectionConfigW
 	const { variablesStore, connections } = useContext(RootAppStoreContext)
 
 	return useComputed(() => {
-		const result: ClientConnectionConfigWithId[] = []
-
-		for (const [id, connection] of connections.connections) {
+		return connections.sortedConnections().filter((connection) => {
 			const connectionVariables = variablesStore.variables.get(connection.label)
-			if (connectionVariables && connectionVariables.size > 0) {
-				result.push({ ...connection, id })
-			}
-		}
-
-		return result.sort((a, b) => a.sortOrder - b.sortOrder)
+			return connectionVariables && connectionVariables.size > 0
+		})
 	}, [variablesStore.variables, connections.connections])
 }

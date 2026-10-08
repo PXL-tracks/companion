@@ -1,5 +1,6 @@
-import { ServiceBase } from './Base.js'
 import OSC, { type OscReceivedMessage } from 'osc'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { ServiceBase } from './Base.js'
 
 /**
  * Abstract class providing base functionality for OSC services.
@@ -48,8 +49,8 @@ export abstract class ServiceOscBase extends ServiceBase {
 				} else {
 					this.logger.info('Listening on port ' + this.port)
 				}
-			} catch (e: any) {
-				this.logger.error(`Could not launch: ${e.message}`)
+			} catch (e) {
+				this.logger.error(`Could not launch: ${stringifyError(e)}`)
 			}
 		}
 	}

@@ -1,10 +1,10 @@
-import { CAlert, CCol, CForm, CFormLabel } from '@coreui/react'
-import React, { useCallback, useContext, useMemo, useRef } from 'react'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { PreventDefaultHandler } from '~/Resources/util'
-import { MyErrorBoundary } from '~/Resources/Error'
-import { LoadingBar, LoadingRetryOrError } from '~/Resources/Loading'
-import { TextInputField } from '~/Components/index.js'
+import { faDollarSign, faGlobe } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useId, useMemo, useRef } from 'react'
+import type { JsonValue } from 'type-fest'
+import { isLabelValid } from '@companion-app/shared/Label.js'
 import {
 	EntityModelType,
 	FeedbackEntitySubType,
@@ -12,26 +12,31 @@ import {
 	type SomeEntityModel,
 } from '@companion-app/shared/Model/EntityModel.js'
 import type { ExpressionVariableOptions } from '@companion-app/shared/Model/ExpressionVariableModel.js'
-import { observer } from 'mobx-react-lite'
+import { StaticAlert } from '~/Components/Alert'
+import { Form, FormLabel } from '~/Components/Form.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { InlineHelpIcon } from '~/Components/InlineHelp'
 import { NonIdealState } from '~/Components/NonIdealState.js'
-import { faDollarSign, faGlobe, faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
+import { TextInputFieldSimple } from '~/Components/TextInputField'
+import { VariableValueDisplay } from '~/Components/VariableValueDisplay'
 import { AddEntityPanel } from '~/Controls/Components/AddEntityPanel.js'
-import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
-import { EntityEditorContextProvider, useEntityEditorContext } from '~/Controls/Components/EntityEditorContext.js'
-import { findAllEntityIdsDeep } from '~/Controls/Util.js'
-import { useControlEntitiesEditorService, useControlEntityService } from '~/Services/Controls/ControlEntitiesService.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { RootAppStoreContext } from '~/Stores/RootAppStore'
 import { EntityManageChildGroups } from '~/Controls/Components/EntityChildGroup'
 import { EntityCommonCells } from '~/Controls/Components/EntityCommonCells'
-import { useControlConfig } from '~/Hooks/useControlConfig'
-import { trpc, useMutationExt } from '~/Resources/TRPC'
-import { VariableValueDisplay } from '~/Components/VariableValueDisplay'
-import { useSubscription } from '@trpc/tanstack-react-query'
+import { EntityEditorContextProvider, useEntityEditorContext } from '~/Controls/Components/EntityEditorContext.js'
 import { EditableEntityList } from '~/Controls/Components/EntityList'
-import { InlineHelp } from '~/Components/InlineHelp'
+import { useEntityListReorderMonitor } from '~/Controls/Components/useEntityListReorderMonitor.js'
+import { ControlNotesEditor } from '~/Controls/ControlNotesEditor.js'
 import { useLocalVariablesStore, type LocalVariablesStore } from '~/Controls/LocalVariablesStore'
-import { isLabelValid } from '@companion-app/shared/Label.js'
+import { findAllEntityIdsDeep } from '~/Controls/Util.js'
+import { PanelCollapseHelperProvider } from '~/Helpers/CollapseHelper.js'
+import { useControlConfig } from '~/Hooks/useControlConfig'
+import { MyErrorBoundary } from '~/Resources/Error'
+import { LoadingBar, LoadingRetryOrError } from '~/Resources/Loading'
+import { trpc, useMutationExt } from '~/Resources/TRPC'
+import { PreventDefaultHandler } from '~/Resources/util'
+import { useControlEntitiesEditorService, useControlEntityService } from '~/Services/Controls/ControlEntitiesService.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore'
 
 interface EditExpressionVariablePanelProps {
 	controlId: string
@@ -86,9 +91,9 @@ export function EditExpressionVariablePanel({ controlId }: EditExpressionVariabl
 							)}
 						</>
 					) : (
-						<CAlert color="danger">
+						<StaticAlert color="danger">
 							Invalid control type: {controlConfig.config.type}. Expected 'expression-variable'.
-						</CAlert>
+						</StaticAlert>
 					)}
 				</div>
 			) : (
@@ -125,25 +130,43 @@ function ExpressionVariableConfig({ controlId, options }: ExpressionVariableConf
 	const setName = useCallback((val: string) => setValueInner('variableName', val), [setValueInner])
 	const setDescription = useCallback((val: string) => setValueInner('description', val), [setValueInner])
 
-	return (
-		<CCol sm={12} className="p-0">
-			<CForm onSubmit={PreventDefaultHandler} className="row flex-form">
-				<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">
-					Name
-					<InlineHelp help="The name for the variable. It will get wrapped with $(expression:X) for you">
-						<FontAwesomeIcon icon={faQuestionCircle} />
-					</InlineHelp>
-				</CFormLabel>
-				<CCol xs={8}>
-					<TextInputField setValue={setName} value={options.variableName} checkValid={isLabelValid} />
-				</CCol>
+	const nameFieldId = useId()
+	const descriptionFieldId = useId()
+	const notesFieldId = useId()
 
-				<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Description</CFormLabel>
-				<CCol xs={8}>
-					<TextInputField setValue={setDescription} value={options.description} />
-				</CCol>
-			</CForm>
-		</CCol>
+	return (
+		<Grid.Col sm={12} className="p-0">
+			<Form onSubmit={PreventDefaultHandler} className="row flex-form">
+				<FormLabel htmlFor={nameFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+					Name
+					<InlineHelpIcon className="ms-1">
+						The name for the variable. It will get wrapped with <code>$(expression:X)</code> for you
+					</InlineHelpIcon>
+				</FormLabel>
+				<Grid.Col xs={8}>
+					<TextInputFieldSimple
+						id={nameFieldId}
+						setValue={setName}
+						value={options.variableName}
+						checkValid={isLabelValid}
+					/>
+				</Grid.Col>
+
+				<FormLabel htmlFor={descriptionFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+					Description
+				</FormLabel>
+				<Grid.Col xs={8}>
+					<TextInputFieldSimple id={descriptionFieldId} setValue={setDescription} value={options.description} />
+				</Grid.Col>
+
+				<FormLabel htmlFor={notesFieldId} className="col-sm-4 col-form-label col-form-label-sm">
+					Notes
+				</FormLabel>
+				<Grid.Col xs={8}>
+					<ControlNotesEditor id={notesFieldId} controlId={controlId} notes={options.notes} className="mb-2" />
+				</Grid.Col>
+			</Form>
+		</Grid.Col>
 	)
 }
 
@@ -161,6 +184,7 @@ const ExpressionVariableEntityEditor = observer(function ExpressionVariableEntit
 	const confirmModal = useRef<GenericConfirmModalRef>(null)
 
 	const serviceFactory = useControlEntitiesEditorService(controlId, 'feedbacks', confirmModal)
+	useEntityListReorderMonitor(controlId, EntityModelType.Feedback, serviceFactory)
 
 	const entityIds = useMemo(() => findAllEntityIdsDeep(entity ? [entity] : []), [entity])
 
@@ -173,8 +197,13 @@ const ExpressionVariableEntityEditor = observer(function ExpressionVariableEntit
 				readonly={false}
 				localVariablesStore={localVariablesStore}
 				localVariablePrefix={null}
+				previewStatusOnly
 			>
-				<PanelCollapseHelperProvider storageId={`feedbacks_${controlId}_entities`} knownPanelIds={entityIds}>
+				<PanelCollapseHelperProvider
+					storageId={`feedbacks_${controlId}_entities`}
+					knownPanelIds={entityIds}
+					evictionOwner={{ kind: 'control', id: controlId }}
+				>
 					<GenericConfirmModal ref={confirmModal} />
 
 					{!entity ? (
@@ -222,18 +251,20 @@ const ExpressionVariableSoleEntityEditor = observer(function ExpressionVariableS
 
 	return (
 		<>
-			<CCol sm={12} className="p-0">
-				<CForm onSubmit={PreventDefaultHandler} className="row flex-form">
-					<CFormLabel className="col-sm-4 col-form-label col-form-label-sm">Current Value</CFormLabel>
-					<CCol xs={8}>
+			<Grid.Col sm={12} className="p-0">
+				<Form onSubmit={PreventDefaultHandler} className="row flex-form">
+					<FormLabel htmlFor={undefined} className="col-sm-4 col-form-label col-form-label-sm">
+						Current Value
+					</FormLabel>
+					<Grid.Col xs={8}>
 						{expressionVariableDefinition?.isActive ? (
-							<ExpressionVariableCurrentValue controlId={controlId} name={expressionVariableDefinition.variableName} />
+							<ExpressionVariableCurrentValue name={expressionVariableDefinition.variableName} />
 						) : (
 							<small>Variable is not active (the name is either empty or in use elsewhere)</small>
 						)}
-					</CCol>
-				</CForm>
-			</CCol>
+					</Grid.Col>
+				</Form>
+			</Grid.Col>
 
 			<div className="editor-grid">
 				<EntityCommonCells
@@ -264,6 +295,7 @@ const ExpressionVariableLocalVariablesEditor = observer(function ExpressionVaria
 	const confirmModal = useRef<GenericConfirmModalRef>(null)
 
 	const serviceFactory = useControlEntitiesEditorService(controlId, 'local-variables', confirmModal)
+	useEntityListReorderMonitor(controlId, EntityModelType.Feedback, serviceFactory)
 
 	const entityIds = useMemo(() => findAllEntityIdsDeep(localVariables), [localVariables])
 
@@ -277,20 +309,28 @@ const ExpressionVariableLocalVariablesEditor = observer(function ExpressionVaria
 				localVariablesStore={localVariablesStore}
 				localVariablePrefix="local"
 			>
-				<PanelCollapseHelperProvider storageId={`localVariables_${controlId}_entities`} knownPanelIds={entityIds}>
+				<PanelCollapseHelperProvider
+					storageId={`localVariables_${controlId}_entities`}
+					knownPanelIds={entityIds}
+					evictionOwner={{ kind: 'control', id: controlId }}
+				>
 					<GenericConfirmModal ref={confirmModal} />
 
 					<EditableEntityList
 						heading={
-							<InlineHelp help="You can use local variables inside of this expression variable to create some dynamic values based on feedbacks">
+							<>
 								Local Variables
-							</InlineHelp>
+								<InlineHelpIcon className="ms-1">
+									You can use local variables inside of this expression variable to create some dynamic values based on
+									feedbacks
+								</InlineHelpIcon>
+							</>
 						}
 						subheading={
-							<CAlert color="info" className="mb-2">
-								Local variables are not yet supported by all modules or fields. Fields which support local variables can
-								be identified by the <FontAwesomeIcon icon={faGlobe} /> icon.
-							</CAlert>
+							<StaticAlert color="info" className="mb-2">
+								Local variables are not supported by all modules or fields. Fields which support local variables can be
+								identified by the <FontAwesomeIcon icon={faGlobe} /> icon.
+							</StaticAlert>
 						}
 						entities={localVariables}
 						ownerId={null}
@@ -304,11 +344,7 @@ const ExpressionVariableLocalVariablesEditor = observer(function ExpressionVaria
 	)
 })
 
-function ExpressionVariableCurrentValue({ name }: { controlId: string; name: string }) {
-	const { notifier } = useContext(RootAppStoreContext)
-
-	const onCopied = useCallback(() => notifier.show(`Copied`, 'Copied to clipboard', 3000), [notifier])
-
+function ExpressionVariableCurrentValue({ name }: { name: string }) {
 	const sub = useSubscription(
 		trpc.preview.expressionStream.watchExpression.subscriptionOptions(
 			{
@@ -320,13 +356,23 @@ function ExpressionVariableCurrentValue({ name }: { controlId: string; name: str
 		)
 	)
 
-	if (!sub.data) {
+	// Retain the last successfully-computed value, so the row keeps showing it while a transient
+	// expression error is reported inline at the field instead of being duplicated here.
+	const lastGoodValue = useRef<JsonValue | undefined>(undefined)
+	const hasLastGoodValue = useRef(false)
+	if (sub.data?.ok) {
+		lastGoodValue.current = sub.data.value
+		hasLastGoodValue.current = true
+	}
+
+	if (!sub.data && !hasLastGoodValue.current) {
 		return <LoadingBar />
 	}
 
-	if (!sub.data.ok) {
-		return <CAlert color="danger">Error: {sub.data.error}</CAlert>
+	if (!hasLastGoodValue.current) {
+		// Errored before ever producing a value - the error itself is shown at the field
+		return <small className="text-muted">No value</small>
 	}
 
-	return <VariableValueDisplay value={sub.data.value} onCopied={onCopied} />
+	return <VariableValueDisplay value={lastGoodValue.current} />
 }

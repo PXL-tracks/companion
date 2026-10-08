@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from 'react'
-import { CAlert, CFormSwitch, CListGroupItem } from '@coreui/react'
-import type { CloudRegionState } from '@companion-app/shared/Model/Cloud.js'
-import classNames from 'classnames'
 import { useSubscription } from '@trpc/tanstack-react-query'
+import classNames from 'classnames'
+import { useCallback, useState } from 'react'
+import type { CloudRegionState } from '@companion-app/shared/Model/Cloud.js'
+import { StaticAlert } from '~/Components/Alert'
+import { SwitchInputField } from '~/Components/SwitchInputField'
 import { trpc, useMutationExt } from '~/Resources/TRPC'
 
 interface CloudRegionPanelProps {
@@ -14,8 +15,7 @@ export function CloudRegionPanel({ regionId, hideDisabled }: CloudRegionPanelPro
 	const setEnabledMutation = useMutationExt(trpc.cloud.setRegionEnabled.mutationOptions())
 
 	const cloudSetStateEnabled = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement>) => {
-			const enabled = !!e.currentTarget.checked
+		(enabled: boolean) => {
 			if (!hideDisabled) {
 				setEnabledMutation.mutate({
 					regionId,
@@ -35,24 +35,24 @@ export function CloudRegionPanel({ regionId, hideDisabled }: CloudRegionPanelPro
 	if (!regionState || (hideDisabled && !regionState.enabled)) return null
 
 	return (
-		<CListGroupItem className="cloud-region-item">
+		<div className="cloud-region-item">
 			<p
 				className={classNames('cloud-region-text', {
 					online: regionState.connected,
 				})}
 			>
-				<CFormSwitch
-					color={regionState.connected ? 'success' : 'danger'}
-					checked={!!regionState.enabled}
-					onChange={cloudSetStateEnabled}
+				<SwitchInputField
+					id={undefined}
+					value={!!regionState.enabled}
+					setValue={cloudSetStateEnabled}
 					disabled={hideDisabled}
-					width={100}
+					small
 				/>{' '}
 				{regionState.name} {regionState.pingResults > -1 ? `(${regionState.pingResults}ms)` : ''}
 			</p>
 
-			{regionState.enabled && regionState.error && <CAlert color="danger">{regionState.error}</CAlert>}
-		</CListGroupItem>
+			{regionState.enabled && regionState.error && <StaticAlert color="danger">{regionState.error}</StaticAlert>}
+		</div>
 	)
 }
 

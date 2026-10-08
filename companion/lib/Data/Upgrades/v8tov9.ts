@@ -1,6 +1,3 @@
-import type { DataStoreBase } from '../StoreBase.js'
-import type { Logger } from '../../Log/Controller.js'
-import type { SomeExportv4 } from '@companion-app/shared/Model/ExportModelv4.js'
 import type {
 	ExportControlv6,
 	ExportFullv6,
@@ -9,6 +6,9 @@ import type {
 	ExportTriggersListv6,
 	SomeExportv6,
 } from '@companion-app/shared/Model/ExportModel.js'
+import type { SomeExportv4 } from '@companion-app/shared/Model/ExportModelv4.js'
+import type { Logger } from '../../Log/Controller.js'
+import type { DataStoreBase } from '../StoreBase.js'
 
 /**
  * do the database upgrades to convert from the v8 to the v9 format
@@ -31,6 +31,7 @@ function convertImportToV9(obj: SomeExportv4): SomeExportv6 {
 		const newObj: ExportFullv6 = {
 			companionBuild: undefined,
 			...structuredClone(obj),
+			instances: structuredClone(obj.instances) as any,
 			version: 9,
 		}
 		if (newObj.pages) {
@@ -44,6 +45,7 @@ function convertImportToV9(obj: SomeExportv4): SomeExportv6 {
 			connectionCollections: undefined,
 			companionBuild: undefined,
 			...structuredClone(obj),
+			instances: structuredClone(obj.instances) as any,
 			version: 9,
 		}
 		convertPageControls(newObj.page)
@@ -54,6 +56,7 @@ function convertImportToV9(obj: SomeExportv4): SomeExportv6 {
 			connectionCollections: undefined,
 			companionBuild: undefined,
 			...structuredClone(obj),
+			instances: structuredClone(obj.instances) as any,
 			version: 9,
 		}
 		return newObj

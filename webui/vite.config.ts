@@ -1,13 +1,11 @@
-import { sentryVitePlugin } from '@sentry/vite-plugin'
-import { defineConfig } from 'vite'
-import reactPlugin from '@vitejs/plugin-react'
-import legacyPlugin from '@vitejs/plugin-legacy'
-import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import fs from 'fs'
 import path from 'path'
-import tsconfigPaths from 'vite-tsconfig-paths'
-
-const upstreamUrl = process.env.UPSTREAM_URL || '127.0.0.1:8000'
+import { sentryVitePlugin } from '@sentry/vite-plugin'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
+import legacyPlugin from '@vitejs/plugin-legacy'
+import reactPlugin from '@vitejs/plugin-react'
+import { defineConfig, loadEnv } from 'vite'
+import { normalizeBasePath } from '../tools/webui-dev-utils'
 
 const buildFile = fs
 	.readFileSync(path.join(import.meta.dirname, '../BUILD'))
@@ -34,82 +32,108 @@ function getBaseFromArgs(): string {
 	return '/'
 }
 
-// Get the base path from Vite's --base argument
-const basePath = getBaseFromArgs()
-let normalizedBase = basePath
-if (!normalizedBase.startsWith('/')) normalizedBase = `/${normalizedBase}`
-normalizedBase = normalizedBase.endsWith('/') ? normalizedBase.slice(0, -1) : normalizedBase
+const normalizedBase = normalizeBasePath(getBaseFromArgs())
 
-export default defineConfig({
-	publicDir: 'public',
-	// This changes the out put dir from dist to build
-	// comment this out if that isn't relevant for your project
-	build: {
-		outDir: 'build',
-		chunkSizeWarningLimit: 1 * 1000 * 1000, // Disable warning about large chunks
-		sourcemap: true,
-	},
-	server: {
-		allowedHosts: ['bs-local.com'],
-		proxy: {
-			[`${normalizedBase}/instance`]: {
-				target: `http://${upstreamUrl}`,
-				rewrite: (path) => path.slice(normalizedBase.length),
-			},
-			[`${normalizedBase}/connections/instance`]: {
-				target: `http://${upstreamUrl}`,
-				rewrite: (path) => path.slice(normalizedBase.length),
-			},
-			[`${normalizedBase}/int`]: {
-				target: `http://${upstreamUrl}`,
-				rewrite: (path) => path.slice(normalizedBase.length),
-			},
-			[`${normalizedBase}/user-guide`]: {
-				target: `http://${upstreamUrl}`,
-				rewrite: (path) => path.slice(normalizedBase.length),
-			},
-			[`${normalizedBase}/trpc`]: {
-				target: `ws://${upstreamUrl}`,
-				ws: true,
-				rewrite: (path) => path.slice(normalizedBase.length),
-			},
-			[`${normalizedBase}/_deps`]: {
-				target: `ws://${upstreamUrl}`,
-				ws: true,
-				rewrite: (path) => path.slice(normalizedBase.length),
-			},
-		},
-	},
-	plugins: [
-		tsconfigPaths(),
-		tanstackRouter({
-			virtualRouteConfig: './src/routes/-routes.ts',
-			addExtensions: true,
-		}),
-		reactPlugin(),
-		legacyPlugin({
-			targets: ['defaults', 'not IE 11', 'safari >= 12.1'],
-		}),
-		process.env.VITE_SENTRY_DSN
-			? sentryVitePlugin({
-					org: 'bitfocus',
-					project: 'companion-ui',
-					url: 'https://sentry2.bitfocus.io/',
-					release: { name: buildFile },
-				})
-			: undefined,
-	],
-	css: {
-		preprocessorOptions: {
-			scss: {
-				quietDeps: true,
-			},
-		},
-	},
+export default defineConfig(({ mode }) => {
+	// Load all vars (no prefix filter) from the workspace root .env files
+	const env = loadEnv(mode, path.join(import.meta.dirname, '..'), '')
 
-	resolve: {
-		alias: {
-			'react-windowed-select': 'react-windowed-select/dist/main.js',
+	// UPSTREAM_URL takes precedence; fall back to COMPANION_APP_PORT, then the default
+	const upstreamUrl =
+		env.UPSTREAM_URL ?? (env.COMPANION_APP_PORT ? `127.0.0.1:${env.COMPANION_APP_PORT}` : '127.0.0.1:8000')
+
+	return {
+		publicDir: 'public',
+		// This changes the out put dir from dist to build
+		// comment this out if that isn't relevant for your project
+		build: {
+			outDir: 'build',
+			chunkSizeWarningLimit: 1 * 1000 * 1000, // Disable warning about large chunks
+			sourcemap: true,
+			cssMinify: 'esbuild', // default (lightningcss) downlevels properties in a way that breaks backwards compatibility
 		},
-	},
+		resolve: {
+			tsconfigPaths: true,
+		},
+		server: {
+			port: parseInt(env.COMPANION_UI_PORT || '', 10) || undefined,
+			host: env.COMPANION_UI_HOST || undefined,
+			allowedHosts: ['bs-local.com'],
+			proxy: {
+				[`${normalizedBase}/instance`]: {
+					target: `http://${upstreamUrl}`,
+					xfwd: true, // forward X-Forwarded-For so companion sees the real client ip (not the vite proxy)
+					rewrite: (path) => path.slice(normalizedBase.length),
+				},
+				[`${normalizedBase}/connections/instance`]: {
+					target: `http://${upstreamUrl}`,
+					xfwd: true, // forward X-Forwarded-For so companion sees the real client ip (not the vite proxy)
+					rewrite: (path) => path.slice(normalizedBase.length),
+				},
+				[`${normalizedBase}/int`]: {
+					target: `http://${upstreamUrl}`,
+					xfwd: true, // forward X-Forwarded-For so companion sees the real client ip (not the vite proxy)
+					rewrite: (path) => path.slice(normalizedBase.length),
+				},
+				[`${normalizedBase}/user-guide`]: {
+					// forward to Docusaurus (note: if changing hostname, change it in tools/webui-dev-docs.mts too)
+					target: `http://localhost:4000`,
+					changeOrigin: true, // not strictly necessary, but probably good practice for "external" servers
+					// rewrite: don't rewrite for docusaurus - it testing a base_url use 'yarn dev:docs --base' or manually set env BASE_URL for docusaurus to use
+					configure: (proxy) => {
+						// Handle ECONNREFUSED errors, by showing the placeholder page (instead of a generic error page)
+						const placeholderHtml = fs.readFileSync(path.join(import.meta.dirname, '../docs/placeholder/index.html'))
+						proxy.on('error', (err, _req, res) => {
+							if ((err as NodeJS.ErrnoException).code !== 'ECONNREFUSED') return
+							if ('writeHead' in res) {
+								res.writeHead(502, { 'Content-Type': 'text/html' })
+								res.end(placeholderHtml)
+							}
+						})
+					},
+				},
+				[`${normalizedBase}/trpc`]: {
+					target: `ws://${upstreamUrl}`,
+					ws: true,
+					xfwd: true, // forward X-Forwarded-For so companion sees the real client ip (not the vite proxy)
+					rewrite: (path) => path.slice(normalizedBase.length),
+				},
+				[`${normalizedBase}/_deps`]: {
+					target: `ws://${upstreamUrl}`,
+					ws: true,
+					xfwd: true, // forward X-Forwarded-For so companion sees the real client ip (not the vite proxy)
+					rewrite: (path) => path.slice(normalizedBase.length),
+				},
+			},
+		},
+		plugins: [
+			tanstackRouter({
+				virtualRouteConfig: './src/routes/-routes.ts',
+				addExtensions: true,
+			}),
+			reactPlugin(),
+			legacyPlugin({
+				targets: ['defaults', 'not IE 11', 'safari >= 12.1'],
+				// Safari 12.1 / old Edge support ES modules, so they load the MODERN bundle, not the legacy one.
+				// Without this, the modern bundle ships to them with no polyfills (missing Object.fromEntries,
+				// String.replaceAll, Array.at, etc). true = usage-based detection against the modern targets.
+				modernPolyfills: true,
+			}),
+			env.VITE_SENTRY_DSN
+				? sentryVitePlugin({
+						org: 'bitfocus',
+						project: 'companion-ui',
+						url: 'https://sentry2.bitfocus.io/',
+						release: { name: buildFile },
+					})
+				: undefined,
+		],
+		css: {
+			preprocessorOptions: {
+				scss: {
+					quietDeps: true,
+				},
+			},
+		},
+	}
 })

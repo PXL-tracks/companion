@@ -9,29 +9,29 @@
  * this program.
  */
 
-import { CreateTriggerControlId } from '@companion-app/shared/ControlId.js'
+import { EventEmitter } from 'node:events'
 import debounceFn from 'debounce-fn'
-import type {
-	ActionForVisitor,
-	FeedbackForVisitor,
-	FeedbackEntityModelExt,
-	InternalModuleFragment,
-	InternalVisitor,
-	InternalActionDefinition,
-	InternalFeedbackDefinition,
-	InternalModuleFragmentEvents,
-} from './Types.js'
+import { FeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
 import type { ControlsController } from '../Controls/Controller.js'
-import type { RunActionExtras } from '../Instance/Connection/ChildHandler.js'
-import { FeedbackEntitySubType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import { EventEmitter } from 'events'
-import type { InternalModuleUtils } from './Util.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import type {
+	ActionForInternalExecution,
+	ActionForVisitor,
+	FeedbackForInternalExecution,
+	FeedbackForVisitor,
+	InternalActionDefinition,
+	InternalActionResult,
+	InternalFeedbackDefinition,
+	InternalModuleFragment,
+	InternalModuleFragmentEvents,
+	InternalVisitor,
+} from './Types.js'
 
 export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents> implements InternalModuleFragment {
 	readonly #controlsController: ControlsController
 
-	constructor(_internalUtils: InternalModuleUtils, controlsController: ControlsController) {
+	constructor(controlsController: ControlsController) {
 		super()
 
 		this.#controlsController = controlsController
@@ -46,7 +46,7 @@ export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents>
 				after: true,
 			}
 		)
-		this.#controlsController.triggers.on('trigger_enabled', () => debounceCheckFeedbacks())
+		this.#controlsController.triggerEvents.on('trigger_enabled', () => debounceCheckFeedbacks())
 
 		const debounceCheckFeedbackCollections = debounceFn(
 			() => {
@@ -58,7 +58,7 @@ export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents>
 				after: true,
 			}
 		)
-		this.#controlsController.triggers.on('trigger_collections_enabled', () => debounceCheckFeedbackCollections())
+		this.#controlsController.triggerEvents.on('trigger_collections_enabled', () => debounceCheckFeedbackCollections())
 	}
 
 	getActionDefinitions(): Record<string, InternalActionDefinition> {
@@ -84,6 +84,8 @@ export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 			trigger_collection_enabled: {
 				label: 'Trigger: Enable or disable trigger collection',
@@ -106,39 +108,44 @@ export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 		}
 	}
 
-	actionUpgrade(action: ActionEntityModel, _controlId: string): ActionEntityModel | void {
-		if (action.definitionId === 'trigger_enabled' && !isNaN(Number(action.options.trigger_id))) {
-			action.options.trigger_id = CreateTriggerControlId(action.options.trigger_id)
+	executeAction(action: ActionForInternalExecution, _extras: RunActionExtras): InternalActionResult {
+		switch (action.definitionId) {
+			case 'trigger_enabled': {
+				const triggerId = stringifyVariableValue(action.options.trigger_id)
+				if (!triggerId) break
 
-			return action
+				const control = this.#controlsController.getControl(triggerId)
+				if (!control || control.type !== 'trigger' || !control.supportsOptions) return null
+
+				let newState = action.options.enable == 'true'
+				if (action.options.enable == 'toggle') newState = !control.options.enabled
+
+				control.optionsSetField('enabled', newState)
+
+				break
+			}
+			case 'trigger_collection_enabled': {
+				const collectionId = stringifyVariableValue(action.options.collection_id)
+				if (!collectionId) break
+
+				let newState: boolean | 'toggle' = action.options.enable == 'true'
+				if (action.options.enable == 'toggle') newState = 'toggle'
+
+				this.#controlsController.setTriggerCollectionEnabled(collectionId, newState)
+
+				break
+			}
+			default:
+				return null
 		}
-	}
 
-	executeAction(action: ControlEntityInstance, _extras: RunActionExtras): boolean {
-		if (action.definitionId === 'trigger_enabled') {
-			const control = this.#controlsController.getControl(action.rawOptions.trigger_id)
-			if (!control || control.type !== 'trigger' || !control.supportsOptions) return false
-
-			let newState = action.rawOptions.enable == 'true'
-			if (action.rawOptions.enable == 'toggle') newState = !control.options.enabled
-
-			control.optionsSetField('enabled', newState)
-
-			return true
-		} else if (action.definitionId === 'trigger_collection_enabled') {
-			let newState: boolean | 'toggle' = action.rawOptions.enable == 'true'
-			if (action.rawOptions.enable == 'toggle') newState = 'toggle'
-
-			this.#controlsController.setTriggerCollectionEnabled(action.rawOptions.collection_id, newState)
-
-			return true
-		} else {
-			return false
-		}
+		return { result: undefined }
 	}
 
 	getFeedbackDefinitions(): Record<string, InternalFeedbackDefinition> {
@@ -169,6 +176,8 @@ export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 			trigger_collection_enabled: {
 				feedbackType: FeedbackEntitySubType.Boolean,
@@ -196,20 +205,28 @@ export class InternalTriggers extends EventEmitter<InternalModuleFragmentEvents>
 						],
 					},
 				],
+
+				optionsSupportExpressions: false,
 			},
 		}
 	}
 
-	executeFeedback(feedback: FeedbackEntityModelExt): boolean | void {
+	executeFeedback(feedback: FeedbackForInternalExecution): boolean | void {
 		if (feedback.definitionId === 'trigger_enabled') {
-			const control = this.#controlsController.getControl(feedback.options.trigger_id)
+			const triggerId = stringifyVariableValue(feedback.options.trigger_id)
+			if (!triggerId) return false
+
+			const control = this.#controlsController.getControl(triggerId)
 			if (!control || control.type !== 'trigger' || !control.supportsOptions) return false
 
 			const state = control.options.enabled
 			const target = feedback.options.enable == 'true'
 			return state == target
 		} else if (feedback.definitionId === 'trigger_collection_enabled') {
-			const state = this.#controlsController.isTriggerCollectionEnabled(feedback.options.collection_id, true)
+			const collectionId = stringifyVariableValue(feedback.options.collection_id)
+			if (!collectionId) return false
+
+			const state = this.#controlsController.isTriggerCollectionEnabled(collectionId, true)
 			const target = feedback.options.enable == 'true'
 			return state == target
 		}

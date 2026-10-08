@@ -7,8 +7,8 @@ export default defineConfig({
 
 			{
 				test: {
-					name: 'companion',
-					root: '.',
+					name: 'shared-lib',
+					root: 'shared-lib',
 					exclude: [
 						'**/module-local-dev/**',
 						'**/bundled-modules/**',
@@ -18,6 +18,31 @@ export default defineConfig({
 						'**/coverage/**',
 						'**/webui/**',
 					],
+				},
+			},
+
+			{
+				test: {
+					name: 'companion',
+					root: 'companion',
+					setupFiles: ['./test/setup.ts'],
+					exclude: [
+						'**/module-local-dev/**',
+						'**/bundled-modules/**',
+						'**/node_modules/**',
+						'**/dist/**',
+						'**/build/**',
+						'**/coverage/**',
+						'**/webui/**',
+					],
+				},
+			},
+
+			{
+				test: {
+					name: 'config-tool',
+					root: 'config-tool',
+					exclude: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/coverage/**'],
 				},
 			},
 		],

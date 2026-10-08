@@ -1,30 +1,19 @@
-import type { UserConfigGridSize } from './UserConfigModel.js'
 import type { ConnectionCollection } from './Connections.js'
-import type { InstanceConfig, InstanceVersionUpdatePolicy } from './Instance.js'
 import type { CustomVariableCollection, CustomVariablesModel } from './CustomVariableModel.js'
-import type { TriggerCollection } from './TriggerModel.js'
 import type { ExpressionVariableCollection, ExpressionVariableModel } from './ExpressionVariableModel.js'
+import type { ImageLibraryCollection, ImageLibraryExportData } from './ImageLibraryModel.js'
+import type { InstanceConfig, InstanceVersionUpdatePolicy } from './Instance.js'
+import type { SurfaceInstanceCollection } from './SurfaceInstance.js'
+import type { OutboundSurfaceInfo } from './Surfaces.js'
+import type { TriggerCollection } from './TriggerModel.js'
+import type { UserConfigGridSize } from './UserConfigModel.js'
 
 export type SomeExportv6 = ExportFullv6 | ExportPageModelv6 | ExportTriggersListv6
 
 export interface ExportBase<Type extends string> {
-	readonly version: 6 | 7 | 8 | 9
+	readonly version: 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
 	readonly type: Type
 	readonly companionBuild: string | undefined // The build of the companion that exported this
-}
-
-export interface ExportInstanceConfigv6 {
-	label: string
-	config: unknown
-	secrets: unknown | undefined
-	isFirstInit: boolean
-	lastUpgradeIndex: number
-	instance_type: string
-	enabled: boolean
-	sortOrder: number
-	moduleVersionId: string | null
-	updatePolicy: InstanceVersionUpdatePolicy // TODO - upgrade script
-	collectionId?: string
 }
 
 export interface ExportFullv6 extends ExportBase<'full'> {
@@ -39,6 +28,11 @@ export interface ExportFullv6 extends ExportBase<'full'> {
 	connectionCollections?: ConnectionCollection[] // Added in v4.1
 	surfaces?: unknown // Record<number, SurfaceConfig>
 	surfaceGroups?: unknown // Record<number, SurfaceGroupConfig>
+	surfacesRemote?: Record<string, OutboundSurfaceInfo> // Added in v4.3
+	surfaceInstances?: ExportInstancesv6 // Added in v4.3
+	surfaceInstanceCollections?: SurfaceInstanceCollection[] // Added in v4.3
+	imageLibrary?: ImageLibraryExportData[] // Added in v5.0
+	imageLibraryCollections?: ImageLibraryCollection[] // Added in v5.0
 }
 
 export interface ExportPageModelv6 extends ExportBase<'page'> {
@@ -46,6 +40,8 @@ export interface ExportPageModelv6 extends ExportBase<'page'> {
 	instances: ExportInstancesv6
 	connectionCollections: ConnectionCollection[] | undefined // Added in v4.1
 	oldPageNumber: number
+	imageLibrary?: ImageLibraryExportData[] // Added in v5.0
+	imageLibraryCollections?: ImageLibraryCollection[] // Added in v5.0
 }
 
 export interface ExportTriggersListv6 extends ExportBase<'trigger_list'> {
@@ -53,6 +49,8 @@ export interface ExportTriggersListv6 extends ExportBase<'trigger_list'> {
 	triggerCollections: TriggerCollection[] | undefined // Added in v4.1
 	instances: ExportInstancesv6
 	connectionCollections: ConnectionCollection[] | undefined // Added in v4.1
+	imageLibrary?: ImageLibraryExportData[] // Added in v5.0
+	imageLibraryCollections?: ImageLibraryCollection[] // Added in v5.0
 }
 
 export type ExportTriggerContentv6 = Record<string, any> // TODO
@@ -68,8 +66,7 @@ export interface ExportPageContentv6 {
 export type ExportControlv6 = Record<string, any> // TODO
 
 export type ExportInstancesv6 =
-	| Record<string, ExportInstanceFullv6 | ExportInstanceMinimalv6>
-	| Record<string, InstanceConfig | undefined> // TODO - tidy
+	Record<string, ExportInstanceFullv6 | ExportInstanceMinimalv6> | Record<string, InstanceConfig | undefined> // TODO - tidy
 
 export type ExportInstanceFullv6 = {
 	label: string
@@ -79,7 +76,7 @@ export type ExportInstanceFullv6 = {
 	lastUpgradeIndex: number
 	moduleVersionId?: string // Added in v4.0
 	updatePolicy?: InstanceVersionUpdatePolicy // Added in v4.0
-	instance_type: string
+	moduleId: string
 	enabled: boolean
 	sortOrder?: number
 	collectionId?: string
@@ -87,7 +84,7 @@ export type ExportInstanceFullv6 = {
 
 export type ExportInstanceMinimalv6 = {
 	label: string
-	instance_type: string
+	moduleId: string
 	lastUpgradeIndex: number
 	moduleVersionId?: string // Added in v4.0
 	updatePolicy?: InstanceVersionUpdatePolicy // Added in v4.0

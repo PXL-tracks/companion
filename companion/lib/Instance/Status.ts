@@ -1,6 +1,6 @@
-import isEqual from 'fast-deep-equal'
 // import LogController from '../Log/Controller.js'
-import { EventEmitter } from 'events'
+import { EventEmitter } from 'node:events'
+import isEqual from 'fast-deep-equal'
 import type { InstanceStatusEntry, InstanceStatusUpdate } from '@companion-app/shared/Model/InstanceStatus.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 
@@ -82,6 +82,10 @@ export class InstanceStatus extends EventEmitter<InstanceStatusEvents> {
 			case 'authentication_failure':
 				category = 'warning'
 				level = 'Authentication Failure'
+				break
+			case 'insufficient_permissions':
+				category = 'warning'
+				level = 'Insufficient Permissions'
 				break
 			case 'system':
 				category = 'error'

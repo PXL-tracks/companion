@@ -1,19 +1,19 @@
-import React, { memo } from 'react'
-import { CCol, CRow } from '@coreui/react'
 import { observer } from 'mobx-react-lite'
+import { memo } from 'react'
+import { Grid } from '~/Components/Grid'
 import { useUserConfigProps } from './Context.js'
 import { CompanionConfig } from './Sections/CompanionConfig.js'
 import { DataCollectionConfig } from './Sections/DataCollection.js'
 
 export const SettingsGeneralPage = memo(function UserConfig() {
 	return (
-		<CRow className="split-panels">
-			<CCol xl={6} className="primary-panel">
+		<Grid.Row className="split-panels">
+			<Grid.Col xl={6} className="primary-panel">
 				<div className="flex-column-layout">
 					<div className="fixed-header">
 						<div className="d-flex justify-content-between">
 							<div>
-								<h4>Settings - Advanced</h4>
+								<h4>Settings - General</h4>
 								<p>Settings apply instantaneously, don't worry about it!</p>
 							</div>
 						</div>
@@ -22,8 +22,8 @@ export const SettingsGeneralPage = memo(function UserConfig() {
 						<UserConfigTable />
 					</div>
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })
 
@@ -32,11 +32,17 @@ const UserConfigTable = observer(function UserConfigTable() {
 	if (!userConfigProps) return null
 
 	return (
-		<table className="table table-responsive-sm table-settings">
-			<tbody>
-				<CompanionConfig {...userConfigProps} />
-				<DataCollectionConfig {...userConfigProps} />
-			</tbody>
-		</table>
+		<>
+			<table className="table table-responsive-sm table-settings">
+				<tbody>
+					<CompanionConfig {...userConfigProps} />
+				</tbody>
+			</table>
+			<table className="table table-responsive-sm table-settings">
+				<tbody>
+					<DataCollectionConfig {...userConfigProps} />
+				</tbody>
+			</table>
+		</>
 	)
 })

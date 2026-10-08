@@ -1,12 +1,15 @@
-import { ServiceBase } from './Base.js'
-import { Bonjour, type Browser } from '@julusian/bonjour-service'
-import { isIPv4 } from 'net'
+import EventEmitter from 'node:events'
+import { isIPv4, isIPv6 } from 'node:net'
+import { Bonjour, type Browser, type DiscoveredService } from '@julusian/bonjour-service'
+import isEqual from 'fast-deep-equal'
+import z from 'zod'
 import type { ClientBonjourEvent, ClientBonjourService } from '@companion-app/shared/Model/Common.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import { assertNever } from '@companion-app/shared/Util.js'
 import type { DataUserConfig } from '../Data/UserConfig.js'
 import type { InstanceController } from '../Instance/Controller.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
-import EventEmitter from 'events'
+import { ServiceBase } from './Base.js'
 
 /**
  * Class providing Bonjour discovery for modules.
@@ -52,8 +55,8 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 				this.#server = new Bonjour()
 
 				this.logger.info('Listening for Bonjour messages')
-			} catch (e: any) {
-				this.logger.error(`Could not launch: ${e.message}`)
+			} catch (e) {
+				this.logger.error(`Could not launch: ${stringifyError(e)}`)
 			}
 		}
 	}
@@ -108,11 +111,62 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 		})
 	}
 
-	#convertService(id: string, svc: any, filter: BonjourBrowserFilter): ClientBonjourService | null {
+	/**
+	 * Handle a service appearing or being updated (up/txt-update/srv-update).
+	 * The UI keys services by fqdn, so re-emitting `up` updates an existing entry.
+	 */
+	#handleServiceUpOrUpdate(
+		id: string,
+		svc: DiscoveredService,
+		filter: BonjourBrowserFilter,
+		oldSvc?: DiscoveredService
+	): void {
+		const uiSvc = this.#convertService(id, svc, filter)
+		const oldUiSvc = oldSvc ? this.#convertService(id, oldSvc, filter) : null
+
+		// Skip emitting if nothing the client cares about changed: a txt field changed but txt is not
+		// surfaced, or the service matched the filter neither before nor after (both null).
+		if (oldSvc && isEqual(oldUiSvc, uiSvc)) return
+
+		if (uiSvc) {
+			this.#serviceEvents.emit(id, { type: 'up', service: uiSvc })
+		} else if (oldUiSvc) {
+			// It previously matched the filter and now doesn't, so remove it. A service that never
+			// matched is ignored, so we don't emit a phantom `down` for an fqdn the client never saw.
+			this.#serviceEvents.emit(id, { type: 'down', fqdn: svc.fqdn })
+		}
+	}
+
+	#convertService(id: string, svc: DiscoveredService, filter: BonjourBrowserFilter): ClientBonjourService | null {
 		// Future: whether to include ipv4, ipv6 should be configurable, but this is fine for now
-		const addresses = svc.addresses.filter((addr: string) => isIPv4(addr))
-		if (addresses.length === 0) return null
-		if (filter.port && svc.port !== filter.port) return null
+		let addresses = svc.addresses
+		switch (filter.addressFamily) {
+			case 'ipv4+6':
+				// No need to filter, include both ipv4 and ipv6
+				break
+			case 'ipv6':
+				addresses = addresses.filter(isIPv6)
+				break
+			case 'ipv4':
+			case undefined: // Default
+				addresses = addresses.filter(isIPv4)
+				break
+			default:
+				assertNever(filter.addressFamily)
+				break
+		}
+
+		if (addresses.length === 0) {
+			this.logger.debug(
+				`Ignoring ${svc.fqdn}: no ${filter.addressFamily ?? 'ipv4'} address ` +
+					`(advertised addresses: ${JSON.stringify(svc.addresses)})`
+			)
+			return null
+		}
+		if (filter.port && svc.port !== filter.port) {
+			this.logger.debug(`Ignoring ${svc.fqdn}: port ${svc.port} does not match filter port ${filter.port}`)
+			return null
+		}
 		return {
 			subId: id,
 			fqdn: svc.fqdn,
@@ -153,6 +207,7 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 				protocol: query.protocol,
 				port: query.port,
 				txt: query.txt,
+				addressFamily: 'addressFamily' in query ? query.addressFamily : undefined,
 			}
 			if (typeof filter.type !== 'string' || !filter.type) throw new Error('Invalid type for bonjour query')
 			if (typeof filter.protocol !== 'string' || !filter.protocol) throw new Error('Invalid protocol for bonjour query')
@@ -175,11 +230,16 @@ export class ServiceBonjourDiscovery extends ServiceBase {
 
 			// Setup event handlers
 			browser.on('up', (svc) => {
-				const uiSvc = this.#convertService(id, svc, filter)
-				if (uiSvc) this.#serviceEvents.emit(id, { type: 'up', service: uiSvc })
+				this.#handleServiceUpOrUpdate(id, svc, filter)
 			})
 			browser.on('down', (svc) => {
 				this.#serviceEvents.emit(id, { type: 'down', fqdn: svc.fqdn })
+			})
+			browser.on('txt-update', (svc, oldSvc) => {
+				this.#handleServiceUpOrUpdate(id, svc, filter, oldSvc)
+			})
+			browser.on('srv-update', (svc, oldSvc) => {
+				this.#handleServiceUpOrUpdate(id, svc, filter, oldSvc)
 			})
 		}
 
@@ -225,4 +285,5 @@ interface BonjourBrowserFilter {
 	protocol: 'tcp' | 'udp'
 	port: number | undefined
 	txt: Record<string, string> | undefined
+	addressFamily: 'ipv4' | 'ipv6' | 'ipv4+6' | undefined
 }

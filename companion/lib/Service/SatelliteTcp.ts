@@ -1,10 +1,10 @@
-import { ServiceBase } from './Base.js'
-import net, { type Socket } from 'net'
-import LogController from '../Log/Controller.js'
-import type { AppInfo } from '../Registry.js'
-import { SatelliteSocketWrapper, ServiceSatelliteApi } from './Satellite/SatelliteApi.js'
+import net, { type Socket } from 'node:net'
+import { StringDecoder } from 'node:string_decoder'
 import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { SurfaceController } from '../Surface/Controller.js'
+import LogController from '../Log/Controller.js'
+import { GLOBAL_BIND_ADDRESS } from '../Resources/Constants.js'
+import { ServiceBase } from './Base.js'
+import { SatelliteSocketWrapper, type ServiceSatelliteApi } from './Satellite/SatelliteApi.js'
 
 /**
  * Class providing the Satellite/Remote Surface api over tcp.
@@ -28,14 +28,15 @@ export class ServiceSatelliteTcp extends ServiceBase {
 
 	readonly #clients = new Set<Socket>()
 
+	/** The number of currently open satellite connections */
 	get clientCount(): number {
 		return this.#clients.size
 	}
 
-	constructor(appInfo: AppInfo, surfaceController: SurfaceController, userconfig: DataUserConfig) {
+	constructor(api: ServiceSatelliteApi, userconfig: DataUserConfig) {
 		super(userconfig, 'Service/SatelliteTcp', null, null)
 
-		this.#api = new ServiceSatelliteApi(appInfo, surfaceController)
+		this.#api = api
 
 		this.port = 16622
 
@@ -49,41 +50,51 @@ export class ServiceSatelliteTcp extends ServiceBase {
 
 			this.#clients.add(socket)
 
-			socket.setTimeout(5000)
-			socket.on('error', (e) => {
+			socket.setNoDelay(true)
+
+			let cleanupDevices: (() => number) | undefined
+
+			// Anchor all teardown on the 'close' event, which node guarantees fires exactly once for
+			// every socket. Registering it before initSocket() runs ensures the socket is always
+			// removed from #clients (and any devices cleaned up) even if initialisation throws -
+			// otherwise the set would grow without bound and leak memory.
+			socket.on('close', () => {
 				this.#clients.delete(socket)
 
+				const count = cleanupDevices?.() ?? 0
+				socketLogger.info(`connection closed with ${count} connected surfaces`)
+			})
+
+			socket.on('error', (e) => {
 				socketLogger.silly('socket error:', e)
 			})
 
-			const { processMessage, cleanupDevices } = this.#api.initSocket(socketLogger, new SatelliteTcpSocket(socket))
-
-			const doCleanup = () => {
-				this.#clients.delete(socket)
-
-				const count = cleanupDevices()
-				socketLogger.info(`connection closed with ${count} connected surfaces`)
-
-				socket.removeAllListeners('data')
-				socket.removeAllListeners('close')
-			}
-
-			socket.on('timeout', () => {
+			// Drop idle connections. Destroy rather than half-close (end), so that a peer which never
+			// sends its own FIN still reaches 'close' and gets pruned from #clients.
+			socket.setTimeout(5000, () => {
 				socketLogger.debug('socket timeout')
-				socket.end()
-				doCleanup()
+				socket.destroy()
 			})
 
-			socket.on('close', doCleanup)
+			try {
+				const api = this.#api.initSocket(socketLogger, new SatelliteTcpSocket(socket))
+				cleanupDevices = api.cleanupDevices
 
-			socket.on('data', (data) => processMessage(data.toString()))
+				// Use a StringDecoder rather than data.toString() so multi-byte UTF-8 characters
+				// split across TCP packet boundaries are decoded correctly.
+				const decoder = new StringDecoder('utf8')
+				socket.on('data', (data) => api.processMessage(decoder.write(data)))
+			} catch (e) {
+				socketLogger.error(`Failed to initialise satellite connection: ${e}`)
+				socket.destroy()
+			}
 		})
 		this.#server.on('error', (e) => {
 			this.logger.debug(`listen-socket error: ${e}`)
 		})
 
 		try {
-			this.#server.listen(this.port)
+			this.#server.listen(this.port, GLOBAL_BIND_ADDRESS)
 		} catch (_e) {
 			this.logger.debug(`ERROR opening tcp port ${this.port} for companion satellite devices`)
 		}

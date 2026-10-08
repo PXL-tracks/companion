@@ -1,21 +1,25 @@
-import { CButton, CCol, CForm, CInputGroup, CFormLabel, CAlert } from '@coreui/react'
-import React, { useCallback, useRef } from 'react'
+import { useCallback, useId, useRef } from 'react'
+import type { JsonValue } from 'type-fest'
+import { EntityModelType, FeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
+import type { TriggerModel, TriggerOptions } from '@companion-app/shared/Model/TriggerModel.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button } from '~/Components/Button'
+import { Form, FormLabel, InputGroup } from '~/Components/Form.js'
 import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
-import { PreventDefaultHandler } from '~/Resources/util.js'
+import { Grid } from '~/Components/Grid'
+import { TabArea } from '~/Components/TabArea.js'
+import { TextInputFieldSimple } from '~/Components/TextInputField.js'
+import { ControlNotesEditor } from '~/Controls/ControlNotesEditor.js'
+import { ControlEntitiesEditor } from '~/Controls/EntitiesEditor.js'
+import { LocalVariablesEditor } from '~/Controls/LocalVariablesEditor.js'
+import { useControlConfig } from '~/Hooks/useControlConfig.js'
+import { useLocalStorage } from '~/Hooks/useLocalStorage.js'
 import { MyErrorBoundary } from '~/Resources/Error.js'
 import { LoadingRetryOrError } from '~/Resources/Loading.js'
-import { ControlEntitiesEditor } from '~/Controls/EntitiesEditor.js'
-import { TextInputField } from '~/Components/index.js'
-import { TriggerEventEditor } from './EventEditor.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faQuestionCircle } from '@fortawesome/free-solid-svg-icons'
-import { useLocalVariablesStore } from '../Controls/LocalVariablesStore.js'
-import { EntityModelType, FeedbackEntitySubType } from '@companion-app/shared/Model/EntityModel.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
-import { useControlConfig } from '~/Hooks/useControlConfig.js'
-import type { TriggerModel } from '@companion-app/shared/Model/TriggerModel.js'
-import { LocalVariablesEditor } from '~/Controls/LocalVariablesEditor.js'
-import { InlineHelp } from '~/Components/InlineHelp.js'
+import { PreventDefaultHandler } from '~/Resources/util.js'
+import { useLocalVariablesStore } from '../Controls/LocalVariablesStore.js'
+import { TriggerEventEditor } from './EventEditor.js'
 
 interface EditTriggerPanelProps {
 	controlId: string
@@ -41,7 +45,9 @@ export function EditTriggerPanel({ controlId }: EditTriggerPanelProps): React.JS
 					{controlConfig.config.type === 'trigger' ? (
 						<TriggerPanelContent config={controlConfig.config} controlId={controlId} />
 					) : (
-						<CAlert color="danger">Invalid control type: {controlConfig.config.type}. Expected 'trigger'.</CAlert>
+						<StaticAlert color="danger">
+							Invalid control type: {controlConfig.config.type}. Expected 'trigger'.
+						</StaticAlert>
 					)}
 				</div>
 			) : (
@@ -58,6 +64,7 @@ interface TriggerPanelContentProps {
 
 function TriggerPanelContent({ config, controlId }: TriggerPanelContentProps): React.ReactNode {
 	const localVariablesStore = useLocalVariablesStore(controlId, config.localVariables)
+	const [activeTab, setActiveTab] = useLocalStorage('triggerEditor.activeTab', 'events')
 
 	return (
 		<>
@@ -66,87 +73,96 @@ function TriggerPanelContent({ config, controlId }: TriggerPanelContentProps): R
 			</MyErrorBoundary>
 
 			<MyErrorBoundary>
-				<TriggerEventEditor
-					heading={
-						<>
-							Events &nbsp;
-							<InlineHelp help="The trigger will be executed when any of the events happens">
-								<FontAwesomeIcon icon={faQuestionCircle} />
-							</InlineHelp>
-						</>
-					}
-					controlId={controlId}
-					events={config.events}
-					localVariablesStore={localVariablesStore}
-				/>
+				<ControlNotesEditor controlId={controlId} notes={config.options.notes} />
 			</MyErrorBoundary>
 
-			<MyErrorBoundary>
-				<ControlEntitiesEditor
-					heading={
-						<>
-							Conditions &nbsp;
-							<InlineHelp help="Only execute when all of these conditions are true">
-								<FontAwesomeIcon icon={faQuestionCircle} />
-							</InlineHelp>
-						</>
-					}
-					controlId={controlId}
-					entities={config.condition}
-					listId="feedbacks"
-					entityType={EntityModelType.Feedback}
-					entityTypeLabel="condition"
-					feedbackListType={FeedbackEntitySubType.Boolean}
-					location={undefined}
-					localVariablesStore={localVariablesStore}
-					localVariablePrefix={null}
-				/>
-			</MyErrorBoundary>
+			<div className="sticky-tabs">
+				<TabArea.Root value={activeTab} onValueChange={setActiveTab}>
+					<TabArea.List>
+						<TabArea.Tab value="events">Events</TabArea.Tab>
+						<TabArea.Tab value="conditions">Conditions</TabArea.Tab>
+						<TabArea.Tab value="actions">Actions</TabArea.Tab>
+						<TabArea.Tab value="variables">Local Variables</TabArea.Tab>
+						<TabArea.Indicator />
+					</TabArea.List>
+				</TabArea.Root>
+			</div>
 
-			<MyErrorBoundary>
-				<ControlEntitiesEditor
-					heading={
-						<>
-							Actions &nbsp;
-							<InlineHelp help="What should happen when executed">
-								<FontAwesomeIcon icon={faQuestionCircle} />
-							</InlineHelp>
-						</>
-					}
-					controlId={controlId}
-					location={undefined}
-					listId="trigger_actions"
-					entities={config.actions}
-					entityType={EntityModelType.Action}
-					entityTypeLabel="action"
-					feedbackListType={null}
-					localVariablesStore={localVariablesStore}
-					localVariablePrefix={null}
-				/>
-			</MyErrorBoundary>
+			{activeTab === 'events' && (
+				<MyErrorBoundary>
+					<TriggerEventEditor
+						heading="Events"
+						subheading={<div className="mb-2">This trigger will be executed when any of the events happens</div>}
+						controlId={controlId}
+						events={config.events}
+						localVariablesStore={localVariablesStore}
+					/>
+				</MyErrorBoundary>
+			)}
 
-			<MyErrorBoundary>
-				<LocalVariablesEditor
-					controlId={controlId}
-					location={undefined}
-					variables={config.localVariables}
-					localVariablesStore={localVariablesStore}
-				/>
-			</MyErrorBoundary>
+			{activeTab === 'conditions' && (
+				<MyErrorBoundary>
+					<ControlEntitiesEditor
+						className="mt-2"
+						heading="Conditions"
+						subheading={<div className="mb-2">Only execute when all of these conditions are true</div>}
+						controlId={controlId}
+						entities={config.condition}
+						listId="feedbacks"
+						entityType={EntityModelType.Feedback}
+						entityTypeLabel="condition"
+						feedbackListType={FeedbackEntitySubType.Boolean}
+						location={undefined}
+						localVariablesStore={localVariablesStore}
+						localVariablePrefix={null}
+					/>
+				</MyErrorBoundary>
+			)}
+
+			{activeTab === 'actions' && (
+				<MyErrorBoundary>
+					<ControlEntitiesEditor
+						className="mt-2"
+						heading="Actions"
+						subheading={<div className="mb-2">What should happen when executed</div>}
+						controlId={controlId}
+						location={undefined}
+						listId="trigger_actions"
+						entities={config.actions}
+						entityType={EntityModelType.Action}
+						entityTypeLabel="action"
+						feedbackListType={null}
+						localVariablesStore={localVariablesStore}
+						localVariablePrefix={null}
+					/>
+				</MyErrorBoundary>
+			)}
+
+			{activeTab === 'variables' && (
+				<MyErrorBoundary>
+					<LocalVariablesEditor
+						className="mt-2"
+						controlId={controlId}
+						location={undefined}
+						variables={config.localVariables}
+						localVariablesStore={localVariablesStore}
+					/>
+				</MyErrorBoundary>
+			)}
 		</>
 	)
 }
 
 interface TriggerConfigProps {
 	controlId: string
-	options: Record<string, any>
+	options: TriggerOptions
 }
 
 function TriggerConfig({ controlId, options }: TriggerConfigProps) {
 	const setOptionsFieldMutation = useMutationExt(trpc.controls.setOptionsField.mutationOptions())
 
 	const setValueInner = useCallback(
-		(key: string, value: any) => {
+		(key: string, value: JsonValue) => {
 			console.log('set', controlId, key, value)
 			setOptionsFieldMutation
 				.mutateAsync({
@@ -163,22 +179,21 @@ function TriggerConfig({ controlId, options }: TriggerConfigProps) {
 
 	const setName = useCallback((val: string) => setValueInner('name', val), [setValueInner])
 
+	const nameFieldId = useId()
+
 	return (
-		<CCol sm={12} className="p-0">
-			<CForm onSubmit={PreventDefaultHandler}>
-				<CForm className="row flex-form">
-					<CCol xs={12}>
-						<CFormLabel>Name</CFormLabel>
-						<p>
-							<CInputGroup>
-								<TextInputField setValue={setName} value={options.name} />
-								<TestActionsButton controlId={controlId} hidden={!options} />
-							</CInputGroup>
-						</p>
-					</CCol>
-				</CForm>
-			</CForm>
-		</CCol>
+		<Grid.Col sm={12} className="p-0">
+			<Form onSubmit={PreventDefaultHandler} className="row flex-form">
+				<Grid.Col xs={12}>
+					<FormLabel htmlFor={nameFieldId}>Name</FormLabel>
+					<br />
+					<InputGroup>
+						<TextInputFieldSimple id={nameFieldId} setValue={setName} value={options.name} />
+						<TestActionsButton controlId={controlId} hidden={!options} />
+					</InputGroup>
+				</Grid.Col>
+			</Form>
+		</Grid.Col>
 	)
 }
 
@@ -189,8 +204,8 @@ function TestActionsButton({ controlId, hidden }: { controlId: string; hidden: b
 		testActionsMutation.mutateAsync({ controlId }).catch((e) => console.error(`Hot press failed: ${e}`))
 	}, [testActionsMutation, controlId])
 	return (
-		<CButton color="warning" hidden={hidden} onMouseDown={hotPressDown}>
+		<Button color="warning" hidden={hidden} onMouseDown={hotPressDown}>
 			Test actions
-		</CButton>
+		</Button>
 	)
 }

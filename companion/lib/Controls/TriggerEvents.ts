@@ -1,5 +1,5 @@
-import EventEmitter from 'events'
-import { performance } from 'perf_hooks'
+import EventEmitter from 'node:events'
+import { performance } from 'node:perf_hooks'
 import LogController from '../Log/Controller.js'
 
 interface TriggerEventsEvents {
@@ -11,7 +11,7 @@ interface TriggerEventsEvents {
 	trigger_enabled: [controlId: string, enabled: boolean]
 	trigger_collections_enabled: []
 	control_press: [controlId: string, pressed: boolean, surfaceId: string | undefined]
-	variables_changed: [changed: Set<string>, fromControlId: string | null]
+	variables_changed: [changed: ReadonlySet<string>, fromControlId: string | null]
 }
 
 /**

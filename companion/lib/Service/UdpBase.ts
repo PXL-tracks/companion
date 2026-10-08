@@ -1,5 +1,6 @@
+import dgram from 'node:dgram'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
 import { ServiceBase } from './Base.js'
-import dgram from 'dgram'
 
 /**
  * Abstract class providing base functionality for UDP services.
@@ -36,11 +37,11 @@ export abstract class ServiceUdpBase extends ServiceBase {
 					//this.server.close();
 				})
 
-				this.server.bind(this.port)
+				this.server.bind(this.port) // Don't bind to an address, as this is an ipv4 server
 				this.currentState = true
 				this.logger.info('Listening on port ' + this.port)
-			} catch (e: any) {
-				this.logger.error(`Could not launch: ${e.message}`)
+			} catch (e) {
+				this.logger.error(`Could not launch: ${stringifyError(e)}`)
 			}
 		}
 	}

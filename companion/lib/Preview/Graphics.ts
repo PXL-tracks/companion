@@ -1,15 +1,22 @@
-import type { ControlLocation, WrappedImage } from '@companion-app/shared/Model/Common.js'
-import { ParseInternalControlReference } from '../Internal/Util.js'
-import LogController from '../Log/Controller.js'
-import type { ImageResult } from '../Graphics/ImageResult.js'
-import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
 import EventEmitter from 'node:events'
 import { nanoid } from 'nanoid'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import type { IPageStore } from '../Page/Store.js'
-import type { ControlsController } from '../Controls/Controller.js'
+import z from 'zod'
+import type { ControlLocation, WrappedImage } from '@companion-app/shared/Model/Common.js'
+import {
+	ExpressionableOptionsObjectSchema,
+	JsonValueSchema,
+	type ExpressionableOptionsObject,
+} from '@companion-app/shared/Model/Options.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
 import type { ControlCommonEvents } from '../Controls/ControlDependencies.js'
+import type { ControlsController } from '../Controls/Controller.js'
+import type { GraphicsController } from '../Graphics/Controller.js'
+import { PREVIEW_RENDER_SIZE, type ImageResult } from '../Graphics/ImageResult.js'
+import { ParseLocationString } from '../Internal/Util.js'
+import LogController from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import { ImageWriteQueue } from '../Resources/ImageWriteQueue.js'
+import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 
 export const zodLocation: z.ZodSchema<ControlLocation> = z.object({
 	pageNumber: z.number().min(1),
@@ -53,6 +60,9 @@ export class PreviewGraphics {
 
 	readonly #renderEvents = new EventEmitter<PreviewRenderEvents>()
 
+	readonly #updateButtonQueue: ImageWriteQueue<string, [ControlLocation, string | null, ImageResult]>
+	readonly #recheckQueue: ImageWriteQueue<string, [string, ControlLocation]>
+
 	constructor(
 		graphicsController: GraphicsController,
 		pageStore: IPageStore,
@@ -63,6 +73,49 @@ export class PreviewGraphics {
 		this.#pageStore = pageStore
 		this.#controlsController = controlsController
 		this.#controlEvents = controlEvents
+
+		this.#updateButtonQueue = new ImageWriteQueue(
+			this.#logger,
+			async (locationId: string, location: ControlLocation, controlId: string | null, render: ImageResult) => {
+				if (controlId && this.#renderEvents.listenerCount(`controlId:${controlId}`) > 0) {
+					this.#renderEvents.emit(
+						`controlId:${controlId}`,
+						await render.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+					)
+				}
+
+				if (this.#renderEvents.listenerCount(`location:${locationId}`) > 0) {
+					this.#renderEvents.emit(`location:${locationId}`, {
+						image: await render.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png'),
+						isUsed: !!render.style,
+					})
+				}
+
+				for (const previewSession of this.#buttonReferencePreviews.values()) {
+					if (!previewSession.resolvedLocation) continue
+					if (previewSession.resolvedLocation.pageNumber != location.pageNumber) continue
+					if (previewSession.resolvedLocation.row != location.row) continue
+					if (previewSession.resolvedLocation.column != location.column) continue
+
+					this.#renderEvents.emit(
+						`reference:${previewSession.id}`,
+						await render.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+					)
+				}
+			}
+		)
+
+		this.#recheckQueue = new ImageWriteQueue(
+			this.#logger,
+			async (_sessionId: string, sessionId: string, resolvedLocation: ControlLocation) => {
+				if (this.#renderEvents.listenerCount(`reference:${sessionId}`) == 0) return
+
+				const dataUrl = await this.#graphicsController
+					.getCachedRenderOrGeneratePlaceholder(resolvedLocation)
+					.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+				this.#renderEvents.emit(`reference:${sessionId}`, dataUrl)
+			}
+		)
 
 		this.#graphicsController.on('button_drawn', this.#updateButton.bind(this))
 		this.#renderEvents.setMaxListeners(0)
@@ -84,7 +137,8 @@ export class PreviewGraphics {
 					const changes = toIterable(self.#renderEvents, `location:${locationId}`, signal)
 
 					const render = self.#graphicsController.getCachedRenderOrGeneratePlaceholder(location)
-					yield { image: render.asDataUrl, isUsed: !!render.style } satisfies WrappedImage
+					const dataUrl = await render.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+					yield { image: dataUrl, isUsed: !!render.style } satisfies WrappedImage
 
 					for await (const [image] of changes) {
 						yield image
@@ -105,7 +159,9 @@ export class PreviewGraphics {
 					// Send the preview image shortly after
 					const location = self.#pageStore.getLocationOfControlId(controlId)
 					const originalImg = location ? self.#graphicsController.getCachedRenderOrGeneratePlaceholder(location) : null
-					yield originalImg?.asDataUrl ?? null
+					yield originalImg
+						? await originalImg.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+						: null
 
 					for await (const [image] of changes) {
 						yield image
@@ -117,10 +173,15 @@ export class PreviewGraphics {
 					z.object({
 						connectionId: z.string(),
 						presetId: z.string(),
+						variableValues: z.record(z.string(), JsonValueSchema.optional()).nullable(),
 					})
 				)
 				.subscription(async function* ({ signal, input }) {
-					const control = self.#controlsController.getOrCreatePresetControl(input.connectionId, input.presetId)
+					const control = self.#controlsController.getOrCreatePresetControl(
+						input.connectionId,
+						input.presetId,
+						input.variableValues
+					)
 					if (!control) throw new Error(`Preset "${input.presetId}" not found for connection "${input.connectionId}"`)
 
 					// track this session on the control
@@ -132,11 +193,15 @@ export class PreviewGraphics {
 
 						// Send the preview image shortly after
 						const initialRender = control.lastRender
-						yield initialRender?.asDataUrl ?? null
+						yield initialRender
+							? await initialRender.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+							: null
 
 						for await (const [controlId, render] of changes) {
 							if (controlId !== control.controlId) continue
-							yield render?.asDataUrl ?? null
+							yield render
+								? await render.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
+								: null
 						}
 					} finally {
 						if (control.removeRenderSubscriberAndCheckEmpty(sessionId)) {
@@ -150,7 +215,7 @@ export class PreviewGraphics {
 				.input(
 					z.object({
 						controlId: z.string(),
-						options: z.object({}).catchall(z.any()),
+						options: ExpressionableOptionsObjectSchema,
 					})
 				)
 				.subscription(async function* ({ signal, input }) {
@@ -164,23 +229,31 @@ export class PreviewGraphics {
 						const changes = toIterable(self.#renderEvents, `reference:${id}`, signal)
 
 						const location = self.#pageStore.getLocationOfControlId(controlId)
-						const parser = self.#controlsController.createVariablesAndExpressionParser(controlId, null)
+						const parser = self.#controlsController.createVariablesAndExpressionParser(controlId)
 
 						// Do a resolve of the reference for the starting image
-						const result = ParseInternalControlReference(self.#logger, parser, location, options, true)
+						const locationValue = parser.parseEntityOption(options.location, {
+							allowExpression: true,
+							parseVariables: true,
+						})
+						const resolvedLocation = locationValue.ok
+							? ParseLocationString(stringifyVariableValue(locationValue.value), location)
+							: null
 
 						// Track the subscription, to allow it to be invalidated
 						self.#buttonReferencePreviews.set(id, {
 							id,
 							controlId,
 							options,
-							resolvedLocation: result.location,
-							referencedVariableIds: Array.from(result.referencedVariables),
+							resolvedLocation: resolvedLocation,
+							referencedVariableIds: locationValue.variableIds,
 						})
 
 						// Emit the initial image
-						yield result.location
-							? self.#graphicsController.getCachedRenderOrGeneratePlaceholder(result.location).asDataUrl
+						yield resolvedLocation
+							? await self.#graphicsController
+									.getCachedRenderOrGeneratePlaceholder(resolvedLocation)
+									.drawNativeEncoded(PREVIEW_RENDER_SIZE, PREVIEW_RENDER_SIZE, null, 'png')
 							: null
 
 						for await (const [image] of changes) {
@@ -198,26 +271,8 @@ export class PreviewGraphics {
 	 * Send a button update to the UIs
 	 */
 	#updateButton(location: ControlLocation, render: ImageResult): void {
-		// Push the updated render to any clients viewing a preview of a control
 		const controlId = this.#pageStore.getControlIdAt(location)
-		if (controlId) {
-			this.#renderEvents.emit(`controlId:${controlId}`, render.asDataUrl)
-		}
-
-		this.#renderEvents.emit(`location:${getLocationSubId(location)}`, {
-			image: render.asDataUrl,
-			isUsed: !!render.style,
-		})
-
-		// Lookup any sessions
-		for (const previewSession of this.#buttonReferencePreviews.values()) {
-			if (!previewSession.resolvedLocation) continue
-			if (previewSession.resolvedLocation.pageNumber != location.pageNumber) continue
-			if (previewSession.resolvedLocation.row != location.row) continue
-			if (previewSession.resolvedLocation.column != location.column) continue
-
-			this.#renderEvents.emit(`reference:${previewSession.id}`, render.asDataUrl)
-		}
+		this.#updateButtonQueue.queue(getLocationSubId(location), location, controlId, render)
 	}
 
 	onControlIdsLocationChanged(controlIds: string[]): void {
@@ -232,18 +287,15 @@ export class PreviewGraphics {
 		}
 	}
 
-	onVariablesChanged(allChangedSet: Set<string>, fromControlId: string | null): void {
+	onVariablesChanged(allChangedSet: ReadonlySet<string>, fromControlId: string | null): void {
 		// Lookup any sessions
 		for (const previewSession of this.#buttonReferencePreviews.values()) {
-			if (!previewSession.referencedVariableIds || !previewSession.referencedVariableIds.length) continue
+			if (!previewSession.referencedVariableIds || !previewSession.referencedVariableIds.size) continue
 
 			// If the changed variables belong to a control, only update if the query is for that control
 			if (fromControlId && previewSession.controlId != fromControlId) continue
 
-			const matchingChangedVariable = previewSession.referencedVariableIds.some((variable) =>
-				allChangedSet.has(variable)
-			)
-			if (!matchingChangedVariable) continue
+			if (previewSession.referencedVariableIds.isDisjointFrom(allChangedSet)) continue
 
 			// Recheck the reference
 			this.#triggerRecheck(previewSession)
@@ -251,43 +303,50 @@ export class PreviewGraphics {
 	}
 
 	#triggerRecheck(previewSession: PreviewSession): void {
-		const location = this.#pageStore.getLocationOfControlId(previewSession.controlId)
-		const parser = this.#controlsController.createVariablesAndExpressionParser(previewSession.controlId, null)
+		try {
+			const location = this.#pageStore.getLocationOfControlId(previewSession.controlId)
+			const parser = this.#controlsController.createVariablesAndExpressionParser(previewSession.controlId)
 
-		// Resolve the new location
-		const result = ParseInternalControlReference(this.#logger, parser, location, previewSession.options, true)
+			// Resolve the new location
+			const locationValue = parser.parseEntityOption(previewSession.options.location, {
+				allowExpression: true,
+				parseVariables: true,
+			})
+			const resolvedLocation = locationValue.ok
+				? ParseLocationString(stringifyVariableValue(locationValue.value), location)
+				: null
 
-		const lastResolvedLocation = previewSession.resolvedLocation
+			const lastResolvedLocation = previewSession.resolvedLocation
 
-		previewSession.referencedVariableIds = Array.from(result.referencedVariables)
-		previewSession.resolvedLocation = result.location
+			previewSession.referencedVariableIds = locationValue.variableIds
+			previewSession.resolvedLocation = resolvedLocation
 
-		if (!result.location) {
-			// Now has an invalid location
-			this.#renderEvents.emit(`reference:${previewSession.id}`, null)
-			return
+			if (!resolvedLocation) {
+				// Now has an invalid location
+				this.#renderEvents.emit(`reference:${previewSession.id}`, null)
+				return
+			}
+
+			// Check if it has changed
+			if (
+				lastResolvedLocation &&
+				resolvedLocation.pageNumber == lastResolvedLocation.pageNumber &&
+				resolvedLocation.row == lastResolvedLocation.row &&
+				resolvedLocation.column == lastResolvedLocation.column
+			)
+				return
+
+			this.#recheckQueue.queue(previewSession.id, previewSession.id, resolvedLocation)
+		} catch (e) {
+			this.#logger.error(`Error while rechecking preview session for control ${previewSession.controlId}: ${e}`)
 		}
-
-		// Check if it has changed
-		if (
-			lastResolvedLocation &&
-			result.location.pageNumber == lastResolvedLocation.pageNumber &&
-			result.location.row == lastResolvedLocation.row &&
-			result.location.column == lastResolvedLocation.column
-		)
-			return
-
-		this.#renderEvents.emit(
-			`reference:${previewSession.id}`,
-			this.#graphicsController.getCachedRenderOrGeneratePlaceholder(result.location).asDataUrl
-		)
 	}
 }
 
 interface PreviewSession {
 	readonly id: string
 	readonly controlId: string
-	options: Record<string, any>
+	options: ExpressionableOptionsObject
 	resolvedLocation: ControlLocation | null
-	referencedVariableIds: string[]
+	referencedVariableIds: ReadonlySet<string>
 }

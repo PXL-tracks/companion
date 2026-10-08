@@ -1,6 +1,7 @@
-import { CButton } from '@coreui/react'
 import classNames from 'classnames'
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { safeSetLocalStorage } from '~/Helpers/SafeStorage.js'
+import { Button, type ButtonColor } from './Button'
 
 export interface TableVisibilityHelper<T extends Record<string, any>> {
 	visibility: T
@@ -23,7 +24,7 @@ export function useTableVisibilityHelper<T extends Record<string, any>>(
 		}
 
 		// setup defaults
-		window.localStorage.setItem(localStorageKey, JSON.stringify(defaultValue))
+		safeSetLocalStorage(localStorageKey, JSON.stringify(defaultValue))
 
 		return structuredClone(defaultValue)
 	})
@@ -40,7 +41,7 @@ export function useTableVisibilityHelper<T extends Record<string, any>>(
 
 	// Save the config when it changes
 	useEffect(() => {
-		window.localStorage.setItem(localStorageKey, JSON.stringify(visibility))
+		safeSetLocalStorage(localStorageKey, JSON.stringify(visibility))
 	}, [localStorageKey, visibility])
 
 	return {
@@ -51,7 +52,7 @@ export function useTableVisibilityHelper<T extends Record<string, any>>(
 
 interface VisibilityButtonProps<T extends Record<string, boolean>> extends TableVisibilityHelper<T> {
 	keyId: keyof T
-	color: string
+	color: ButtonColor
 	label: string
 	title?: string
 }
@@ -67,7 +68,7 @@ export function VisibilityButton<T extends Record<string, any>>({
 	const doToggle = useCallback(() => toggleVisibility(keyId), [keyId, toggleVisibility])
 
 	return (
-		<CButton
+		<Button
 			size="sm"
 			color={color}
 			className={classNames({ active: visibility[keyId] })}
@@ -75,6 +76,6 @@ export function VisibilityButton<T extends Record<string, any>>({
 			title={title}
 		>
 			{label}
-		</CButton>
+		</Button>
 	)
 }

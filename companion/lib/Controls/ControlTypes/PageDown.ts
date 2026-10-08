@@ -1,15 +1,85 @@
-import type { PageDownButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
-import { ControlBase } from '../ControlBase.js'
+import type { LayeredButtonModel, PageDownButtonModel } from '@companion-app/shared/Model/ButtonModel.js'
+import { exprExpr, exprVal } from '@companion-app/shared/Model/Options.js'
 import type {
-	ControlWithoutActionSets,
-	ControlWithoutActions,
-	ControlWithoutEvents,
-	ControlWithoutOptions,
-	ControlWithoutPushed,
-	ControlWithoutStyle,
-} from '../IControlFragments.js'
-import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
+	ButtonGraphicsBoxElement,
+	ButtonGraphicsGroupElement,
+	ButtonGraphicsLineElement,
+	ButtonGraphicsTextElement,
+	SomeButtonGraphicsElement,
+} from '@companion-app/shared/Model/StyleLayersModel.js'
+import {
+	ButtonGraphicsDecorationType,
+	ButtonGraphicsElementUsage,
+	ButtonGraphicsShowStatusIcons,
+} from '@companion-app/shared/Model/StyleModel.js'
 import type { ControlDependencies } from '../ControlDependencies.js'
+import { CreateElementOfType } from './Button/LayerDefaults.js'
+import { ControlButtonPage } from './PageButton.js'
+
+export const pageDownElements: SomeButtonGraphicsElement[] = [
+	{
+		type: 'canvas',
+		id: 'canvas',
+		name: 'Canvas',
+		decoration: exprVal(ButtonGraphicsDecorationType.None),
+		showStatusIcons: exprVal(ButtonGraphicsShowStatusIcons.None),
+		usage: ButtonGraphicsElementUsage.Automatic,
+	},
+	{
+		...(CreateElementOfType('box') as ButtonGraphicsBoxElement),
+		color: exprVal(0x0f0f0f), // Grey background
+	},
+
+	{
+		// Draw the arrow
+		...(CreateElementOfType('group') as ButtonGraphicsGroupElement),
+		enabled: exprExpr('!$(internal:_graphics_page_plusminus)'),
+		squareCoords: exprVal(true),
+		children: [
+			{
+				...(CreateElementOfType('line') as ButtonGraphicsLineElement),
+				fromX: exprVal(64),
+				fromY: exprVal(55),
+				toX: exprVal(50),
+				toY: exprVal(69),
+				borderColor: exprVal(0xffffff),
+				borderWidth: exprVal(2.5),
+			},
+			{
+				...(CreateElementOfType('line') as ButtonGraphicsLineElement),
+				fromX: exprVal(36),
+				fromY: exprVal(55),
+				toX: exprVal(50),
+				toY: exprVal(69),
+				borderColor: exprVal(0xffffff),
+				borderWidth: exprVal(2.5),
+			},
+		],
+	},
+
+	{
+		// Draw +/- if enabled
+		...(CreateElementOfType('text') as ButtonGraphicsTextElement),
+		enabled: exprExpr('$(internal:_graphics_page_plusminus)'),
+		text: exprExpr('$(internal:_graphics_page_direction_flipped) ? "+" : "–"'),
+		color: exprVal(0xffffff),
+		fontsize: exprVal(60),
+		fontsizeAllowShrink: exprVal(false),
+		valign: exprVal('top'),
+		y: exprVal(50),
+		height: exprVal(50),
+	},
+
+	{
+		...(CreateElementOfType('text') as ButtonGraphicsTextElement),
+		text: exprVal('DOWN'),
+		color: exprVal(0xffc600), // Yellow color
+		fontsize: exprVal(35),
+		fontsizeAllowShrink: exprVal(false),
+		valign: exprVal('bottom'),
+		height: exprVal(47),
+	},
+]
 
 /**
  * Class for a pagedown button control.
@@ -26,25 +96,8 @@ import type { ControlDependencies } from '../ControlDependencies.js'
  * Individual Contributor License Agreement for Companion along with
  * this program.
  */
-export class ControlButtonPageDown
-	extends ControlBase<PageDownButtonModel>
-	implements
-		ControlWithoutActions,
-		ControlWithoutStyle,
-		ControlWithoutEvents,
-		ControlWithoutActionSets,
-		ControlWithoutOptions,
-		ControlWithoutPushed
-{
+export class ControlButtonPageDown extends ControlButtonPage<PageDownButtonModel> {
 	readonly type = 'pagedown'
-
-	readonly supportsActions = false
-	readonly supportsEntities = false
-	readonly supportsStyle = false
-	readonly supportsEvents = false
-	readonly supportsActionSets = false
-	readonly supportsOptions = false
-	readonly supportsPushed = false
 
 	/**
 	 * @param registry - the application core
@@ -69,35 +122,11 @@ export class ControlButtonPageDown
 		}
 	}
 
-	/**
-	 * Get the complete style object of a button
-	 * @returns the processed style of the button
-	 */
-	getDrawStyle(): DrawStyleModel {
+	protected getDrawElements(): ReturnType<ControlButtonPage<any>['getDrawElements']> {
 		return {
-			style: 'pagedown',
+			drawType: 'pagedown',
+			elements: pageDownElements,
 		}
-	}
-
-	/**
-	 * Collect the connection ids, labels, and variables referenced by this control
-	 * @param foundConnectionIds - connection ids being referenced
-	 * @param foundConnectionLabels - connection labels being referenced
-	 * @param foundVariables - variables being referenced
-	 */
-	collectReferencedConnectionsAndVariables(
-		_foundConnectionIds: Set<string>,
-		_foundConnectionLabels: Set<string>,
-		_foundVariables: Set<string>
-	): void {
-		// Nothing being referenced
-	}
-
-	/**
-	 * Inform the control that it has been moved, and anything relying on its location must be invalidated
-	 */
-	triggerLocationHasChanged(): void {
-		// Nothing to do
 	}
 
 	/**
@@ -122,10 +151,12 @@ export class ControlButtonPageDown
 		}
 	}
 
-	getBitmapSize(): { width: number; height: number } | null {
-		return null
-	}
-	renameVariables(_labelFrom: string, _labelTo: string): void {
-		// Nothing to do
+	convertControl(): LayeredButtonModel {
+		return this.buildConvertedControl(pageDownElements, {
+			definitionId: 'dec_page',
+			options: {
+				surfaceId: exprVal('self'),
+			},
+		})
 	}
 }

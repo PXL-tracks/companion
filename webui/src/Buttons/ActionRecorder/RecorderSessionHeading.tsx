@@ -1,13 +1,16 @@
-import React, { useCallback, useContext, type RefObject } from 'react'
-import { PreventDefaultHandler, useComputed } from '~/Resources/util.js'
-import { CButton, CButtonGroup, CRow, CForm, CFormLabel, CFormSwitch } from '@coreui/react'
-import { MultiDropdownInputField } from '~/Components/index.js'
-import type { DropdownChoice, DropdownChoiceId } from '@companion-module/base'
-import type { RecordSessionInfo } from '@companion-app/shared/Model/ActionRecorderModel.js'
-import type { GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
 import { observer } from 'mobx-react-lite'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { useCallback, useContext, useId, type RefObject } from 'react'
+import type { RecordSessionInfo } from '@companion-app/shared/Model/ActionRecorderModel.js'
+import type { DropdownChoice, DropdownChoiceId } from '@companion-app/shared/Model/Common.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { Form, FormLabel } from '~/Components/Form.js'
+import type { GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { MultiDropdownInputField } from '~/Components/MultiDropdownInputField.js'
+import { SwitchInputField } from '~/Components/SwitchInputField'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { PreventDefaultHandler, useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 interface RecorderSessionHeadingProps {
 	confirmRef: RefObject<GenericConfirmModalRef>
@@ -50,8 +53,7 @@ export const RecorderSessionHeading = observer(function RecorderSessionHeading({
 	}, [abortSessionMutation, sessionId, confirmRef])
 
 	const changeRecording = useCallback(
-		(e: React.ChangeEvent<HTMLInputElement> | boolean) => {
-			const isRunning = typeof e === 'boolean' ? e : e.target.checked
+		(isRunning: boolean) => {
 			setRecordingMutation.mutateAsync({ sessionId, isRunning }).catch((e) => {
 				console.error(e)
 			})
@@ -90,14 +92,18 @@ export const RecorderSessionHeading = observer(function RecorderSessionHeading({
 		return result
 	}, [connections])
 
+	const connectionsFieldId = useId()
+	const recordingFieldId = useId()
+
 	return (
 		<>
-			<CForm onSubmit={PreventDefaultHandler}>
-				<CRow className="flex-form flex-form-row" style={{ clear: 'both' }}>
+			<Form onSubmit={PreventDefaultHandler}>
+				<Grid.Row className="flex-form m-0" style={{ clear: 'both' }}>
 					<div className="flex w-full gap-2rem">
 						<div className="w-full">
-							<CFormLabel>Connections</CFormLabel>
+							<FormLabel htmlFor={connectionsFieldId}>Connections</FormLabel>
 							<MultiDropdownInputField
+								htmlName={connectionsFieldId}
 								value={sessionInfo.connectionIds}
 								setValue={changeConnectionIds}
 								choices={connectionsWhichCanRecord}
@@ -105,30 +111,29 @@ export const RecorderSessionHeading = observer(function RecorderSessionHeading({
 						</div>
 
 						<div>
-							<CFormLabel>Recording</CFormLabel>
-							<p>
-								<CFormSwitch color="success" size="xl" checked={!!sessionInfo.isRunning} onChange={changeRecording} />
-							</p>
+							<FormLabel htmlFor={recordingFieldId}>Recording</FormLabel>
+							<br />
+							<SwitchInputField id={recordingFieldId} value={!!sessionInfo.isRunning} setValue={changeRecording} />
 						</div>
 					</div>
-				</CRow>
+				</Grid.Row>
 
-				<CRow className="flex-form-row" style={{ clear: 'both' }}>
+				<Grid.Row className="m-0" style={{ clear: 'both' }}>
 					<div>
-						<CButtonGroup className={'margin-bottom'}>
-							<CButton onClick={doClearActions} color="secondary" disabled={!sessionInfo.actions?.length}>
+						<ButtonGroup className="margin-bottom">
+							<Button onClick={doClearActions} color="secondary" disabled={!sessionInfo.actions?.length}>
 								Clear Actions
-							</CButton>
-							<CButton onClick={doAbort} color="danger">
+							</Button>
+							<Button onClick={doAbort} color="danger">
 								Discard
-							</CButton>
-							<CButton onClick={doFinish2} color="secondary" disabled={!sessionInfo.actions?.length}>
+							</Button>
+							<Button onClick={doFinish2} color="secondary" disabled={!sessionInfo.actions?.length}>
 								Finish
-							</CButton>
-						</CButtonGroup>
+							</Button>
+						</ButtonGroup>
 					</div>
-				</CRow>
-			</CForm>
+				</Grid.Row>
+			</Form>
 		</>
 	)
 })

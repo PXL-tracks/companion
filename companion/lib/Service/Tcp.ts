@@ -1,10 +1,10 @@
-import { decimalToRgb } from '../Resources/Util.js'
-import { ApiMessageError, ServiceTcpUdpApi } from './TcpUdpApi.js'
-import { ServiceTcpBase, type TcpClientInfo } from './TcpBase.js'
-import type { ServiceApi } from './ServiceApi.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
 import type { ImageResult } from '../Graphics/ImageResult.js'
+import { decimalToRgb } from '../Resources/Util.js'
+import type { ServiceApi } from './ServiceApi.js'
+import { ServiceTcpBase, type TcpClientInfo } from './TcpBase.js'
+import { ApiMessageError, ServiceTcpUdpApi } from './TcpUdpApi.js'
 
 /**
  * Class providing the TCP api.
@@ -38,7 +38,7 @@ export class ServiceTcp extends ServiceTcpBase {
 	}
 
 	onButtonDrawn(location: ControlLocation, render: ImageResult): void {
-		const bgcolor = (typeof render.style !== 'string' ? render.style : {})?.bgcolor || 0
+		const bgcolor = render.style?.color?.color || 0
 
 		if (this.clients.size > 0) {
 			const color = decimalToRgb(bgcolor)
@@ -100,5 +100,7 @@ export class ServiceTcp extends ServiceTcpBase {
 		}
 
 		client.receiveBuffer = client.receiveBuffer.substr(offset)
+
+		this.enforceReceiveBufferLimit(client)
 	}
 }

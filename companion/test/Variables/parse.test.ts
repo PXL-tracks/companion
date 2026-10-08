@@ -1,11 +1,11 @@
-import { describe, test, expect } from 'vitest'
-import { parseVariablesInString } from '../../lib/Variables/Util.js'
+import { describe, expect, test } from 'vitest'
 import { VARIABLE_UNKNOWN_VALUE } from '@companion-app/shared/Variables.js'
+import { parseVariablesInString } from '../../lib/Variables/Util.js'
 
 describe('variable parsing', () => {
 	test('undefined string', () => {
 		expect(parseVariablesInString(undefined as any, {}, new Map(), VARIABLE_UNKNOWN_VALUE)).toMatchObject({
-			text: undefined,
+			text: '',
 			variableIds: new Set([]),
 		})
 	})
@@ -18,7 +18,6 @@ describe('variable parsing', () => {
 	})
 
 	test('simple unknown variable', () => {
-		console.log('new Map()', new Map())
 		expect(parseVariablesInString('$(abc:def)', {}, new Map(), VARIABLE_UNKNOWN_VALUE)).toMatchObject({
 			text: VARIABLE_UNKNOWN_VALUE,
 			variableIds: new Set(['abc:def']),
@@ -121,6 +120,22 @@ describe('variable parsing', () => {
 		})
 	})
 
+	test('many variable references', () => {
+		const variables = {
+			abc: {
+				def: 'val1',
+				second: 'val2',
+			},
+		}
+
+		// More references than the iteration limit, all should be resolved
+		const input = '$(abc:def),$(abc:second),'.repeat(150)
+		expect(parseVariablesInString(input, variables, new Map(), VARIABLE_UNKNOWN_VALUE)).toMatchObject({
+			text: 'val1,val2,'.repeat(150),
+			variableIds: new Set(['abc:def', 'abc:second']),
+		})
+	})
+
 	test('infinite referencing variable', () => {
 		const variables = {
 			abc: {
@@ -157,6 +172,43 @@ describe('variable parsing', () => {
 		expect(parseVariablesInString('$(abc:$(abc:third))', variables, new Map(), VARIABLE_UNKNOWN_VALUE)).toEqual({
 			text: VARIABLE_UNKNOWN_VALUE,
 			variableIds: new Set(['abc:third', 'abc:nope']),
+		})
+	})
+
+	test('internal:custom_* -> custom:* mapping and rewriting', () => {
+		const variables = {
+			custom: {
+				textual: 'hello',
+				numeric: 42,
+				bool: false,
+			},
+		}
+
+		expect(parseVariablesInString('$(internal:custom_textual)', variables, new Map(), VARIABLE_UNKNOWN_VALUE)).toEqual({
+			text: 'hello',
+			variableIds: new Set(['custom:textual']),
+		})
+		expect(
+			parseVariablesInString(
+				'The answer to the Ultimate Question of Life, the Universe and Everything: $(internal:custom_numeric)',
+				variables,
+				new Map(),
+				VARIABLE_UNKNOWN_VALUE
+			)
+		).toEqual({
+			text: 'The answer to the Ultimate Question of Life, the Universe and Everything: 42',
+			variableIds: new Set(['custom:numeric']),
+		})
+		expect(
+			parseVariablesInString(
+				'$(internal:custom_bool): now place variable ref at start',
+				variables,
+				new Map(),
+				VARIABLE_UNKNOWN_VALUE
+			)
+		).toEqual({
+			text: 'false: now place variable ref at start',
+			variableIds: new Set(['custom:bool']),
 		})
 	})
 })

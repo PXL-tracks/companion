@@ -1,10 +1,9 @@
-import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
-import { CSpinner } from '@coreui/react'
-import { faCheckCircle, faTriangleExclamation, faPowerOff } from '@fortawesome/free-solid-svg-icons'
+import { faCheckCircle, faPowerOff, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import React from 'react'
-import { InlineHelp } from '~/Components/InlineHelp.js'
 import { observer } from 'mobx-react-lite'
+import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
+import { InlineHelpCustom } from '~/Components/InlineHelp.js'
+import { Spinner } from '~/Components/Spinner'
 
 interface InstanceTableStatusCellProps {
 	isEnabled: boolean
@@ -26,39 +25,39 @@ export const InstanceTableStatusCell = observer(function InstanceTableStatusCell
 				return <FontAwesomeIcon icon={faCheckCircle} color={'#33aa33'} size="2xl" />
 			case 'warning':
 				return (
-					<InlineHelp help={`${status.level ?? 'Warning'}${messageStr ? ': ' + messageStr : ''}`}>
+					<InlineHelpCustom help={`${status.level ?? 'Warning'}${messageStr ? ': ' + messageStr : ''}`}>
 						<FontAwesomeIcon icon={faTriangleExclamation} color={'#fab92c'} size="2xl" />
-					</InlineHelp>
+					</InlineHelpCustom>
 				)
 			case 'error':
 				switch (status.level) {
 					case 'system':
 						return (
-							<InlineHelp help={messageStr || 'Unknown error'}>
+							<InlineHelpCustom help={messageStr || 'Unknown error'}>
 								<FontAwesomeIcon icon={faTriangleExclamation} color={'#d50215'} size="2xl" />
-							</InlineHelp>
+							</InlineHelpCustom>
 						)
 					case 'Connecting':
 						return (
-							<InlineHelp help={`${status.level ?? 'Error'}${messageStr ? ': ' + messageStr : ''}`}>
+							<InlineHelpCustom help={`${status.level ?? 'Error'}${messageStr ? ': ' + messageStr : ''}`}>
 								<div style={{ padding: '0 3.5px' }}>
-									<CSpinner color="warning" style={{ width: '29px', height: '29px' }} />
+									<Spinner color="warning" style={{ width: '29px', height: '29px' }} />
 								</div>
-							</InlineHelp>
+							</InlineHelpCustom>
 						)
 					default:
 						return (
-							<InlineHelp help={`${status.level ?? 'Error'}${messageStr ? ': ' + messageStr : ''}`}>
+							<InlineHelpCustom help={`${status.level ?? 'Error'}${messageStr ? ': ' + messageStr : ''}`}>
 								<FontAwesomeIcon icon={faTriangleExclamation} color={'#d50215'} size="2xl" />
-							</InlineHelp>
+							</InlineHelpCustom>
 						)
 				}
 
 			default:
 				return (
-					<InlineHelp help={`Unknown${messageStr ? ': ' + messageStr : ''}`}>
+					<InlineHelpCustom help={`Unknown${messageStr ? ': ' + messageStr : ''}`}>
 						<FontAwesomeIcon icon={faTriangleExclamation} color={'#fab92c'} size="2xl" />
-					</InlineHelp>
+					</InlineHelpCustom>
 				)
 		}
 	} else {

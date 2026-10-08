@@ -1,8 +1,10 @@
+import { createRequire } from 'node:module'
+import path from 'node:path'
 import fs from 'fs-extra'
+import type { SomeModuleManifest } from '@companion-app/shared/Model/ModuleManifest.js'
+import type { ModuleManifestRuntime } from '@companion-module/base/manifest'
 import { isPackaged } from '../Resources/Util.js'
-import path from 'path'
-import type { ModuleManifest } from '@companion-module/base'
-import { doesModuleSupportPermissionsModel } from './ApiVersions.js'
+import { doesModuleSupportPermissionsModel } from './Connection/ApiVersions.js'
 
 /**
  * Get the path to the Node.js binary for the given runtime type.
@@ -30,38 +32,81 @@ export async function getNodeJsPath(runtimeType: string): Promise<string | null>
 	return nodePath
 }
 
+/**
+ * Resolve a path to its real on-disk location (following symlinks), falling back to the input if it
+ * cannot be resolved. Needed because Node's permission model matches grants against canonicalised paths.
+ */
+export function realPathOrSelf(inputPath: string): string {
+	try {
+		return fs.realpathSync(inputPath)
+	} catch (_e) {
+		return inputPath
+	}
+}
+
 export function getNodeJsPermissionArguments(
-	manifest: ModuleManifest,
+	manifest: SomeModuleManifest,
 	moduleApiVersion: string,
 	moduleDir: string,
 	enableInspect: boolean
 ): string[] {
-	// Not supported by node18
-	if (enableInspect || manifest.runtime.type === 'node18' || !doesModuleSupportPermissionsModel(moduleApiVersion))
-		return []
+	const args: string[] = []
 
-	const args = [
-		'--no-warnings=SecurityWarning',
-		'--permission',
-		// Always allow read access to the module source directory
-		`--allow-fs-read=${moduleDir}`,
-	]
+	// Not supported by surfaces
+	if (manifest.type === 'surface') return args
 
-	let forceReadWriteAll = false
-	if (process.platform === 'win32' && moduleDir.startsWith('\\\\')) {
-		// This is a network path, which nodejs does not support for the permissions model
-		forceReadWriteAll = true
+	// Check module api is new enough
+	if (!doesModuleSupportPermissionsModel(moduleApiVersion)) return args
+
+	const manifestPermissions: ModuleManifestRuntime['permissions'] = manifest.runtime.permissions || {}
+
+	if (manifestPermissions['insecure-algorithms']) args.push('--openssl-legacy-provider')
+
+	// Node18 is more limited in supported arguments
+	if (manifest.runtime.type === 'node18') return args
+
+	if (!process.env.COMPANION_SKIP_SYSTEM_CA) {
+		args.push('--use-system-ca')
 	}
 
-	const manifestPermissions = manifest.runtime.permissions || {}
-	if (manifestPermissions['worker-threads']) args.push('--allow-worker')
-	if (manifestPermissions['child-process'] || manifestPermissions['native-addons']) args.push('--allow-child-process')
-	if (manifestPermissions['native-addons']) args.push('--allow-addons')
-	if (manifestPermissions['native-addons'] || manifestPermissions['filesystem'] || forceReadWriteAll) {
-		// Note: Using native addons usually means probing random filesystem paths to check the current platform
+	if (!enableInspect) {
+		// Node canonicalises filesystem accesses to their real path before checking them against the granted
+		// paths, but does not canonicalise the grants themselves. So the grants must be real paths too.
+		const companionCodeDir = isPackaged() ? import.meta.dirname : path.join(import.meta.dirname, '../../..')
+		args.push(
+			'--no-warnings=SecurityWarning',
+			'--permission',
+			// Always allow read access to the module source directory
+			`--allow-fs-read=${realPathOrSelf(moduleDir)}`,
+			`--allow-fs-read=${realPathOrSelf(companionCodeDir)}` // Allow read access to companion code, because of some esm loader issues
+		)
 
-		// Future: This should be scoped to some limited directories as specified by the user in the connection settings
-		args.push('--allow-fs-read=*', '--allow-fs-write=*')
+		// If using node25+, we must allow network access when using permissions model
+		if (manifest.runtime.type !== 'node22') args.push('--allow-net')
+
+		if (!isPackaged()) {
+			// Always allow read access to module host package, needed when running a dev version
+			const require = createRequire(import.meta.url)
+			args.push(
+				`--allow-fs-read=${realPathOrSelf(path.join(path.dirname(require.resolve('@companion-module/host')), '../../..'))}`
+			)
+		}
+
+		let forceReadWriteAll = false
+		if (process.platform === 'win32' && moduleDir.startsWith('\\\\')) {
+			// This is a network path, which nodejs does not support for the permissions model
+			forceReadWriteAll = true
+		}
+
+		if (manifestPermissions['worker-threads']) args.push('--allow-worker')
+		if (manifestPermissions['child-process'] || manifestPermissions['native-addons']) args.push('--allow-child-process')
+		if (manifestPermissions['native-addons']) args.push('--allow-addons')
+		if (manifestPermissions['native-addons'] || manifestPermissions['filesystem'] || forceReadWriteAll) {
+			// Note: Using native addons usually means probing random filesystem paths to check the current platform
+
+			// Future: This should be scoped to some limited directories as specified by the user in the connection settings
+			args.push('--allow-fs-read=*', '--allow-fs-write=*')
+		}
 	}
 
 	return args

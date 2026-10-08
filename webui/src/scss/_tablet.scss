@@ -1,6 +1,10 @@
+@use 'sass:color';
+
 .page-tablet {
+	$primary-color: #d69e2e;
+
 	background-color: #181818;
-	color: #d69e2e;
+	color: $primary-color;
 
 	height: 100vh;
 
@@ -13,8 +17,13 @@
 		}
 	}
 
-	.form-label {
+	.form-label2 {
 		margin-top: 0.5rem;
+	}
+
+	.text-muted {
+		color: color.adjust($primary-color, $lightness: -10%) !important;
+		font-size: 0.93em;
 	}
 
 	.container-fluid {
@@ -23,8 +32,8 @@
 		margin: 0 auto;
 	}
 
-	.btn.open-config,
-	.btn.close-config {
+	.button.open-config,
+	.button.close-config {
 		float: right;
 	}
 
@@ -45,7 +54,7 @@
 		margin: 10px 0 10px;
 	}
 
-	.btn {
+	.button {
 		margin: 0 5px;
 		color: #d69e2e;
 		border: 1px solid #d69e2e;
@@ -67,7 +76,7 @@
 				padding: 0 25px;
 			}
 
-			.btn {
+			.button {
 				float: right;
 			}
 		}

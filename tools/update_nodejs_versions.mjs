@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
-import { SemVer } from 'semver'
 import path from 'node:path'
+import { SemVer } from 'semver'
 
 const nodejsVersionsPath = path.join(import.meta.dirname, '../assets/nodejs-versions.json')
 
@@ -20,6 +20,7 @@ for (const [versionName, currentVersion] of Object.entries(existingVersions)) {
 	let latestVersion = new SemVer(currentVersion)
 	for (const apiRelease of apiReleases) {
 		const apiSemver = new SemVer(apiRelease.version)
+		if (apiSemver.prerelease.length > 0) continue
 		if (apiSemver.major === latestVersion.major && apiSemver.compare(latestVersion) > 0) {
 			latestVersion = apiSemver
 		}

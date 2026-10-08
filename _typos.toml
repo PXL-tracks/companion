@@ -1,6 +1,7 @@
 [default]
 extend-ignore-re = [
   ".*// typos:disable-line[^\\n]*\\n[^\\n]*\\n",
+  ";ba\\b", # sed branch to label `a`
 ]
 
 [default.extend-words]
@@ -14,6 +15,7 @@ latch_compatability = "latch_compatability" # Bad spelling for an internal actio
 UE150 = "UE150" # Unit tests
 sACN = "sACN"
 PNGs = "PNGs"
+XPression = "XPression"
 
 [files]
 extend-exclude = [
@@ -22,4 +24,5 @@ extend-exclude = [
   "**/*.companionconfig",
   "assets/linux/*.rules",
   "shared-lib/lib/OpenApi/",
+  "launcher/assets/installer.nsh",
 ]

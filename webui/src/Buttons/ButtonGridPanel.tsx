@@ -1,21 +1,23 @@
-import { CAlert, CButton, CCol, CRow } from '@coreui/react'
-import React, { useCallback, useContext, useRef } from 'react'
-import { KeyReceiver, makeAbsolutePath } from '~/Resources/util.js'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faFileExport, faHome, faPencil } from '@fortawesome/free-solid-svg-icons'
-import { ConfirmExportModal, type ConfirmExportModalRef } from '~/Components/ConfirmExportModal.js'
-import { ButtonInfiniteGrid, PrimaryButtonGridIcon, type ButtonInfiniteGridRef } from './ButtonInfiniteGrid.js'
-import { useHasBeenRendered } from '~/Hooks/useHasBeenRendered.js'
-import { ButtonGridHeader } from './ButtonGridHeader.js'
-import { ButtonGridActions, type ButtonGridActionsRef } from './ButtonGridActions.js'
-import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { observer } from 'mobx-react-lite'
-import { ButtonGridZoomControl } from './ButtonGridZoomControl.js'
-import type { GridZoomController } from './GridZoom.js'
-import { EditPagePropertiesModal, type EditPagePropertiesModalRef } from './EditPageProperties.js'
+import React, { useCallback, useContext, useRef, useState } from 'react'
+import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
+import { StaticAlert } from '~/Components/Alert.js'
+import { Button } from '~/Components/Button.js'
+import { ConfirmExportModal, type ConfirmExportModalRef } from '~/Components/ConfirmExportModal.js'
+import { Grid } from '~/Components/Grid'
+import { useHasBeenRendered } from '~/Hooks/useHasBeenRendered.js'
+import { ContextHelpButton } from '~/Layout/PanelIcons.js'
+import { KeyReceiver, makeAbsolutePath } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { ButtonGridActions, type ButtonGridActionsRef } from './ButtonGridActions.js'
+import { ButtonGridHeader } from './ButtonGridHeader.js'
 import { ButtonGridResizePrompt } from './ButtonGridResizePrompt.js'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { ButtonGridZoomControl } from './ButtonGridZoomControl.js'
+import { ButtonInfiniteGrid, PrimaryButtonGridIcon, type ButtonInfiniteGridRef } from './ButtonInfiniteGrid.js'
+import { EditPagePropertiesModal, type EditPagePropertiesModalRef } from './EditPageProperties.js'
+import type { GridZoomController } from './GridZoom.js'
 
 interface ButtonsGridPanelProps {
 	pageNumber: number
@@ -27,6 +29,9 @@ interface ButtonsGridPanelProps {
 	clearSelectedButton: () => void
 	gridZoomValue: number
 	gridZoomController: GridZoomController
+	copySourceButton?: ControlLocation | null
+	contextMenuButton?: ControlLocation | null
+	onButtonContextMenu?: (location: ControlLocation, x: number, y: number) => void
 }
 
 export const ButtonsGridPanel = observer(function ButtonsPage({
@@ -39,6 +44,9 @@ export const ButtonsGridPanel = observer(function ButtonsPage({
 	clearSelectedButton,
 	gridZoomValue,
 	gridZoomController,
+	copySourceButton,
+	contextMenuButton,
+	onButtonContextMenu,
 }: ButtonsGridPanelProps) {
 	const { pages, userConfig } = useContext(RootAppStoreContext)
 
@@ -97,55 +105,8 @@ export const ButtonsGridPanel = observer(function ButtonsPage({
 
 	const gridSize = userConfig.properties?.gridSize
 
-	const setConfigKeyMutation = useMutationExt(trpc.userConfig.setConfigKey.mutationOptions())
-
-	const doGrow = useCallback(
-		(direction: 'left' | 'right' | 'top' | 'bottom', amount: number) => {
-			if (amount <= 0 || !gridSize) return
-
-			switch (direction) {
-				case 'left':
-					setConfigKeyMutation.mutate({
-						key: 'gridSize',
-						value: {
-							...gridSize,
-							minColumn: gridSize.minColumn - (amount || 2),
-						},
-					})
-					break
-				case 'right':
-					setConfigKeyMutation.mutate({
-						key: 'gridSize',
-						value: {
-							...gridSize,
-							maxColumn: gridSize.maxColumn + (amount || 2),
-						},
-					})
-					break
-				case 'top':
-					setConfigKeyMutation.mutate({
-						key: 'gridSize',
-						value: {
-							...gridSize,
-							minRow: gridSize.minRow - (amount || 2),
-						},
-					})
-					break
-				case 'bottom':
-					setConfigKeyMutation.mutate({
-						key: 'gridSize',
-						value: {
-							...gridSize,
-							maxRow: gridSize.maxRow + (amount || 2),
-						},
-					})
-					break
-			}
-		},
-		[setConfigKeyMutation, gridSize]
-	)
-
 	const [hasBeenInView, isInViewRef] = useHasBeenRendered()
+	const [viewportMinHeight, setViewportMinHeight] = useState(250) // arbitrary initial min-height
 
 	return (
 		<KeyReceiver onKeyDown={onKeyDown} tabIndex={0} className="button-grid-panel">
@@ -153,7 +114,10 @@ export const ButtonsGridPanel = observer(function ButtonsPage({
 				<ConfirmExportModal ref={exportModalRef} title="Export Page" />
 				<EditPagePropertiesModal ref={editRef} includeName />
 
-				<h4>Buttons</h4>
+				<h4 className="button-inline">
+					Buttons
+					<ContextHelpButton action="/user-guide/config/buttons/" />
+				</h4>
 				<p style={{ marginBottom: '0.5rem' }}>
 					The squares below represent each button on your Streamdeck. Click on them to set up how you want them to look,
 					and what they should do when you press or click on them.
@@ -161,28 +125,28 @@ export const ButtonsGridPanel = observer(function ButtonsPage({
 
 				<ButtonGridResizePrompt />
 
-				<CRow>
-					<CCol sm={12}>
+				<Grid.Row>
+					<Grid.Col sm={12}>
 						<ButtonGridHeader pageNumber={pageNumber} changePage={changePage2} setPage={setPage}>
-							<CButton color="light" onClick={showExportModal} title="Export Page" className="btn-right">
-								<FontAwesomeIcon icon={faFileExport} />
-							</CButton>
-							<CButton color="light" onClick={configurePage} title="Edit Page" className="btn-right">
-								<FontAwesomeIcon icon={faPencil} />
-							</CButton>
-							<CButton color="light" onClick={resetPosition} title="Home Position" className="btn-right">
-								<FontAwesomeIcon icon={faHome} />
-							</CButton>
 							<ButtonGridZoomControl
 								useCompactButtons={true}
 								gridZoomValue={gridZoomValue}
 								gridZoomController={gridZoomController}
 							/>
+							<Button color="light" onClick={resetPosition} title="Home Position" className="ms-1">
+								<FontAwesomeIcon icon={faHome} />
+							</Button>
+							<Button color="light" onClick={configurePage} title="Edit Page" className="ms-1">
+								<FontAwesomeIcon icon={faPencil} />
+							</Button>
+							<Button color="light" onClick={showExportModal} title="Export Page" className="ms-1">
+								<FontAwesomeIcon icon={faFileExport} />
+							</Button>
 						</ButtonGridHeader>
-					</CCol>
-				</CRow>
+					</Grid.Col>
+				</Grid.Row>
 			</div>
-			<div className="button-grid-panel-content">
+			<div className="button-grid-panel-content" style={{ minHeight: viewportMinHeight }}>
 				{hasBeenInView && gridSize && (
 					<ButtonInfiniteGrid
 						ref={gridRef}
@@ -190,10 +154,13 @@ export const ButtonsGridPanel = observer(function ButtonsPage({
 						pageNumber={pageNumber}
 						buttonClick={buttonClick}
 						selectedButton={selectedButton}
+						copySourceButton={copySourceButton}
+						contextMenuButton={contextMenuButton}
+						onButtonContextMenu={onButtonContextMenu}
 						gridSize={gridSize}
-						doGrow={userConfig.properties?.gridSizeInlineGrow ? doGrow : undefined}
-						buttonIconFactory={PrimaryButtonGridIcon}
+						ButtonIconFactory={PrimaryButtonGridIcon}
 						drawScale={gridZoomValue / 100}
+						setViewportMinHeight={setViewportMinHeight}
 					/>
 				)}
 			</div>
@@ -205,11 +172,11 @@ export const ButtonsGridPanel = observer(function ButtonsPage({
 					clearSelectedButton={clearSelectedButton}
 				/>
 
-				<CAlert color="info" className="mb-2">
+				<StaticAlert color="info" className="mb-2">
 					You can use the arrow keys, pageup and pagedown to navigate with the keyboard, and use common key commands
 					such as copy, paste, and cut to rearrange buttons. You can also press the delete or backspace key with any
 					button highlighted to delete it.
-				</CAlert>
+				</StaticAlert>
 			</div>
 		</KeyReceiver>
 	)

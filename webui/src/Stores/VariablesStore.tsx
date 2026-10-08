@@ -1,11 +1,11 @@
+import { action, computed, observable, type ObservableMap } from 'mobx'
 import type {
 	CustomVariableCollection,
 	CustomVariableDefinition,
 	CustomVariableUpdate,
 } from '@companion-app/shared/Model/CustomVariableModel.js'
-import { action, computed, observable, type ObservableMap } from 'mobx'
-import { assertNever } from '~/Resources/util.js'
 import type { VariableDefinition, VariableDefinitionUpdate } from '@companion-app/shared/Model/Variables.js'
+import { assertNever } from '~/Resources/util.js'
 import { ApplyDiffToStore, updateObjectInPlace } from './ApplyDiffToMap'
 import type { ExpressionVariablesListStore } from './ExpressionVariablesListStore'
 
@@ -125,7 +125,7 @@ export class VariablesStore {
 			if (!info.variableName) continue
 
 			definitions.push({
-				label: info.description || 'An expression variable',
+				description: info.description || 'An expression variable',
 				connectionLabel: 'expression',
 				name: info.variableName,
 			})
@@ -138,11 +138,11 @@ export class VariablesStore {
 		const definitions: VariableDefinitionExt[] = []
 
 		// Custom variables
-		for (const [id, info] of this.customVariables) {
+		for (const [name, info] of this.customVariables) {
 			definitions.push({
-				label: info.description,
+				description: info.description,
 				connectionLabel: 'custom',
-				name: id,
+				name,
 			})
 		}
 
@@ -150,21 +150,18 @@ export class VariablesStore {
 	})
 
 	public variableDefinitionsForLabel = (label: string): VariableDefinitionExt[] => {
-		const definitions: VariableDefinitionExt[] = []
-
 		// Module variables
 		const variables = this.variables.get(label)
-		if (variables) {
-			for (const [name, variable] of variables) {
-				definitions.push({
-					...variable,
-					connectionLabel: label,
-					name,
-				})
-			}
-		}
+		if (!variables) return []
 
-		return definitions
+		return variables
+			.entries()
+			.map(([name, variable]): VariableDefinitionExt => ({
+				...variable,
+				connectionLabel: label,
+				name,
+			}))
+			.toArray()
 	}
 
 	public get allCustomVariableCollectionIds(): string[] {
@@ -201,5 +198,4 @@ export class VariablesStore {
 
 export interface VariableDefinitionExt extends VariableDefinition {
 	connectionLabel: string
-	name: string
 }

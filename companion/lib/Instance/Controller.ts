@@ -9,39 +9,49 @@
  * this program.
  */
 
-import { InstanceDefinitions } from './Definitions.js'
-import { InstanceProcessManager } from './ProcessManager.js'
-import { InstanceStatus } from './Status.js'
+import { EventEmitter } from 'node:events'
+import express from 'express'
+import type { UdevRuleDefinition } from 'udev-generator'
+import z from 'zod'
 import { isLabelValid, makeLabelSafe } from '@companion-app/shared/Label.js'
-import { InstanceModules } from './Modules.js'
-import type { ControlsController } from '../Controls/Controller.js'
-import type { VariablesController } from '../Variables/Controller.js'
-import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
 import type { ClientConnectionConfig, ClientConnectionsUpdate } from '@companion-app/shared/Model/Connections.js'
+import type { ExportInstanceFullv6, ExportInstanceMinimalv6 } from '@companion-app/shared/Model/ExportModel.js'
 import {
+	InstanceVersionUpdatePolicy,
 	ModuleInstanceType,
 	type InstanceConfig,
-	type InstanceVersionUpdatePolicy,
 } from '@companion-app/shared/Model/Instance.js'
-import type { ModuleManifest } from '@companion-module/base'
-import type { ExportInstanceFullv6, ExportInstanceMinimalv6 } from '@companion-app/shared/Model/ExportModel.js'
-import { InstanceConfigStore, type AddInstanceProps } from './ConfigStore.js'
-import { EventEmitter } from 'events'
-import LogController from '../Log/Controller.js'
-import { InstanceSharedUdpManager } from './Connection/SharedUdpManager.js'
-import type { ServiceOscSender } from '../Service/OscSender.js'
-import type { DataDatabase } from '../Data/Database.js'
-import type { GraphicsController } from '../Graphics/Controller.js'
-import express from 'express'
-import { InstanceInstalledModulesManager } from './InstalledModulesManager.js'
-import { ModuleStoreService } from './ModuleStore.js'
-import type { AppInfo } from '../Registry.js'
+import type { InstanceStatusEntry } from '@companion-app/shared/Model/InstanceStatus.js'
+import type { ModuleManifestExt } from '@companion-app/shared/Model/ModuleManifest.js'
+import type {
+	ClientSurfaceInstanceConfig,
+	ClientSurfaceInstancesUpdate,
+} from '@companion-app/shared/Model/SurfaceInstance.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import type { Complete } from '@companion-module/base'
+import type { IControlStore } from '../Controls/IControlStore.js'
 import type { DataCache } from '../Data/Cache.js'
-import { InstanceCollections } from './Collections.js'
-import type { Complete } from '@companion-module/base/dist/util.js'
-import { createConnectionsTrpcRouter } from './Connection/TrpcRouter.js'
+import type { DataDatabase } from '../Data/Database.js'
+import LogController from '../Log/Controller.js'
+import type { AppInfo } from '../Registry.js'
+import type { ServiceOscSender } from '../Service/OscSender.js'
+import type { SurfaceController } from '../Surface/Controller.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
-import z from 'zod'
+import type { VariablesController } from '../Variables/Controller.js'
+import { ActionRecorder } from './ActionRecorder.js'
+import { InstanceConfigStore, type AddInstanceProps } from './ConfigStore.js'
+import { ConnectionsCollections } from './Connection/Collections.js'
+import { InstanceSharedUdpManager } from './Connection/SharedUdpManager.js'
+import { createConnectionsTrpcRouter } from './Connection/TrpcRouter.js'
+import { InstanceDefinitions } from './Definitions.js'
+import { InstanceInstalledModulesManager } from './InstalledModulesManager.js'
+import { InstanceModules } from './Modules.js'
+import { ModuleStoreService } from './ModuleStore.js'
+import { InstanceProcessManager } from './ProcessManager.js'
+import { InstanceStatus } from './Status.js'
+import { SurfaceInstanceCollections } from './Surface/Collections.js'
+import { createSurfacesTrpcRouter } from './Surface/TrpcRouter.js'
+import { InstanceUdevRulesController } from './UdevRules.js'
 
 type CreateConnectionData = {
 	type: string
@@ -54,16 +64,25 @@ export interface InstanceControllerEvents {
 	connection_deleted: [connectionId: string]
 	connection_collections_enabled: []
 
+	surface_instance_added: [instanceId?: string]
+	surface_instance_updated: [instanceId: string]
+	surface_instance_deleted: [instanceId: string]
+	surface_collections_enabled: []
+
 	uiConnectionsUpdate: [changes: ClientConnectionsUpdate[]]
+	uiSurfaceInstancesUpdate: [changes: ClientSurfaceInstancesUpdate[]]
 	[id: `debugLog:${string}`]: [time: number | null, source: string, level: string, message: string]
 }
 
 export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 	readonly #logger = LogController.createLogger('Instance/Controller')
 
-	readonly #controlsController: ControlsController
+	readonly #controlsStore: IControlStore
 	readonly #variablesController: VariablesController
-	readonly #connectionCollectionsController: InstanceCollections
+	readonly #surfacesController: SurfaceController
+	readonly #connectionCollectionsController: ConnectionsCollections
+	readonly #surfaceInstanceCollectionsController: SurfaceInstanceCollections
+	readonly #udevRules: InstanceUdevRulesController
 
 	readonly #configStore: InstanceConfigStore
 
@@ -74,13 +93,39 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 	readonly processManager: InstanceProcessManager
 	readonly modules: InstanceModules
 	readonly sharedUdpManager: InstanceSharedUdpManager
+	readonly actionRecorder: ActionRecorder
 	readonly modulesStore: ModuleStoreService
 	readonly userModulesManager: InstanceInstalledModulesManager
 
 	readonly connectionApiRouter = express.Router()
 
-	get connectionCollections(): InstanceCollections {
+	get connectionCollections(): ConnectionsCollections {
 		return this.#connectionCollectionsController
+	}
+	get surfaceInstanceCollections(): SurfaceInstanceCollections {
+		return this.#surfaceInstanceCollectionsController
+	}
+
+	/**
+	 * Whether the collection containing an instance of the given type is enabled.
+	 * Dispatches to the correct collections controller so callers don't have to.
+	 */
+	isCollectionEnabled(moduleType: ModuleInstanceType, collectionId: string | null | undefined): boolean {
+		switch (moduleType) {
+			case ModuleInstanceType.Connection:
+				return this.#connectionCollectionsController.isCollectionEnabled(collectionId)
+			case ModuleInstanceType.Surface:
+				return this.#surfaceInstanceCollectionsController.isCollectionEnabled(collectionId)
+			default:
+				return false
+		}
+	}
+
+	/**
+	 * Whether an instance should be running: it is enabled directly AND its collection is enabled.
+	 */
+	isInstanceEnabled(config: InstanceConfig): boolean {
+		return config.enabled !== false && this.isCollectionEnabled(config.moduleInstanceType, config.collectionId)
 	}
 
 	constructor(
@@ -88,16 +133,18 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		db: DataDatabase,
 		cache: DataCache,
 		apiRouter: express.Router,
-		controls: ControlsController,
-		graphics: GraphicsController,
+		controlsStore: IControlStore,
 		variables: VariablesController,
+		surfaces: SurfaceController,
 		oscSender: ServiceOscSender
 	) {
 		super()
 		this.setMaxListeners(0)
 
 		this.#variablesController = variables
-		this.#controlsController = controls
+		this.#surfacesController = surfaces
+		this.#controlsStore = controlsStore
+		this.#udevRules = new InstanceUdevRulesController(appInfo.udevRulesDir, () => this.#collectSurfaceUsbIds())
 
 		this.#configStore = new InstanceConfigStore(db, (instanceIds, updateProcessManager) => {
 			// Ensure any changes to collectionId update the enabled state
@@ -112,29 +159,37 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 			}
 
 			this.#broadcastConnectionChanges(instanceIds)
+			this.#broadcastSurfaceInstanceChanges(instanceIds)
 		})
-		this.#connectionCollectionsController = new InstanceCollections(db, this.#configStore, () => {
+		this.#connectionCollectionsController = new ConnectionsCollections(db, this.#configStore, () => {
 			this.emit('connection_collections_enabled')
 
 			this.#queueUpdateAllConnectionState(ModuleInstanceType.Connection)
+		})
+		this.#surfaceInstanceCollectionsController = new SurfaceInstanceCollections(db, this.#configStore, () => {
+			this.emit('surface_collections_enabled')
+
+			this.#queueUpdateAllConnectionState(ModuleInstanceType.Surface)
 		})
 
 		this.sharedUdpManager = new InstanceSharedUdpManager()
 		this.definitions = new InstanceDefinitions(this.#configStore)
 		this.status = new InstanceStatus()
-		this.modules = new InstanceModules(this, apiRouter, appInfo.modulesDirs)
+		this.actionRecorder = new ActionRecorder(this, controlsStore)
+		this.modules = new InstanceModules(this, apiRouter, appInfo)
 		this.processManager = new InstanceProcessManager(
 			{
-				controls: controls,
+				controls: controlsStore,
 				variables: variables,
 				oscSender: oscSender,
+				actionRecorder: this.actionRecorder,
 
 				instanceDefinitions: this.definitions,
 				instanceStatus: this.status,
 				sharedUdpManager: this.sharedUdpManager,
-				setInstanceConfig: (connectionId, config, secrets, upgradeIndex) => {
+				setConnectionConfig: (instanceId, config, secrets, upgradeIndex) => {
 					this.setConnectionLabelAndConfig(
-						connectionId,
+						instanceId,
 						{
 							label: null,
 							enabled: null,
@@ -152,6 +207,16 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 					this.emit(`debugLog:${connectionId}`, time, source, level, message)
 				},
 			},
+			{
+				surfaceController: surfaces,
+				instanceStatus: this.status,
+				debugLogLine: (instanceId: string, time: number | null, source: string, level: string, message: string) => {
+					this.emit(`debugLog:${instanceId}`, time, source, level, message)
+				},
+				invalidateClientJson: (instanceId: string) => {
+					this.#broadcastSurfaceInstanceChanges([instanceId])
+				},
+			},
 			this.modules,
 			this.#configStore
 		)
@@ -164,11 +229,9 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		)
 		this.modules.listenToStoreEvents(this.modulesStore)
 
-		graphics.on('resubscribeFeedbacks', () => this.processManager.resubscribeAllFeedbacks())
-
 		this.connectionApiRouter.use('/:label', (req, res, _next) => {
 			const label = req.params.label
-			const connectionId = this.getIdForLabel(label) || label
+			const connectionId = this.getIdForLabel(ModuleInstanceType.Connection, label) || label
 			const connection = this.processManager.getConnectionChild(connectionId)
 			if (connection) {
 				connection.executeHttpRequest(req, res)
@@ -179,6 +242,9 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 		// Prepare for clients already
 		this.#broadcastConnectionChanges(this.#configStore.getAllInstanceIdsOfType(ModuleInstanceType.Connection))
+		this.#broadcastSurfaceInstanceChanges(this.#configStore.getAllInstanceIdsOfType(ModuleInstanceType.Surface))
+
+		this.#udevRules.triggerRegenerate()
 	}
 
 	getAllConnectionIds(): string[] {
@@ -205,13 +271,38 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 	}
 
 	/**
+	 * Setup the default surface instances
+	 */
+	createDefaultSurfaceInstances(): void {
+		this.addSurfaceInstanceWithLabel('elgato-stream-deck', 'elgato-stream-deck', {
+			versionId: 'builtin',
+			updatePolicy: InstanceVersionUpdatePolicy.Stable,
+			disabled: false,
+		})
+
+		this.addSurfaceInstanceWithLabel('xkeys', 'xkeys', {
+			versionId: 'builtin',
+			updatePolicy: InstanceVersionUpdatePolicy.Stable,
+			disabled: false,
+		})
+	}
+
+	/**
 	 * Initialise instances
 	 * @param extraModulePath - extra directory to search for modules
 	 */
-	async initInstances(extraModulePath: string): Promise<void> {
+	async initInstances(isFirstRun: boolean, extraModulePath: string): Promise<void> {
 		await this.userModulesManager.init()
 
 		await this.modules.initModules(extraModulePath)
+
+		// Validate and fix surface instance states before initializing
+		this.#validateAndFixSurfaceInstanceStates()
+
+		// If this is a fresh install, setup the default surface instances
+		if (isFirstRun && this.#configStore.getAllInstanceIdsOfType(ModuleInstanceType.Surface).length === 0) {
+			this.createDefaultSurfaceInstances()
+		}
 
 		const instanceIds = this.#configStore.getAllInstanceIdsOfType(null)
 		this.#logger.silly('instance_init', instanceIds)
@@ -220,17 +311,81 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		}
 
 		this.emit('connection_added')
+		this.emit('surface_instance_added')
 	}
 
 	async reloadUsesOfModule(moduleType: ModuleInstanceType, moduleId: string, versionId: string): Promise<void> {
 		// restart usages of this module
 		const { instanceIds, labels } = this.#configStore.findActiveUsagesOfModule(moduleType, moduleId, versionId)
 		for (const id of instanceIds) {
+			if (moduleType === ModuleInstanceType.Surface) {
+				const config = this.#configStore.getConfigOfTypeForId(id, moduleType)
+				if (!config) continue
+
+				// If this can no longer be enabled, disable it
+				if (config.enabled && !this.#canEnableSurfaceInstance(id)) {
+					config.enabled = false
+					this.#configStore.commitChanges([id], false)
+				}
+			}
+
 			// Restart it
 			this.#queueUpdateInstanceState(id, false, true)
 		}
 
 		this.#logger.info(`Reloading ${labels.length} instances: ${labels.join(', ')}`)
+	}
+
+	#validateAndFixSurfaceInstanceStates(): void {
+		// Group enabled surface integrations by module ID
+		const instancesByModule = new Map<string, Array<{ instanceId: string; config: InstanceConfig }>>()
+		for (const [instanceId, config] of this.#configStore.getAllInstanceConfigs()) {
+			if (config.moduleInstanceType !== ModuleInstanceType.Surface) continue
+			if (!config.enabled) continue
+
+			if (!instancesByModule.has(config.moduleId)) {
+				instancesByModule.set(config.moduleId, [])
+			}
+			instancesByModule.get(config.moduleId)!.push({ instanceId, config })
+		}
+
+		// Check each module to see if multiple instances are allowed
+		for (const instances of instancesByModule.values()) {
+			// If only one instance exists, there is nothing to check
+			if (instances.length <= 1) continue
+
+			// Check if ALL versions in use allow multiple instances
+			let allVersionsAllowMultiple = true
+			for (const { config } of instances) {
+				const moduleInfo = this.modules.getModuleManifest(
+					ModuleInstanceType.Surface,
+					config.moduleId,
+					config.moduleVersionId
+				)
+				// If no loaded module, skip this instance
+				if (!moduleInfo || moduleInfo.manifest.type !== 'surface') continue
+
+				if (!moduleInfo.manifest.allowMultipleInstances) {
+					allVersionsAllowMultiple = false
+					break
+				}
+			}
+
+			// If not all versions allow multiple instances, disable all but the first
+			if (!allVersionsAllowMultiple) {
+				for (let i = 1; i < instances.length; i++) {
+					const { instanceId, config } = instances[i]
+					this.#logger.warn(
+						`Disabling surface integration "${config.label}" (${instanceId}) because not all versions of this module allow multiple instances`
+					)
+					config.enabled = false
+				}
+				this.#configStore.commitChanges(
+					instances.slice(1).map((i) => i.instanceId),
+					false
+				)
+			}
+		}
 	}
 
 	findActiveUsagesOfModule(
@@ -263,7 +418,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		if (!connectionConfig) return { ok: false, message: 'no connection instance' }
 
 		if (values.label !== null) {
-			const idUsingLabel = this.getIdForLabel(values.label)
+			const idUsingLabel = this.getIdForLabel(ModuleInstanceType.Connection, values.label)
 			if (idUsingLabel && idUsingLabel !== id) {
 				return { ok: false, message: 'duplicate label' }
 			}
@@ -300,7 +455,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 			connectionConfig.label = values.label
 			this.#variablesController.values.connectionLabelRename(oldLabel, values.label)
 			this.#variablesController.definitions.connectionLabelRename(oldLabel, values.label)
-			this.#controlsController.renameVariables(oldLabel, values.label)
+			this.#controlsStore.renameVariables(oldLabel, values.label)
 			this.definitions.updateVariablePrefixesForLabel(id, values.label)
 		}
 
@@ -319,6 +474,8 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 		this.#configStore.commitChanges([id], false)
 
+		this.#logger.debug(`instance "${connectionConfig.label}" configuration updated`)
+
 		// If enabled has changed, start/stop the connection
 		if (values.enabled !== null) {
 			this.#queueUpdateInstanceState(id, false, false)
@@ -335,12 +492,10 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 		const updateInstance = !!values.label || ((values.config || values.secrets) && !options?.skipNotifyConnection)
 		if (updateInstance && instance) {
-			instance.updateConfigAndLabel(connectionConfig).catch((e: any) => {
-				instance.logger.warn('Error updating instance configuration: ' + e.message)
+			instance.updateConfigAndLabel(connectionConfig).catch((e) => {
+				instance.logger.warn('Error updating instance configuration: ' + stringifyError(e))
 			})
 		}
-
-		this.#logger.debug(`instance "${connectionConfig.label}" configuration updated`)
 
 		return { ok: true }
 	}
@@ -366,7 +521,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 		const label = this.#configStore.makeLabelUnique(ModuleInstanceType.Connection, labelBase)
 
-		if (this.getIdForLabel(label)) throw new Error(`Label "${label}" already in use`)
+		if (this.getIdForLabel(ModuleInstanceType.Connection, label)) throw new Error(`Label "${label}" already in use`)
 
 		this.#logger.info('Adding connection ' + moduleId + ' ' + product)
 
@@ -384,17 +539,17 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		return this.#configStore.getConfigOfTypeForId(id, ModuleInstanceType.Connection)?.label
 	}
 
-	getIdForLabel(label: string): string | undefined {
-		return this.#configStore.getConnectionIdFromLabel(label)
+	getIdForLabel(moduleType: ModuleInstanceType, label: string): string | undefined {
+		return this.#configStore.getIdFromLabel(moduleType, label)
 	}
 
-	getManifestForConnection(id: string): ModuleManifest | undefined {
+	getManifestForConnection(id: string): ModuleManifestExt | undefined {
 		const config = this.#configStore.getConfigOfTypeForId(id, ModuleInstanceType.Connection)
 		if (!config) return undefined
 
 		const moduleManifest = this.modules.getModuleManifest(
 			ModuleInstanceType.Connection,
-			config.instance_type,
+			config.moduleId,
 			config.moduleVersionId
 		)
 
@@ -424,6 +579,29 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		}
 	}
 
+	/**
+	 * Force a restart of a running connection process
+	 * @returns true if the connection was found and restart was triggered
+	 */
+	restartConnection(id: string): boolean {
+		const connectionConfig = this.#configStore.getConfigOfTypeForId(id, ModuleInstanceType.Connection)
+		if (!connectionConfig) return false
+
+		if (connectionConfig.enabled === false) {
+			this.#logger.warn(`Cannot restart disabled connection "${connectionConfig.label}"`)
+			return false
+		}
+
+		if (!this.#connectionCollectionsController.isCollectionEnabled(connectionConfig.collectionId)) {
+			this.#logger.warn(`Cannot restart connection "${connectionConfig.label}" in disabled collection`)
+			return false
+		}
+
+		this.#logger.info(`Restarting connection "${connectionConfig.label}"`)
+		this.#queueUpdateInstanceState(id, false, true)
+		return true
+	}
+
 	async removeConnection(connectionId: string): Promise<void> {
 		const config = this.#configStore.getConfigOfTypeForId(connectionId, ModuleInstanceType.Connection)
 		if (!config) {
@@ -449,7 +627,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		this.definitions.forgetConnection(connectionId)
 		this.#variablesController.values.forgetConnection(connectionId, label)
 		this.#variablesController.definitions.forgetConnection(connectionId, label)
-		this.#controlsController.forgetConnection(connectionId)
+		this.#controlsStore.forgetConnection(connectionId)
 	}
 
 	async deleteAllConnections(deleteCollections: boolean): Promise<void> {
@@ -465,11 +643,275 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		await Promise.all(ps)
 	}
 
+	async deleteAllSurfaceInstances(deleteCollections: boolean): Promise<void> {
+		const ps: Promise<void>[] = []
+		for (const surfaceId of this.#configStore.getAllInstanceIdsOfType(ModuleInstanceType.Surface)) {
+			ps.push(this.removeSurfaceInstance(surfaceId))
+		}
+
+		if (deleteCollections) {
+			this.#surfaceInstanceCollectionsController.discardAllCollections()
+		}
+
+		await Promise.all(ps)
+	}
+
 	/**
 	 * Get information for the metrics system about the current connections
 	 */
 	getConnectionsMetrics(): Record<string, Record<string, number>> {
 		return this.#configStore.getModuleVersionsMetrics(ModuleInstanceType.Connection)
+	}
+
+	#canEnableSurfaceInstance(instanceId: string): boolean {
+		const thisConfig = this.#configStore.getConfigOfTypeForId(instanceId, ModuleInstanceType.Surface)
+		if (!thisConfig) return false
+
+		// Collect all enabled instances of this module
+		const allInstancesOfModule = this.#configStore
+			.getAllInstanceConfigs()
+			.entries()
+			.filter(
+				([_id, config]) =>
+					config.moduleInstanceType === ModuleInstanceType.Surface &&
+					config.moduleId === thisConfig.moduleId &&
+					config.enabled
+			)
+			.toArray()
+
+		// If there is only one instance, then enabling is always allowed
+		if (allInstancesOfModule.length <= 1) {
+			return true
+		}
+
+		// Check if ALL versions in use allow multiple instances
+		let allVersionsAllowMultiple = true
+		for (const [_id, config] of allInstancesOfModule) {
+			const moduleInfo = this.modules.getModuleManifest(
+				ModuleInstanceType.Surface,
+				config.moduleId,
+				config.moduleVersionId
+			)
+			// If no loaded module, skip this instance
+			if (!moduleInfo || moduleInfo.manifest.type !== 'surface') continue
+
+			if (!moduleInfo.manifest.allowMultipleInstances) {
+				allVersionsAllowMultiple = false
+				break
+			}
+		}
+
+		// If all versions allow multiple instances, enabling is allowed
+		return allVersionsAllowMultiple
+	}
+
+	/**
+	 * Add a new surface instance with a predetermined label
+	 */
+	addSurfaceInstanceWithLabel(
+		moduleId: string,
+		labelBase: string,
+		props: AddInstanceProps
+	): [id: string, config: InstanceConfig] {
+		if (props.versionId === null) {
+			// Get the latest installed version
+			props.versionId = this.modules.getLatestVersionOfModule(ModuleInstanceType.Surface, moduleId, false)
+		}
+
+		// Ensure the requested module and version is installed
+		this.userModulesManager.ensureModuleIsInstalled(ModuleInstanceType.Surface, moduleId, props.versionId)
+
+		const label = this.#configStore.makeLabelUnique(ModuleInstanceType.Surface, labelBase)
+
+		if (this.getIdForLabel(ModuleInstanceType.Surface, label)) throw new Error(`Label "${label}" already in use`)
+
+		this.#logger.info('Adding surface module ' + moduleId)
+
+		delete props.collectionId // Surfaces don't use collections
+		const [id, config] = this.#configStore.addSurface(moduleId, label, props)
+
+		this.#queueUpdateInstanceState(id, true)
+
+		this.#logger.silly(`surface_instance_added: ${id}`)
+		this.emit('surface_instance_added', id)
+
+		this.#udevRules.triggerRegenerate()
+
+		return [id, config]
+	}
+
+	enableDisableSurfaceInstance(id: string, state: boolean): void {
+		const surfaceConfig = this.#configStore.getConfigOfTypeForId(id, ModuleInstanceType.Surface)
+		if (surfaceConfig) {
+			const label = surfaceConfig.label
+			if (surfaceConfig.enabled !== state) {
+				this.#logger.info((state ? 'Enable' : 'Disable') + ' surface ' + label)
+				surfaceConfig.enabled = state
+
+				// If enabling, check if it would violate allowMultipleInstances rule and auto-disable if so
+				if (surfaceConfig.enabled && !this.#canEnableSurfaceInstance(id)) {
+					this.#logger.warn(`Disabling surface "${label}" because enabling would violate allowMultipleInstances rule`)
+					surfaceConfig.enabled = false
+				}
+
+				this.#configStore.commitChanges([id], false)
+
+				this.#queueUpdateInstanceState(id, false, true)
+			} else {
+				if (state === true) {
+					this.#logger.warn(`Attempting to enable surface "${label}" that is already enabled`)
+				} else {
+					this.#logger.warn(`Attempting to disable surface "${label}" that is already disabled`)
+				}
+			}
+		}
+	}
+
+	async removeSurfaceInstance(instanceId: string): Promise<void> {
+		const config = this.#configStore.getConfigOfTypeForId(instanceId, ModuleInstanceType.Surface)
+		if (!config) {
+			this.#logger.warn(`Can't delete surface integration "${instanceId}" which does not exist!`)
+			return
+		}
+
+		const label = config.label
+		this.#logger.info(`Deleting surface integration: ${label ?? instanceId}`)
+
+		try {
+			this.processManager.queueUpdateInstanceState(instanceId, null, true)
+		} catch (e) {
+			this.#logger.debug(`Error while deleting surface integration "${label ?? instanceId}": `, e)
+		}
+
+		this.status.forgetInstanceStatus(instanceId)
+		this.#configStore.forgetInstance(instanceId)
+		this.#udevRules.triggerRegenerate()
+
+		this.emit('surface_instance_deleted', instanceId)
+
+		// forward cleanup elsewhere
+		this.#broadcastSurfaceInstanceChanges([instanceId])
+		this.#surfacesController.outbound.removeAllForSurfaceInstance(instanceId)
+	}
+
+	setSurfaceInstanceLabelAndConfig(
+		instanceId: string,
+		data: {
+			label: string | null
+			enabled: boolean | null
+			config: unknown | null
+			updatePolicy: InstanceVersionUpdatePolicy | null
+		}
+	): { ok: true } | { ok: false; message: string } {
+		const surfaceConfig = this.#configStore.getConfigOfTypeForId(instanceId, ModuleInstanceType.Surface)
+		if (!surfaceConfig) return { ok: false, message: 'no surface integration' }
+
+		if (data.label !== null) {
+			const idUsingLabel = this.getIdForLabel(ModuleInstanceType.Surface, data.label)
+			if (idUsingLabel && idUsingLabel !== instanceId) {
+				return { ok: false, message: 'duplicate label' }
+			}
+
+			if (!isLabelValid(data.label)) {
+				return { ok: false, message: 'invalid label' }
+			}
+		}
+
+		if (data.label !== null) {
+			surfaceConfig.label = data.label
+		}
+		if (data.config !== null) {
+			surfaceConfig.config = data.config
+		}
+		if (data.updatePolicy !== null) {
+			surfaceConfig.updatePolicy = data.updatePolicy
+		}
+		if (data.enabled !== null) {
+			surfaceConfig.enabled = data.enabled
+		}
+
+		// If enabling, check if it would violate allowMultipleInstances rule and auto-disable if so
+		let enabledChanged = false
+		if (surfaceConfig.enabled && !this.#canEnableSurfaceInstance(instanceId)) {
+			this.#logger.warn(
+				`Disabling surface "${surfaceConfig.label}" because enabling would violate allowMultipleInstances rule`
+			)
+			surfaceConfig.enabled = false
+			enabledChanged = true
+		}
+
+		this.emit('surface_instance_updated', instanceId)
+
+		this.#configStore.commitChanges([instanceId], false)
+
+		this.#logger.debug(`surface integration "${surfaceConfig?.label}" configuration updated`)
+
+		// If enabled has changed, start/stop the connection
+		if (data.enabled !== null || enabledChanged) {
+			this.#queueUpdateInstanceState(instanceId, false, false)
+			if (!surfaceConfig.enabled) {
+				// If new state is disabled, stop processing here
+				return { ok: true }
+			}
+		}
+
+		return { ok: true }
+	}
+
+	getSurfaceInstanceClientJson(): Record<string, ClientSurfaceInstanceConfig> {
+		const result: Record<string, ClientSurfaceInstanceConfig> = {}
+
+		for (const [id, config] of this.#configStore.getAllInstanceConfigs()) {
+			if (config.moduleInstanceType !== ModuleInstanceType.Surface) continue
+
+			const instance = this.processManager.getSurfaceChild(id)
+
+			result[id] = {
+				id: id,
+				moduleType: config.moduleInstanceType,
+				moduleId: config.moduleId,
+				moduleVersionId: config.moduleVersionId,
+				updatePolicy: config.updatePolicy,
+				label: config.label,
+				enabled: config.enabled,
+				sortOrder: config.sortOrder,
+				collectionId: config.collectionId ?? null,
+
+				remoteConfigFields: instance?.features.supportsRemote?.configFields ?? null,
+				remoteConfigMatches: instance?.features.supportsRemote?.configMatchesExpression ?? null,
+			}
+		}
+
+		return result
+	}
+
+	/**
+	 * Inform clients of changes to the list of surfaces
+	 */
+	#broadcastSurfaceInstanceChanges(instanceIds: string[]): void {
+		const newJson = this.getSurfaceInstanceClientJson()
+
+		const changes: ClientSurfaceInstancesUpdate[] = []
+
+		for (const surfaceId of instanceIds) {
+			if (!newJson[surfaceId]) {
+				changes.push({ type: 'remove', id: surfaceId })
+			} else {
+				changes.push({ type: 'update', id: surfaceId, info: newJson[surfaceId] })
+			}
+		}
+
+		// Now broadcast to any interested clients
+		if (this.listenerCount('uiSurfaceInstancesUpdate') > 0) {
+			this.emit('uiSurfaceInstancesUpdate', changes)
+		}
+	}
+
+	/**
+	 * Get information for the metrics system about the current surfaces
+	 */
+	getSurfacesMetrics(): Record<string, Record<string, number>> {
+		return this.#configStore.getModuleVersionsMetrics(ModuleInstanceType.Surface)
 	}
 
 	setModuleVersionAndActivate(
@@ -481,17 +923,29 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		if (!config) return false
 
 		// Don't validate the version, as it might not yet be installed
-		// const moduleInfo = instanceController.modules.getModuleManifest(config.instance_type, versionId)
-		// if (!moduleInfo) throw new Error(`Unknown module type or version ${config.instance_type} (${versionId})`)
+		// const moduleInfo = instanceController.modules.getModuleManifest(config.moduleId, versionId)
+		// if (!moduleInfo) throw new Error(`Unknown module type or version ${config.moduleId} (${versionId})`)
 
 		if (newVersionId?.includes('@')) {
 			// Its a moduleId and version
 			const [moduleId, version] = newVersionId.split('@')
-			config.instance_type = moduleId
+			config.moduleId = moduleId
 			config.moduleVersionId = version || null
 		} else {
 			// Its a simple version
 			config.moduleVersionId = newVersionId
+		}
+
+		// If this is an enabled surface instance, check if the new version would violate allowMultipleInstances
+		if (
+			config.enabled &&
+			config.moduleInstanceType === ModuleInstanceType.Surface &&
+			!this.#canEnableSurfaceInstance(instanceId)
+		) {
+			this.#logger.warn(
+				`Disabling surface "${config.label}" because changing to version ${config.moduleVersionId} would violate allowMultipleInstances rule`
+			)
+			config.enabled = false
 		}
 
 		// Update the config
@@ -499,15 +953,13 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		this.#configStore.commitChanges([instanceId], false)
 
 		// Install the module if needed
-		this.userModulesManager.ensureModuleIsInstalled(
-			config.moduleInstanceType,
-			config.instance_type,
-			config.moduleVersionId
-		)
+		this.userModulesManager.ensureModuleIsInstalled(config.moduleInstanceType, config.moduleId, config.moduleVersionId)
 
 		// Trigger a restart (or as much as possible)
 		if (config.enabled) {
 			this.#queueUpdateInstanceState(instanceId, false, true)
+		} else if (config.moduleInstanceType === ModuleInstanceType.Surface) {
+			this.#udevRules.triggerRegenerate()
 		}
 
 		return true
@@ -568,7 +1020,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 		const obj = minimal
 			? ({
-					instance_type: rawObj.instance_type,
+					moduleId: rawObj.moduleId,
 					label: rawObj.label,
 					lastUpgradeIndex: rawObj.lastUpgradeIndex,
 					moduleVersionId: rawObj.moduleVersionId ?? undefined,
@@ -578,6 +1030,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 				} satisfies Complete<ExportInstanceMinimalv6>)
 			: ({
 					...rawObj,
+					moduleId: rawObj.moduleId, // Rename for export
 					moduleVersionId: rawObj.moduleVersionId ?? undefined,
 					secrets: includeSecrets ? rawObj.secrets : undefined,
 				} satisfies ExportInstanceFullv6)
@@ -587,6 +1040,10 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 	exportAllConnections(includeSecrets: boolean): Record<string, InstanceConfig | undefined> {
 		return this.#configStore.exportAllConnections(includeSecrets)
+	}
+
+	exportAllSurfaceInstances(): Record<string, InstanceConfig | undefined> {
+		return this.#configStore.exportAllSurfaceInstances()
 	}
 
 	/**
@@ -625,11 +1082,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 		// Seamless fixup old configs
 		if (!config.moduleVersionId) {
-			config.moduleVersionId = this.modules.getLatestVersionOfModule(
-				config.moduleInstanceType,
-				config.instance_type,
-				true
-			)
+			config.moduleVersionId = this.modules.getLatestVersionOfModule(config.moduleInstanceType, config.moduleId, true)
 			changed = !!config.moduleVersionId
 		}
 
@@ -652,6 +1105,9 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 				)
 				changed = true
 			}
+		} else if (config.moduleInstanceType === ModuleInstanceType.Surface) {
+			// Ensure the udev rules are up to date
+			this.#udevRules.triggerRegenerate()
 		}
 
 		if (changed || forceCommitChanges) {
@@ -659,12 +1115,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 			this.#configStore.commitChanges([id], false)
 		}
 
-		let enableInstance = config.enabled !== false
-		if (
-			config.moduleInstanceType === ModuleInstanceType.Connection &&
-			!this.#connectionCollectionsController.isCollectionEnabled(config.collectionId)
-		)
-			enableInstance = false
+		const enableInstance = this.isInstanceEnabled(config)
 
 		this.processManager.queueUpdateInstanceState(
 			id,
@@ -672,7 +1123,7 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 				? {
 						label: config.label,
 						moduleType: config.moduleInstanceType,
-						moduleId: config.instance_type,
+						moduleId: config.moduleId,
 						moduleVersionId: config.moduleVersionId,
 					}
 				: null,
@@ -694,6 +1145,8 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 
 			connections: createConnectionsTrpcRouter(this.#logger, this, this, this.#configStore),
 
+			surfaces: createSurfacesTrpcRouter(this.#logger, this, this, this.#configStore),
+
 			debugLog: publicProcedure
 				.input(
 					z.object({
@@ -710,6 +1163,8 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 						yield { time, source, level, message }
 					}
 				}),
+
+			udevRules: this.#udevRules.createTrpcRouter(),
 		})
 	}
 
@@ -729,5 +1184,26 @@ export class InstanceController extends EventEmitter<InstanceControllerEvents> {
 		if (!this.#lastClientJson) this.#lastClientJson = structuredClone(result)
 
 		return result
+	}
+
+	/** Gather the USB ids of all enabled surface modules, used to generate the udev rules */
+	#collectSurfaceUsbIds(): UdevRuleDefinition[] {
+		const usbIds: UdevRuleDefinition[] = []
+
+		for (const config of this.#configStore.getAllInstanceConfigs().values()) {
+			if (config.moduleInstanceType !== ModuleInstanceType.Surface) continue
+
+			// Find the manifest of the module
+			const manifest = this.modules.getModuleManifest(
+				ModuleInstanceType.Surface,
+				config.moduleId,
+				config.moduleVersionId
+			)
+			if (!manifest || manifest.manifest.type !== 'surface') continue
+
+			if (manifest.manifest.usbIds) usbIds.push(...manifest.manifest.usbIds)
+		}
+
+		return usbIds
 	}
 }

@@ -1,10 +1,9 @@
+import { EventEmitter } from 'node:events'
 import jsonPatch from 'fast-json-patch'
-import debounceFn from 'debounce-fn'
-import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
+import type { UIControlUpdate } from '@companion-app/shared/Model/Controls.js'
 import LogController, { type Logger } from '../Log/Controller.js'
 import type { ControlDependencies } from './ControlDependencies.js'
-import { EventEmitter } from 'node:events'
-import type { UIControlUpdate } from '@companion-app/shared/Model/Controls.js'
+import type { LayeredButtonDrawer } from './ControlTypes/Button/LayeredButtonDrawer.js'
 
 export type ControlUpdateEvents = {
 	update: [change: UIControlUpdate]
@@ -71,7 +70,7 @@ export abstract class ControlBase<TJson> {
 		if (typeof this.checkButtonStatus === 'function' && this.checkButtonStatus(false)) redraw = true
 
 		// Trigger redraw
-		if (redraw) this.triggerRedraw()
+		if (redraw) this.triggerInvalidation()
 
 		const newJson = this.toJSON(true)
 
@@ -116,17 +115,9 @@ export abstract class ControlBase<TJson> {
 	abstract triggerLocationHasChanged(): void
 
 	/**
-	 * Get the size of the bitmap render of this control
+	 * The drawing surface for controls that render to a button, or `null` for controls that don't draw.
 	 */
-	abstract getBitmapSize(): { width: number; height: number } | null
-
-	/**
-	 * Get the complete style object of a button
-	 * @returns the processed style of the button
-	 */
-	getDrawStyle(): DrawStyleModel | null {
-		return null
-	}
+	abstract get drawing(): LayeredButtonDrawer | null
 
 	/**
 	 * Emit a change to the runtime properties of this control.
@@ -163,28 +154,11 @@ export abstract class ControlBase<TJson> {
 	}
 
 	/**
-	 * Trigger a redraw of this control, if it can be drawn
+	 * React to a change to this control - invalidate the rendered graphic, re-check a trigger condition, etc.
+	 * Abstract with no default on purpose, so a new control type must decide how it reacts rather than
+	 * silently inheriting drawing behaviour.
 	 */
-	triggerRedraw = debounceFn(
-		() => {
-			// This is a hacky way of ensuring we don't schedule two invalidations in short succession when doing lots of work
-			// Long term this should be replaced with a proper work queue inside GraphicsController
-			if (this.#pendingDraw) return
-
-			this.#pendingDraw = true
-			setImmediate(() => {
-				this.deps.events.emit('invalidateControlRender', this.controlId)
-				this.#pendingDraw = false
-			})
-		},
-		{
-			before: false,
-			after: true,
-			wait: 10,
-			maxWait: 20,
-		}
-	)
-	#pendingDraw = false
+	protected abstract triggerInvalidation(): void
 
 	/**
 	 * Rename an instance for variables used in the controls

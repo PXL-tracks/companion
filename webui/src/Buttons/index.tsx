@@ -1,23 +1,30 @@
-import { CCol, CNav, CNavItem, CNavLink, CRow, CTabContent, CTabPane } from '@coreui/react'
-import { faCalculator, faGift, faLayerGroup, faVideoCamera } from '@fortawesome/free-solid-svg-icons'
+import { useDragDropMonitor } from '@dnd-kit/react'
+import { faCalculator, faGift, faLayerGroup, faThLarge, faVideoCamera } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { useMatchRoute, useNavigate, type UseNavigateResult } from '@tanstack/react-router'
+import { observer } from 'mobx-react-lite'
 import { nanoid } from 'nanoid'
-import { ConnectionPresets } from './Presets/Presets.js'
-import { MyErrorBoundary } from '~/Resources/Error.js'
-import { ButtonsGridPanel } from './ButtonGridPanel.js'
-import { EditButton } from './EditButton/EditButton.js'
-import { ActionRecorder } from './ActionRecorder/index.js'
-import React, { useCallback, useContext, useRef, useState } from 'react'
-import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useMediaQuery } from 'usehooks-ts'
 import { formatLocation } from '@companion-app/shared/ControlId.js'
 import type { ControlLocation } from '@companion-app/shared/Model/Common.js'
-import { observer } from 'mobx-react-lite'
+import { ContextMenu } from '~/Components/ContextMenu.js'
+import { GenericConfirmModal, type GenericConfirmModalRef } from '~/Components/GenericConfirmModal.js'
+import { Grid } from '~/Components/Grid'
+import { TabArea } from '~/Components/TabArea.js'
+import { safeSetSessionStorage } from '~/Helpers/SafeStorage.js'
+import { MyErrorBoundary } from '~/Resources/Error.js'
+import { trpc, useMutationExt } from '~/Resources/TRPC.js'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import classNames from 'classnames'
+import { ActionRecorder } from './ActionRecorder/index.js'
+import { ButtonsGridPanel } from './ButtonGridPanel.js'
+import { EditButton } from './EditButton/EditButton.js'
+import { parseGridButtonDroppableId } from './GridButtonDroppableId.js'
 import { useGridZoom } from './GridZoom.js'
 import { PagesList } from './Pages.js'
-import { useMatchRoute, useNavigate, type UseNavigateResult } from '@tanstack/react-router'
-import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import type { PresetDragItem } from './Presets/PresetDragItem.js'
+import { ConnectionPresets } from './Presets/Presets.js'
+import { useButtonContextMenu } from './useButtonContextMenu.js'
 
 const SESSION_STORAGE_LAST_BUTTONS_PAGE = 'lastButtonsPage'
 
@@ -33,7 +40,7 @@ function useUrlPageNumber(): number | null {
 
 function navigateToButtonsPage(navigate: UseNavigateResult<'/buttons'>, pageNumber: number): void {
 	void navigate({ to: `/buttons/${pageNumber}` })
-	window.sessionStorage.setItem(SESSION_STORAGE_LAST_BUTTONS_PAGE, pageNumber.toString())
+	safeSetSessionStorage(SESSION_STORAGE_LAST_BUTTONS_PAGE, pageNumber.toString())
 }
 
 function getLastPageNumber(): number {
@@ -50,8 +57,11 @@ export const ButtonsPage = observer(function ButtonsPage() {
 	const clearModalRef = useRef<GenericConfirmModalRef>(null)
 	const [gridZoomController, gridZoomValue] = useGridZoom('grid')
 
+	const isLargeScreen = useMediaQuery('(min-width: 1200px)')
+
 	const [tabResetToken, setTabResetToken] = useState(nanoid())
-	const [activeTab, setActiveTab] = useState('pages')
+	const [activeTab, setActiveTab] = useState('grid')
+
 	const [selectedButton, setSelectedButton] = useState<ControlLocation | null>(null)
 	const [copyFromButton, setCopyFromButton] = useState<[ControlLocation, string] | null>(null)
 
@@ -66,7 +76,7 @@ export const ButtonsPage = observer(function ButtonsPage() {
 
 	const doChangeTab = useCallback((newTab: string) => {
 		setActiveTab((oldTab) => {
-			if (newTab !== 'edit' && oldTab !== newTab) {
+			if (newTab !== 'edit' && newTab !== 'grid' && oldTab !== newTab) {
 				setSelectedButton(null)
 				setTabResetToken(nanoid())
 			}
@@ -94,11 +104,59 @@ export const ButtonsPage = observer(function ButtonsPage() {
 		doChangeTab('pages')
 	}, [doChangeTab])
 
+	// When screen becomes large, switch away from grid tab since it's now in its own column
+	useEffect(() => {
+		if (isLargeScreen && activeTab === 'grid') {
+			setActiveTab('pages')
+		}
+	}, [isLargeScreen, activeTab])
+
 	const gridSize = userConfig.properties?.gridSize
 
 	const resetControlMutation = useMutationExt(trpc.controls.resetControl.mutationOptions())
 	const copyControlMutation = useMutationExt(trpc.controls.copyControl.mutationOptions())
 	const moveControlMutation = useMutationExt(trpc.controls.moveControl.mutationOptions())
+	const swapControlMutation = useMutationExt(trpc.controls.swapControl.mutationOptions())
+
+	// Dropping a preset (from the Presets tab) onto a grid button imports it at that location.
+	// Subscribed via the global dnd-kit provider; we filter to preset drags by `type`.
+	const importPresetMutation = useMutationExt(trpc.controls.importPreset.mutationOptions())
+	useDragDropMonitor({
+		onDragEnd(event) {
+			if (event.canceled) return
+			const { source, target } = event.operation
+			if (!source || !target || source.type !== 'preset') return
+
+			const location = parseGridButtonDroppableId(target.id)
+			if (!location) return
+
+			const dropData = source.data as PresetDragItem
+			importPresetMutation
+				.mutateAsync({
+					connectionId: dropData.connectionId,
+					presetId: dropData.presetId,
+					location,
+					variableValues: dropData.variableValues,
+				})
+				.catch(() => {
+					console.error('Preset import failed')
+				})
+		},
+	})
+
+	const {
+		contextMenuOpen,
+		setContextMenuOpen,
+		contextMenuPosition,
+		contextMenuLocation,
+		contextMenuItems,
+		doButtonContextMenu,
+	} = useButtonContextMenu({
+		copyFromButton,
+		setCopyFromButton,
+		clearModalRef,
+		setTabResetToken,
+	})
 
 	const handleKeyDownInButtons = useCallback(
 		(e: React.KeyboardEvent) => {
@@ -128,6 +186,9 @@ export const ButtonsPage = observer(function ButtonsPage() {
 				gridZoomController.zoomReset()
 			} else {
 				switch (e.key) {
+					case 'Escape':
+						setCopyFromButton(null)
+						break
 					case 'ArrowDown':
 						setSelectedButton((selectedButton) => {
 							if (selectedButton && gridSize) {
@@ -251,6 +312,14 @@ export const ButtonsPage = observer(function ButtonsPage() {
 								})
 							setCopyFromButton(null)
 							setTabResetToken(nanoid())
+						} else if (copyFromButton[1] === 'swap') {
+							swapControlMutation
+								.mutateAsync({ fromLocation: copyFromButton[0], toLocation: selectedButton })
+								.catch((e) => {
+									console.error(`swap failed: ${e}`)
+								})
+							setCopyFromButton(null)
+							setTabResetToken(nanoid())
 						} else {
 							console.error('unknown paste operation:', copyFromButton[1])
 						}
@@ -262,6 +331,7 @@ export const ButtonsPage = observer(function ButtonsPage() {
 			resetControlMutation,
 			copyControlMutation,
 			moveControlMutation,
+			swapControlMutation,
 			selectedButton,
 			copyFromButton,
 			gridSize,
@@ -284,57 +354,71 @@ export const ButtonsPage = observer(function ButtonsPage() {
 		pageNumber = newPageNumber
 	}
 
+	const gridPanel = (
+		<MyErrorBoundary>
+			<ButtonsGridPanel
+				buttonGridClick={doButtonGridClick}
+				isHot={viewControl.buttonGridHotPress}
+				selectedButton={selectedButton}
+				copySourceButton={copyFromButton?.[0] ?? null}
+				contextMenuButton={contextMenuOpen ? contextMenuLocation : null}
+				onButtonContextMenu={doButtonContextMenu}
+				pageNumber={pageNumber}
+				changePage={setPageNumber}
+				onKeyDown={handleKeyDownInButtons}
+				clearSelectedButton={clearSelectedButton}
+				gridZoomController={gridZoomController}
+				gridZoomValue={gridZoomValue}
+			/>
+		</MyErrorBoundary>
+	)
+
 	return (
-		<CRow className="buttons-page split-panels">
+		<Grid.Row className="buttons-page split-panels">
 			<GenericConfirmModal ref={clearModalRef} />
+			<ContextMenu
+				open={contextMenuOpen}
+				onOpenChange={setContextMenuOpen}
+				position={contextMenuPosition}
+				menuItems={contextMenuItems}
+			/>
 
-			<CCol xs={12} xl={6} className="primary-panel">
-				<MyErrorBoundary>
-					<ButtonsGridPanel
-						buttonGridClick={doButtonGridClick}
-						isHot={viewControl.buttonGridHotPress}
-						selectedButton={selectedButton}
-						pageNumber={pageNumber}
-						changePage={setPageNumber}
-						onKeyDown={handleKeyDownInButtons}
-						clearSelectedButton={clearSelectedButton}
-						gridZoomController={gridZoomController}
-						gridZoomValue={gridZoomValue}
-					/>
-				</MyErrorBoundary>
-			</CCol>
+			{/* On large screens, show the grid in its own column */}
+			{isLargeScreen && (
+				<Grid.Col xs={12} xl={6} className="primary-panel">
+					{gridPanel}
+				</Grid.Col>
+			)}
 
-			<CCol xs={12} xl={6} className="secondary-panel">
+			<Grid.Col xs={12} xl={6} className="secondary-panel">
 				<div className="secondary-panel-inner">
-					<CNav variant="tabs">
-						<CNavItem
-							className={classNames({
-								hidden: !selectedButton,
-							})}
-						>
-							<CNavLink active={activeTab === 'edit'} onClick={() => doChangeTab('edit')}>
-								<FontAwesomeIcon icon={faCalculator} /> Edit Button{' '}
-								{selectedButton ? `${formatLocation(selectedButton)}` : '?'}
-							</CNavLink>
-						</CNavItem>
-						<CNavItem>
-							<CNavLink active={activeTab === 'pages'} onClick={() => doChangeTab('pages')}>
+					<TabArea.Root value={activeTab} onValueChange={setActiveTab}>
+						<TabArea.List>
+							{!isLargeScreen && (
+								<TabArea.Tab value="grid">
+									<FontAwesomeIcon icon={faThLarge} /> Buttons
+								</TabArea.Tab>
+							)}
+							{selectedButton && (
+								<TabArea.Tab value="edit">
+									<FontAwesomeIcon icon={faCalculator} /> Edit Button{' '}
+									{selectedButton ? `${formatLocation(selectedButton)}` : '?'}
+								</TabArea.Tab>
+							)}
+							<TabArea.Tab value="pages">
 								<FontAwesomeIcon icon={faLayerGroup} /> Pages
-							</CNavLink>
-						</CNavItem>
-						<CNavItem>
-							<CNavLink active={activeTab === 'presets'} onClick={() => doChangeTab('presets')}>
+							</TabArea.Tab>
+							<TabArea.Tab value="presets">
 								<FontAwesomeIcon icon={faGift} /> Presets
-							</CNavLink>
-						</CNavItem>
-						<CNavItem>
-							<CNavLink active={activeTab === 'action-recorder'} onClick={() => doChangeTab('action-recorder')}>
+							</TabArea.Tab>
+							<TabArea.Tab value="action-recorder">
 								<FontAwesomeIcon icon={faVideoCamera} /> Recorder
-							</CNavLink>
-						</CNavItem>
-					</CNav>
-					<CTabContent>
-						<CTabPane visible={activeTab === 'edit'}>
+							</TabArea.Tab>
+						</TabArea.List>
+
+						{/* On small screens, show the grid in its own tab */}
+						{!isLargeScreen && <TabArea.Panel value="grid">{gridPanel}</TabArea.Panel>}
+						<TabArea.Panel value="edit">
 							<MyErrorBoundary>
 								{selectedButton && (
 									<EditButton
@@ -344,25 +428,25 @@ export const ButtonsPage = observer(function ButtonsPage() {
 									/>
 								)}
 							</MyErrorBoundary>
-						</CTabPane>
-						<CTabPane visible={activeTab === 'pages'}>
+						</TabArea.Panel>
+						<TabArea.Panel value="pages">
 							<MyErrorBoundary>
 								<PagesList setPageNumber={setPageNumber} />
 							</MyErrorBoundary>
-						</CTabPane>
-						<CTabPane visible={activeTab === 'presets'}>
+						</TabArea.Panel>
+						<TabArea.Panel value="presets">
 							<MyErrorBoundary>
 								<ConnectionPresets resetToken={tabResetToken} />
 							</MyErrorBoundary>
-						</CTabPane>
-						<CTabPane visible={activeTab === 'action-recorder'}>
+						</TabArea.Panel>
+						<TabArea.Panel value="action-recorder" className="pt-0">
 							<MyErrorBoundary>
 								<ActionRecorder />
 							</MyErrorBoundary>
-						</CTabPane>
-					</CTabContent>
+						</TabArea.Panel>
+					</TabArea.Root>
 				</div>
-			</CCol>
-		</CRow>
+			</Grid.Col>
+		</Grid.Row>
 	)
 })

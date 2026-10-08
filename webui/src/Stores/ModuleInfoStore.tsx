@@ -1,19 +1,19 @@
 import { action, observable, runInAction } from 'mobx'
+import { nanoid } from 'nanoid'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import type {
-	ModuleInfoUpdate,
 	ClientModuleInfo,
+	ModuleInfoUpdate,
 	ModuleUpgradeToOtherVersion,
 } from '@companion-app/shared/Model/ModuleInfo.js'
-import { assertNever } from '~/Resources/util.js'
 import type {
 	ModuleStoreListCacheEntry,
 	ModuleStoreListCacheStore,
 	ModuleStoreModuleInfoStore,
 } from '@companion-app/shared/Model/ModulesStore.js'
-import { nanoid } from 'nanoid'
 import { trpc } from '~/Resources/TRPC'
+import { assertNever } from '~/Resources/util.js'
 import { applyJsonPatchInPlace } from './ApplyDiffToMap'
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 
 export type ModuleInfoId = `${ModuleInstanceType}:${string}`
 
@@ -28,12 +28,14 @@ export class ModuleInfoStore {
 
 	readonly storeRefreshProgress = observable.map<ModuleInfoId | null, number>()
 
-	readonly storeUpdateInfo: Omit<ModuleStoreListCacheStore, 'connectionModules' | 'connectionModuleApiVersion'> =
-		observable.object({
-			lastUpdated: 0,
-			lastUpdateAttempt: 0,
-			updateWarning: null,
-		})
+	readonly storeUpdateInfo: Omit<
+		ModuleStoreListCacheStore,
+		'connectionModules' | 'connectionModuleApiVersion' | 'surfaceModules' | 'surfaceModuleApiVersion'
+	> = observable.object({
+		lastUpdated: 0,
+		lastUpdateAttempt: 0,
+		updateWarning: null,
+	})
 
 	readonly storeList = observable.map<ModuleInfoId, ModuleStoreListCacheEntryExt>()
 
@@ -106,21 +108,30 @@ export class ModuleInfoStore {
 			updateWarning: null,
 			connectionModuleApiVersion: null,
 			connectionModules: null,
+			surfaceModuleApiVersion: null,
+			surfaceModules: null,
 		}
 
 		this.storeUpdateInfo.lastUpdated = storeInfo.lastUpdated
 		this.storeUpdateInfo.lastUpdateAttempt = storeInfo.lastUpdateAttempt
 		this.storeUpdateInfo.updateWarning = storeInfo.updateWarning
 
-		const allModules: [ModuleInfoId, ModuleStoreListCacheEntryExt][] = Object.entries(
-			storeInfo.connectionModules || {}
-		).map(([id, entry]) => [
-			`${ModuleInstanceType.Connection}:${id}`,
-			{
-				...entry,
-				moduleType: ModuleInstanceType.Connection,
-			},
-		])
+		const pushModules = (moduleType: ModuleInstanceType, modules: Record<string, ModuleStoreListCacheEntry> | null) => {
+			for (const [moduleId, moduleInfo] of Object.entries(modules || {})) {
+				allModules.push([
+					`${moduleType}:${moduleId}`,
+					{
+						...moduleInfo,
+						moduleType,
+					},
+				])
+			}
+		}
+
+		const allModules: [ModuleInfoId, ModuleStoreListCacheEntryExt][] = []
+		pushModules(ModuleInstanceType.Connection, storeInfo.connectionModules)
+		pushModules(ModuleInstanceType.Surface, storeInfo.surfaceModules)
+
 		// TODO - is this too aggressive?
 		this.storeList.replace(allModules)
 	})

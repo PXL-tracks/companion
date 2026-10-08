@@ -1,6 +1,6 @@
+import type { Operation as JsonPatchOperation } from 'fast-json-patch'
 import type { CollectionBase } from './Collections.js'
 import type { SomeEntityModel } from './EntityModel.js'
-import type { Operation as JsonPatchOperation } from 'fast-json-patch'
 
 export type ExpressionVariableCollection = CollectionBase<null>
 
@@ -13,11 +13,12 @@ export interface ExpressionVariableModel {
 	localVariables: SomeEntityModel[]
 }
 
-export interface ExpressionVariableOptions {
+export type ExpressionVariableOptions = {
 	variableName: string
 	description: string
 	sortOrder: number
 	collectionId?: string
+	notes?: string
 }
 
 export interface ClientExpressionVariableData extends ExpressionVariableOptions {

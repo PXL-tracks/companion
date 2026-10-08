@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import type { VariablesStore } from '~/Stores/VariablesStore.js'
 import { useSubscription } from '@trpc/tanstack-react-query'
+import { useState } from 'react'
+import type { CustomVariableUpdate } from '@companion-app/shared/Model/CustomVariableModel.js'
 import { trpc } from '~/Resources/TRPC'
+import type { VariablesStore } from '~/Stores/VariablesStore.js'
 
 export function useCustomVariablesSubscription(
 	store: VariablesStore,
@@ -18,7 +19,7 @@ export function useCustomVariablesSubscription(
 			},
 			onData: (data) => {
 				setLoadError?.(null)
-				store.updateCustomVariables(data)
+				store.updateCustomVariables(data as CustomVariableUpdate[])
 				setReady(true)
 			},
 			onError: (error) => {

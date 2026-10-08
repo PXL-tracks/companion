@@ -9,14 +9,17 @@
  * this program.
  */
 
-import LogController, { type Logger } from '../Log/Controller.js'
-import type { SurfaceHandler } from './Handler.js'
-import type { SurfaceGroupConfig } from '@companion-app/shared/Model/Surfaces.js'
-import type { SurfaceController } from './Controller.js'
-import type { IPageStore } from '../Page/Store.js'
-import type { DataUserConfig } from '../Data/UserConfig.js'
-import type { DataStoreTableView } from '../Data/StoreBase.js'
 import type EventEmitter from 'node:events'
+import type { JsonValue } from 'type-fest'
+import type { SurfaceGroupConfig } from '@companion-app/shared/Model/Surfaces.js'
+import { stringifyVariableValue } from '@companion-app/shared/Model/Variables.js'
+import { stringifyError } from '@companion-app/shared/Stringify.js'
+import type { DataStoreTableView } from '../Data/StoreBase.js'
+import type { DataUserConfig } from '../Data/UserConfig.js'
+import LogController, { type Logger } from '../Log/Controller.js'
+import type { IPageStore } from '../Page/Store.js'
+import type { SurfaceController } from './Controller.js'
+import type { SurfaceHandler } from './Handler.js'
 import type { UpdateEvents } from './Types.js'
 
 export class SurfaceGroup {
@@ -28,6 +31,7 @@ export class SurfaceGroup {
 		last_page_id: '',
 		startup_page_id: '',
 		use_last_page: true,
+		never_lock: false,
 		restrict_pages: false,
 		allowed_page_ids: [],
 	}
@@ -80,7 +84,7 @@ export class SurfaceGroup {
 	 */
 	#dbTable: DataStoreTableView<Record<string, SurfaceGroupConfig>>
 	/**
-	 * The core page controller
+	 * The core page store
 	 */
 	#pageStore: IPageStore
 	/**
@@ -209,7 +213,7 @@ export class SurfaceGroup {
 
 		this.surfaceHandlers.push(surfaceHandler)
 
-		surfaceHandler.setLocked(this.#isLocked, true)
+		surfaceHandler.setLocked(this.#isLocked && !this.groupConfig.never_lock, true)
 		surfaceHandler.storeNewDevicePage(this.#currentPageId, true)
 	}
 
@@ -406,25 +410,29 @@ export class SurfaceGroup {
 	 * @param key Config field to change
 	 * @param value New value for the field
 	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	setGroupConfigValue(key: string, value: any): string | undefined {
-		this.#logger.debug(`Set config "${key}" to "${value}"`)
+	setGroupConfigValue(key: string, value: JsonValue | undefined): string | undefined {
+		this.#logger.debug(`Set config "${key}" to "${stringifyVariableValue(value)}"`)
 
-		let newValue = null
+		let newValue: JsonValue | null = null
 		try {
 			newValue = validateGroupConfigValue(this.#pageStore, key, value)
-		} catch (e: any) {
-			this.#logger.warn(`Set config failed: ${e?.message ?? e}`)
+		} catch (e) {
+			this.#logger.warn(`Set config failed: ${stringifyError(e)}`)
 			return 'invalid value'
 		}
 
-		if (key === 'last_page_id') {
-			this.#storeNewPage(value)
+		if (key === 'last_page_id' && typeof newValue === 'string') {
+			this.#storeNewPage(newValue)
 
 			return
 		} else {
 			;(this.groupConfig as any)[key] = newValue
 			this.#saveConfig()
+
+			// Changing never_lock changes whether the lock is suppressed for the member surfaces
+			if (key === 'never_lock') {
+				this.#applyLockedToSurfaces()
+			}
 
 			return
 		}
@@ -435,37 +443,28 @@ export class SurfaceGroup {
 	 * @returns whether the locked state changed
 	 */
 	setLocked(locked: boolean): boolean {
-		// If an auto-group, just pass to the sole surface
-		if (this.isAutoGroup) {
-			return this.surfaceHandlers[0].setLocked(locked)
-		}
-
-		// // skip if surface can't be locked
-		// if (this.#surfaceConfig.config.never_lock) return
-
 		if (this.#isLocked === !!locked) {
 			return false
 		}
 
-		// Track the locked status
+		// Track the intended locked status. `never_lock` is applied when pushing to the surfaces,
+		// so the intent is still remembered while suppressed and can be restored if it is toggled off.
 		this.#isLocked = !!locked
 
-		// If it changed, redraw
-		for (const surface of this.surfaceHandlers) {
-			surface.setLocked(locked)
-		}
+		this.#applyLockedToSurfaces()
 
 		return true
 	}
 
 	/**
-	 * Ensure all surfaces in this group have the correct locked state
+	 * Push the effective locked state to all surfaces in this group.
+	 * A group configured to never lock is always pushed as unlocked.
 	 */
-	syncLocked(): void {
-		if (this.isAutoGroup) return
+	#applyLockedToSurfaces(): void {
+		const locked = this.#isLocked && !this.groupConfig.never_lock
 
 		for (const surface of this.surfaceHandlers) {
-			surface.setLocked(this.#isLocked)
+			surface.setLocked(locked)
 		}
 	}
 
@@ -494,14 +493,13 @@ export class SurfaceGroup {
 	}
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function validateGroupConfigValue(pageStore: IPageStore, key: string, value: any): any {
+export function validateGroupConfigValue(pageStore: IPageStore, key: string, value: JsonValue | undefined): JsonValue {
 	switch (key) {
 		case 'use_last_page': {
 			return Boolean(value)
 		}
 		case 'startup_page_id': {
-			value = String(value)
+			value = stringifyVariableValue(value) ?? ''
 			if (!pageStore.isPageIdValid(value)) {
 				throw new Error(`Invalid startup_page "${value}"`)
 			}
@@ -509,13 +507,16 @@ export function validateGroupConfigValue(pageStore: IPageStore, key: string, val
 			return value
 		}
 		case 'last_page_id': {
-			value = String(value)
+			value = stringifyVariableValue(value) ?? ''
 			if (!pageStore.isPageIdValid(value)) {
 				throw new Error(`Invalid current_page "${value}"`)
 			}
 
 			return value
 		}
+		case 'never_lock':
+			return Boolean(value)
+
 		case 'restrict_pages':
 			return Boolean(value)
 

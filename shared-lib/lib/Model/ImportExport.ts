@@ -12,12 +12,15 @@ export const zodClientImportOrResetSelection = z.object({
 	buttons: zodImportOrResetType,
 	surfaces: z.object({
 		known: zodImportOrResetType,
+		instances: zodImportOrResetType,
+		remote: zodImportOrResetType,
 	}),
 	triggers: zodImportOrResetType,
 	customVariables: zodImportOrResetType,
 	expressionVariables: zodImportOrResetType,
 	connections: zodResetType, // Future: This should become zodImportOrResetType, once there is a plan for how that should work
 	userconfig: zodResetType, // Future: This should become zodImportOrResetType, or more likely an object describing subsections
+	imageLibrary: zodImportOrResetType,
 })
 
 export type ClientImportOrResetSelection = z.infer<typeof zodClientImportOrResetSelection>
@@ -28,15 +31,28 @@ const zodQueryBoolean = z.preprocess((val) => {
 	}
 	return val
 }, z.boolean())
+const zodQueryNull = z.preprocess((val) => {
+	if (typeof val === 'string') {
+		return val === '' ? null : val
+	}
+	return val
+}, z.null())
 
 export const zodClientExportSelection = z.object({
 	buttons: zodQueryBoolean,
 	connections: zodQueryBoolean,
-	surfaces: zodQueryBoolean,
+	surfaces: z
+		.object({
+			known: zodQueryBoolean,
+			instances: zodQueryBoolean,
+			remote: zodQueryBoolean,
+		})
+		.or(zodQueryNull),
 	triggers: zodQueryBoolean,
 	customVariables: zodQueryBoolean,
 	expressionVariables: zodQueryBoolean,
 	includeSecrets: zodQueryBoolean,
+	imageLibrary: zodQueryBoolean,
 	format: zodExportFormat,
 	filename: z.string().optional(),
 })
@@ -57,10 +73,13 @@ export interface ClientImportObject {
 	type: 'page' | 'full'
 	connections: Record<string, ClientImportObjectInstance>
 	buttons: boolean
-	surfaces: boolean
+	surfacesKnown: boolean
+	surfacesInstances: boolean
+	surfacesRemote: boolean
 	triggers: Record<string, { name: string }> | null
 	customVariables: boolean
 	expressionVariables: boolean
+	imageLibrary: boolean
 	oldPageNumber?: number
 	page?: ClientPageInfo
 	pages?: Record<number, ClientPageInfo>

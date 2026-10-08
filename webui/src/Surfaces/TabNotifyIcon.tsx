@@ -1,18 +1,31 @@
-import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
 import { observer } from 'mobx-react-lite'
-import React, { useContext } from 'react'
+import { useContext } from 'react'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { useUdevRulesStatus } from '~/Hooks/useUdevRulesStatus'
 import { useMissingVersionsCount } from '~/Instances/MissingVersionsWarning'
 import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 
 export const SurfacesTabNotifyIcon = observer(function SurfacesTabNotifyIcon(): JSX.Element | null {
-	const { surfaces } = useContext(RootAppStoreContext)
+	const { surfaces, surfaceInstances } = useContext(RootAppStoreContext)
 
 	const updateCount = surfaces.countFirmwareUpdates()
-	if (updateCount === 0) return null
+	const missingCount = useMissingVersionsCount(ModuleInstanceType.Surface, surfaceInstances.instances)
+
+	const udevStatus = useUdevRulesStatus()
+	const udevNeedsApply = !!udevStatus?.supported && udevStatus.needsApply
+
+	const count = updateCount + missingCount + (udevNeedsApply ? 1 : 0)
+	if (count === 0) return null
+
+	const lines = [
+		updateCount > 0 ? `${updateCount} surfaces have firmware updates available` : null,
+		missingCount > 0 ? `Missing ${missingCount} needed modules` : null,
+		udevNeedsApply ? `USB permissions need updating` : null,
+	].filter(Boolean)
 
 	return (
-		<span className="notification-count" title={`${updateCount} surfaces have firmware updates available`}>
-			{updateCount}
+		<span className="notification-count" title={lines.join(', ')}>
+			{count}
 		</span>
 	)
 })

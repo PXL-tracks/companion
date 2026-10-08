@@ -1,17 +1,27 @@
-import React, { useCallback, useContext } from 'react'
-import { DropdownInputField, MultiDropdownInputField } from '~/Components/index.js'
-import { useComputed } from '~/Resources/util.js'
-import TimePicker from 'react-time-picker'
-import DatePicker from 'react-date-picker'
-import type { InternalInputField } from '@companion-app/shared/Model/Options.js'
-import type { DropdownChoice } from '@companion-module/base'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import { observer } from 'mobx-react-lite'
-import type { TriggerCollection } from '@companion-app/shared/Model/TriggerModel.js'
-import type { ConnectionCollection } from '@companion-app/shared/Model/Connections.js'
+import { useCallback, useContext } from 'react'
+import type { CollectionBase } from '@companion-app/shared/Model/Collections.js'
+import type { DropdownChoice } from '@companion-app/shared/Model/Common.js'
+import type { ClientConnectionConfig } from '@companion-app/shared/Model/Connections.js'
+import type { InternalInputField, InternalInputFieldSurfaceSerial } from '@companion-app/shared/Model/Options.js'
+import { HorizontalAlignmentInputField, VerticalAlignmentInputField } from '~/Components/AlignmentInputField.js'
+import { DateInputField } from '~/Components/DateInputField.js'
+import type { DropdownChoicesOrGroups } from '~/Components/DropdownChoices.js'
+import { DropdownInputField } from '~/Components/DropdownInputField.js'
+import { ImageInputField } from '~/Components/ImageInputField.js'
+import { MultiDropdownInputField } from '~/Components/MultiDropdownInputField.js'
+import { TimeInputField } from '~/Components/TimeInputField.js'
+import VariableInputGroup from '~/Components/VariableInputGroup.js'
+import { unwrapPastedVariableReference } from '~/Components/variablePaste.js'
+import { VariablePickerField } from '~/Components/VariablePickerField.js'
+import { groupItemsByCollection } from '~/Helpers/CollectionGrouping.js'
+import { useComputed } from '~/Resources/util.js'
+import type { GenericCollectionsStore } from '~/Stores/GenericCollectionsStore'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
 import type { LocalVariablesStore } from './LocalVariablesStore'
 
 export function InternalModuleField(
+	id: string | undefined,
 	option: InternalInputField,
 	isLocatedInGrid: boolean,
 	localVariablesStore: LocalVariablesStore | null,
@@ -24,6 +34,7 @@ export function InternalModuleField(
 		case 'internal:connection_id':
 			return (
 				<InternalConnectionIdDropdown
+					id={id}
 					disabled={readonly}
 					value={value}
 					includeAll={option.includeAll}
@@ -35,6 +46,7 @@ export function InternalModuleField(
 		case 'internal:page':
 			return (
 				<InternalPageDropdown
+					id={id}
 					disabled={readonly}
 					isLocatedInGrid={isLocatedInGrid}
 					includeDirection={option.includeDirection}
@@ -46,15 +58,19 @@ export function InternalModuleField(
 		case 'internal:custom_variable':
 			return (
 				<InternalCustomVariableDropdown
+					id={id}
 					disabled={readonly}
 					value={value}
 					setValue={setValue}
 					includeNone={option.includeNone}
 				/>
 			)
+		case 'internal:variable_value':
+			return <VariableInputGroup id={id} value={value} setValue={setValue} disabled={readonly} />
 		case 'internal:variable':
 			return (
 				<InternalVariableDropdown
+					id={id}
 					disabled={readonly}
 					value={value}
 					setValue={setValue}
@@ -65,17 +81,21 @@ export function InternalModuleField(
 		case 'internal:surface_serial':
 			return (
 				<InternalSurfaceBySerialDropdown
+					id={id}
 					disabled={readonly}
 					isLocatedInGrid={isLocatedInGrid}
 					value={value}
 					setValue={setValue}
 					includeSelf={option.includeSelf}
-					useRawSurfaces={option.useRawSurfaces}
+					listMode={option.listMode}
 				/>
 			)
+		case 'internal:outbound_surface_id':
+			return <OutboundSurfaceDropdown id={id} disabled={readonly} value={value} setValue={setValue} />
 		case 'internal:trigger':
 			return (
 				<InternalTriggerDropdown
+					id={id}
 					disabled={readonly}
 					isLocatedInGrid={isLocatedInGrid}
 					value={value}
@@ -84,13 +104,29 @@ export function InternalModuleField(
 				/>
 			)
 		case 'internal:trigger_collection':
-			return <InternalTriggerCollectionDropdown disabled={readonly} value={value} setValue={setValue} />
+			return <InternalTriggerCollectionDropdown id={id} disabled={readonly} value={value} setValue={setValue} />
 		case 'internal:connection_collection':
-			return <InternalConnectionCollectionDropdown disabled={readonly} value={value} setValue={setValue} />
+			return <InternalConnectionCollectionDropdown id={id} disabled={readonly} value={value} setValue={setValue} />
 		case 'internal:time':
-			return <InternalTimePicker disabled={readonly} value={value} setValue={setValue} />
+			return <TimeInputField id={id} disabled={readonly} value={value} setValue={setValue} />
 		case 'internal:date':
-			return <InternalDatePicker disabled={readonly} value={value} setValue={setValue} />
+			return <DateInputField id={id} disabled={readonly} value={value} setValue={setValue} />
+		case 'internal:horizontal-alignment':
+			return <HorizontalAlignmentInputField id={id} value={value} setValue={setValue} disabled={readonly} />
+		case 'internal:vertical-alignment':
+			return <VerticalAlignmentInputField id={id} value={value} setValue={setValue} disabled={readonly} />
+		case 'internal:image-file': {
+			return (
+				<ImageInputField
+					id={id}
+					value={value}
+					setValue={setValue}
+					disabled={readonly}
+					min={option.min}
+					max={option.max}
+				/>
+			)
+		}
 		default:
 			// Use fallback
 			return null
@@ -98,6 +134,7 @@ export function InternalModuleField(
 }
 
 interface InternalConnectionIdDropdownProps {
+	id: string | undefined
 	includeAll: boolean | undefined
 	value: any
 	setValue: (value: any) => void
@@ -107,6 +144,7 @@ interface InternalConnectionIdDropdownProps {
 }
 
 const InternalConnectionIdDropdown = observer(function InternalConnectionIdDropdown({
+	id,
 	includeAll,
 	value,
 	setValue,
@@ -116,28 +154,55 @@ const InternalConnectionIdDropdown = observer(function InternalConnectionIdDropd
 }: Readonly<InternalConnectionIdDropdownProps>) {
 	const { connections } = useContext(RootAppStoreContext)
 
-	const choices = useComputed(() => {
-		const connectionChoices = []
+	const choices = useComputed((): DropdownChoicesOrGroups => {
+		const allConnections = connections.sortedConnections()
+
+		// Filter and convert connections to items for grouping
+		const filterItem = (config: ClientConnectionConfig): boolean => {
+			if (filterActionsRecorder && !config.hasRecordActionsHandler) return false
+			return true
+		}
+
+		const getItemChoice = (config: ClientConnectionConfig): DropdownChoice => ({
+			id: config.id,
+			label: config.label ?? config.id,
+		})
+
+		const groupsOrItems = groupItemsByCollection(
+			connections.rootCollections(),
+			allConnections,
+			getItemChoice,
+			filterItem
+		)
+
+		// Add "All Connections" option at the beginning if requested
 		if (includeAll) {
-			connectionChoices.push({ id: 'all', label: 'All Connections' })
+			const allChoice: DropdownChoice = { id: 'all', label: 'All Connections' }
+
+			return [allChoice, ...groupsOrItems]
 		}
 
-		for (const [id, config] of connections.connections.entries()) {
-			if (filterActionsRecorder && !config.hasRecordActionsHandler) continue
-
-			connectionChoices.push({ id, label: config.label ?? id })
-		}
-		return connectionChoices
+		return groupsOrItems
 	}, [connections, includeAll, filterActionsRecorder])
 
 	if (multiple) {
-		return <MultiDropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+		return (
+			<MultiDropdownInputField
+				htmlName={id}
+				disabled={disabled}
+				value={value}
+				choices={choices}
+				sortSelection
+				setValue={setValue}
+			/>
+		)
 	} else {
-		return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+		return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
 	}
 })
 
 interface InternalPageDropdownProps {
+	id: string | undefined
 	isLocatedInGrid: boolean
 	includeStartup: boolean | undefined
 	includeDirection: boolean | undefined
@@ -147,6 +212,7 @@ interface InternalPageDropdownProps {
 }
 
 export const InternalPageDropdown = observer(function InternalPageDropdown({
+	id,
 	isLocatedInGrid,
 	includeStartup,
 	includeDirection,
@@ -175,10 +241,11 @@ export const InternalPageDropdown = observer(function InternalPageDropdown({
 		return choices
 	}, [pages, isLocatedInGrid, includeStartup, includeDirection])
 
-	return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+	return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
 })
 
 interface InternalPageIdDropdownProps {
+	id: string | undefined
 	// isLocatedInGrid: boolean
 	includeStartup: boolean | undefined
 	includeDirection: boolean | undefined
@@ -189,6 +256,7 @@ interface InternalPageIdDropdownProps {
 }
 
 export const InternalPageIdDropdown = observer(function InternalPageDropdown({
+	id,
 	// isLocatedInGrid,
 	includeStartup,
 	includeDirection,
@@ -219,13 +287,16 @@ export const InternalPageIdDropdown = observer(function InternalPageDropdown({
 	}, [pages, /*isLocatedInGrid,*/ includeStartup, includeDirection])
 
 	if (multiple === undefined || !multiple) {
-		return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+		return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
 	} else {
-		return <MultiDropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+		return (
+			<MultiDropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
+		)
 	}
 })
 
 interface InternalCustomVariableDropdownProps {
+	id: string | undefined
 	value: any
 	setValue: (value: any) => void
 	includeNone: boolean | undefined
@@ -233,6 +304,7 @@ interface InternalCustomVariableDropdownProps {
 }
 
 export const InternalCustomVariableDropdown = observer(function InternalCustomVariableDropdown({
+	id,
 	value,
 	setValue,
 	includeNone,
@@ -240,42 +312,49 @@ export const InternalCustomVariableDropdown = observer(function InternalCustomVa
 }: Readonly<InternalCustomVariableDropdownProps>) {
 	const { variablesStore: customVariables } = useContext(RootAppStoreContext)
 
-	const choices = useComputed(() => {
-		const choices: DropdownChoice[] = []
-
-		if (includeNone) {
-			choices.push({
-				id: '',
-				label: 'None',
-			})
+	const choices = useComputed((): DropdownChoicesOrGroups => {
+		interface MinimalCustomVariable {
+			id: string
+			description: string
+			collectionId: string | null
 		}
 
-		const customVariablesSorted = Array.from(customVariables.customVariables.entries()).sort(
-			(a, b) => a[1].sortOrder - b[1].sortOrder
+		// Convert custom variables Map to array of objects with id field
+		const allCustomVariables = Array.from(customVariables.customVariables.entries()).map(
+			([id, info]): MinimalCustomVariable => ({
+				id,
+				description: info.description,
+				collectionId: info.collectionId || null,
+			})
 		)
 
-		for (const [id, info] of customVariablesSorted) {
-			choices.push({
-				id,
-				label: info.description,
-			})
+		const getItemChoice = (variable: MinimalCustomVariable): DropdownChoice => ({
+			id: variable.id,
+			label: variable.description,
+		})
+
+		const groupsOrItems = groupItemsByCollection(
+			customVariables.rootCustomVariableCollections(),
+			allCustomVariables,
+			getItemChoice
+		)
+
+		// Add "None" option at the beginning if requested
+		if (includeNone) {
+			const noneChoice: DropdownChoice = { id: '', label: 'None' }
+			return [noneChoice, ...groupsOrItems]
 		}
 
-		return choices
+		return groupsOrItems
 	}, [customVariables, includeNone])
 
 	return (
-		<DropdownInputField
-			disabled={disabled}
-			value={value ?? ''}
-			choices={choices}
-			setValue={setValue}
-			fancyFormat={true}
-		/>
+		<VariablePickerField htmlName={id} disabled={disabled} value={value ?? ''} choices={choices} setValue={setValue} />
 	)
 })
 
 interface InternalVariableDropdownProps {
+	id: string | undefined
 	value: any
 	setValue: (value: any) => void
 	disabled: boolean
@@ -284,6 +363,7 @@ interface InternalVariableDropdownProps {
 }
 
 const InternalVariableDropdown = observer(function InternalVariableDropdown({
+	id,
 	value,
 	setValue,
 	disabled,
@@ -311,7 +391,7 @@ const InternalVariableDropdown = observer(function InternalVariableDropdown({
 			const id = `${variable.connectionLabel}:${variable.name}`
 			choices.push({
 				id,
-				label: variable.label,
+				label: variable.description,
 			})
 		}
 
@@ -320,21 +400,11 @@ const InternalVariableDropdown = observer(function InternalVariableDropdown({
 		return choices
 	}, [baseVariableDefinitions, localVariableDefinitions])
 
-	const hasMatch = choices.find((c) => c.id === value)
-
-	const onPasteIntercept = useCallback((pastedValue: string) => {
-		let value = pastedValue.trim()
-		if (value.length === 0) return pastedValue
-		if (value.startsWith('$(') && value.endsWith(')')) {
-			value = value.slice(2, -1)
-		}
-
-		return value
-	}, [])
+	const onPasteIntercept = useCallback((pastedValue: string) => unwrapPastedVariableReference(pastedValue), [])
 
 	return (
-		<DropdownInputField
-			className={hasMatch ? '' : 'select-warning'}
+		<VariablePickerField
+			htmlName={id}
 			disabled={disabled}
 			value={value ?? ''}
 			choices={choices}
@@ -342,27 +412,28 @@ const InternalVariableDropdown = observer(function InternalVariableDropdown({
 			regex="/^([\w-_]+):([a-zA-Z0-9-_\.]+)$/"
 			allowCustom /* Allow specifying a variable which doesnt currently exist, perhaps as something is offline */
 			onPasteIntercept={onPasteIntercept}
-			fancyFormat={true}
 		/>
 	)
 })
 
 interface InternalSurfaceBySerialDropdownProps {
+	id: string | undefined
 	isLocatedInGrid: boolean
 	value: any
 	setValue: (value: any) => void
 	disabled: boolean
 	includeSelf: boolean | undefined
-	useRawSurfaces: boolean | undefined
+	listMode: InternalInputFieldSurfaceSerial['listMode']
 }
 
 const InternalSurfaceBySerialDropdown = observer(function InternalSurfaceBySerialDropdown({
+	id,
 	isLocatedInGrid,
 	value,
 	setValue,
 	disabled,
 	includeSelf,
-	useRawSurfaces,
+	listMode,
 }: InternalSurfaceBySerialDropdownProps) {
 	const { surfaces } = useContext(RootAppStoreContext)
 
@@ -372,16 +443,7 @@ const InternalSurfaceBySerialDropdown = observer(function InternalSurfaceBySeria
 			choices.push({ id: 'self', label: 'Current surface' })
 		}
 
-		if (!useRawSurfaces) {
-			for (const group of surfaces.store.values()) {
-				if (!group) continue
-
-				choices.push({
-					label: group.displayName,
-					id: group.id,
-				})
-			}
-		} else {
+		if (listMode === 'surfaces') {
 			for (const group of surfaces.store.values()) {
 				if (!group) continue
 
@@ -392,15 +454,64 @@ const InternalSurfaceBySerialDropdown = observer(function InternalSurfaceBySeria
 					})
 				}
 			}
+		} else {
+			for (const group of surfaces.store.values()) {
+				if (!group) continue
+
+				choices.push({
+					label: group.displayName,
+					id: group.id,
+				})
+
+				// Also offer the individual member surfaces. Auto-groups are skipped as their id is the
+				// same as their sole surface, which would produce a duplicate entry.
+				if (listMode === 'groups-and-surfaces' && !group.isAutoGroup) {
+					for (const surface of group.surfaces) {
+						choices.push({
+							label: `${group.displayName} - ${surface.displayName}`,
+							id: surface.id,
+						})
+					}
+				}
+			}
 		}
 
 		return choices
-	}, [surfaces, isLocatedInGrid, includeSelf, useRawSurfaces])
+	}, [surfaces, isLocatedInGrid, includeSelf, listMode])
 
-	return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+	return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
+})
+
+interface OutboundSurfaceDropdownProps {
+	id: string | undefined
+	value: any
+	setValue: (value: any) => void
+	disabled: boolean
+}
+
+const OutboundSurfaceDropdown = observer(function OutboundSurfaceDropdown({
+	id,
+	value,
+	setValue,
+	disabled,
+}: Readonly<OutboundSurfaceDropdownProps>) {
+	const { surfaces } = useContext(RootAppStoreContext)
+
+	const choices = useComputed((): DropdownChoice[] => {
+		return surfaces.outboundSurfaces
+			.values()
+			.map((surface) => ({
+				id: surface.id,
+				label: surface.displayName || surface.id,
+			}))
+			.toArray()
+	}, [surfaces])
+
+	return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
 })
 
 interface InternalTriggerDropdownProps {
+	id: string | undefined
 	isLocatedInGrid: boolean
 	value: any
 	setValue: (value: any) => void
@@ -409,6 +520,7 @@ interface InternalTriggerDropdownProps {
 }
 
 const InternalTriggerDropdown = observer(function InternalTriggerDropdown({
+	id,
 	isLocatedInGrid,
 	value,
 	setValue,
@@ -417,143 +529,108 @@ const InternalTriggerDropdown = observer(function InternalTriggerDropdown({
 }: InternalTriggerDropdownProps) {
 	const { triggersList } = useContext(RootAppStoreContext)
 
-	const choices = useComputed(() => {
-		const choices: DropdownChoice[] = []
+	const choices = useComputed((): DropdownChoicesOrGroups => {
+		const selfChoices: DropdownChoice[] = []
+
+		// Add self options if needed
 		if (!isLocatedInGrid && includeSelf) {
 			if (includeSelf === 'abort') {
-				choices.push({ id: 'self', label: 'Current trigger: except this run' })
-				choices.push({ id: 'self:only-this-run', label: 'Current trigger: only this run' })
-				choices.push({ id: 'self:all-runs', label: 'Current trigger: all runs' })
+				selfChoices.push({ id: 'self', label: 'Current trigger: except this run' })
+				selfChoices.push({ id: 'self:only-this-run', label: 'Current trigger: only this run' })
+				selfChoices.push({ id: 'self:all-runs', label: 'Current trigger: all runs' })
 			} else {
-				choices.push({ id: 'self', label: 'Current trigger' })
+				selfChoices.push({ id: 'self', label: 'Current trigger' })
 			}
 		}
 
-		for (const [id, trigger] of triggersList.triggers.entries()) {
-			choices.push({
-				id: id,
-				label: trigger.name || `Trigger #${id}`,
-			})
+		interface MinimalTrigger {
+			id: string
+			name: string
+			collectionId: string | null
 		}
-		return choices
+
+		// Convert triggers Map to array of objects with id field
+		const allTriggers = Array.from(triggersList.triggers.entries()).map(([id, trigger]): MinimalTrigger => ({
+			id,
+			name: trigger.name,
+			collectionId: trigger.collectionId || null,
+		}))
+
+		const getItemChoice = (trigger: MinimalTrigger): DropdownChoice => ({
+			id: trigger.id,
+			label: trigger.name || `Trigger #${trigger.id}`,
+		})
+
+		const groupsOrItems = groupItemsByCollection(triggersList.rootCollections(), allTriggers, getItemChoice)
+
+		// Prepend self choices at the top (before all groups)
+		return [...selfChoices, ...groupsOrItems]
 	}, [triggersList, isLocatedInGrid, includeSelf])
 
-	return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+	return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
 })
 
 interface InternalTriggerCollectionDropdownProps {
+	id: string | undefined
 	value: any
 	setValue: (value: any) => void
 	disabled: boolean
 }
 
 const InternalTriggerCollectionDropdown = observer(function InternalTriggerCollectionDropdown({
+	id,
 	value,
 	setValue,
 	disabled,
 }: InternalTriggerCollectionDropdownProps) {
 	const { triggersList } = useContext(RootAppStoreContext)
 
-	const choices = useComputed(() => {
-		const choices: DropdownChoice[] = []
+	const choices = useCollectionChoices(triggersList)
 
-		const processCollections = (collections: TriggerCollection[]) => {
-			for (const collection of collections) {
-				choices.push({
-					id: collection.id,
-					label: collection.label || `Collection #${collection.id}`,
-				})
-			}
-		}
-		processCollections(triggersList.rootCollections())
-
-		return choices
-	}, [triggersList])
-
-	return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
+	return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
 })
 
 interface InternalConnectionCollectionDropdownProps {
+	id: string | undefined
 	value: any
 	setValue: (value: any) => void
 	disabled: boolean
 }
 
 const InternalConnectionCollectionDropdown = observer(function InternalConnectionCollectionDropdown({
+	id,
 	value,
 	setValue,
 	disabled,
 }: InternalConnectionCollectionDropdownProps) {
 	const { connections } = useContext(RootAppStoreContext)
 
-	const choices = useComputed(() => {
+	const choices = useCollectionChoices(connections)
+
+	return <DropdownInputField htmlName={id} disabled={disabled} value={value} choices={choices} setValue={setValue} />
+})
+
+function useCollectionChoices(listStore: GenericCollectionsStore<any>): DropdownChoice[] {
+	return useComputed(() => {
 		const choices: DropdownChoice[] = []
 
-		const processCollections = (collections: ConnectionCollection[]) => {
+		const processCollections = (collections: CollectionBase<any>[], parentPath: string[]) => {
 			for (const collection of collections) {
+				const label = collection.label || `Collection #${collection.id}`
+				const fullPath = [...parentPath, label].join(' / ')
+
 				choices.push({
 					id: collection.id,
-					label: collection.label || `Collection #${collection.id}`,
+					label: fullPath,
 				})
+
 				if (collection.children) {
-					processCollections(collection.children)
+					processCollections(collection.children, [...parentPath, label])
 				}
 			}
 		}
-		processCollections(connections.rootCollections())
+		processCollections(listStore.rootCollections(), [])
 
 		return choices
-	}, [connections])
-
-	return <DropdownInputField disabled={disabled} value={value} choices={choices} setValue={setValue} />
-})
-
-interface InternalTimePickerProps {
-	value: any
-	setValue: (value: any) => void
-	disabled: boolean
-}
-
-function InternalTimePicker({ value, setValue, disabled }: InternalTimePickerProps) {
-	return (
-		<>
-			<TimePicker
-				disabled={disabled}
-				format="HH:mm:ss"
-				maxDetail="second"
-				required
-				value={value}
-				onChange={setValue}
-				className={''}
-				openClockOnFocus={false}
-			/>
-		</>
-	)
-}
-
-interface InternalDatePickerProps {
-	value: any
-	setValue: (value: any) => void
-	disabled: boolean
-}
-
-function InternalDatePicker({ value, setValue, disabled }: InternalDatePickerProps) {
-	return (
-		<>
-			<DatePicker
-				disabled={disabled}
-				format="yyyy-M-dd"
-				minDate={new Date()}
-				required
-				value={value}
-				onChange={setValue}
-				className={''}
-				showLeadingZeros={true}
-				calendarIcon={null}
-				yearPlaceholder="yyyy"
-				monthPlaceholder="mm"
-				dayPlaceholder="dd"
-			/>
-		</>
-	)
+	}, [listStore])
 }

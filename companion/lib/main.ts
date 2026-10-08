@@ -1,25 +1,28 @@
 /* eslint-disable n/no-process-exit */
 
-// Setup some fixes before loading any imports
-import './Resources/FixImports.js'
-
 // Setup segfault handler
+// prettier-ignore
 import '@julusian/segfault-raub'
-
 // Setup logging before anything else runs
+// prettier-ignore
 import logger from './Log/Controller.js'
+// End of special setup imports
 
+import net, { isIPv6 } from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
 // Now we can think about startup
 import { Command } from 'commander'
-import { Registry } from './Registry.js'
-import os from 'os'
-import path from 'path'
-import fs from 'fs-extra'
 import envPaths from 'env-paths'
+import fs from 'fs-extra'
 import { nanoid } from 'nanoid'
-import { ConfigReleaseDirs } from '@companion-app/shared/Paths.js'
 import { type SyslogTransportOptions } from 'winston-syslog'
-import net from 'net'
+import { ModuleInstanceType } from '@companion-app/shared/Model/Instance.js'
+import { ConfigReleaseDirs } from '@companion-app/shared/Paths.js'
+import { registerLaunchOptions } from './LaunchOptionsCli.js'
+import { Registry } from './Registry.js'
+import { DISABLE_IPv6, GLOBAL_BIND_ADDRESS } from './Resources/Constants.js'
+import { isPackaged, isRunningUnderLauncher } from './Resources/Util.js'
 
 const program = new Command()
 
@@ -29,27 +32,20 @@ program.command('check-launches', { hidden: true }).action(() => {
 	process.exit(89)
 })
 
+// Server-only flags that the headless `config-tool` does not manage. These are declared here
+// rather than in the shared list, since the config tool never reads or generates them.
 program
 	.option('--list-interfaces', 'List the available network interfaces that can be passed to --admin-interface')
-	.option('--admin-port <number>', 'Set the port the admin ui should bind to', '8000')
-	.option(
-		'--admin-interface <string>',
-		'Set the interface the admin ui should bind to. The first ip on this interface will be used'
-	)
-	.option('--admin-address <string>', 'Set the ip address the admin ui should bind to (default: "0.0.0.0")')
 	.option(
 		'--config-dir <string>',
 		'Use the specified directory for storing configuration. The default path varies by system, and is different to 2.2 (the old path will be used if existing config is found)'
 	)
-	.option('--extra-module-path <string>', 'Search an extra directory for modules to load')
 	.option('--machine-id <string>', 'Unique id for this installation')
-	.option('--log-level <string>', 'Log level to output to console')
 	.option('--disable-admin-password', 'Disables password lockout for the admin UI')
-	.option('--syslog-enable', 'Enable syslog transport')
-	.option('--syslog-host <string>', 'Syslog server to write to (default: localhost)')
-	.option('--syslog-port <string>', 'Port on syslog server to write to')
-	.option('--syslog-tcp', 'Use TCP for transport (default: udp)')
-	.option('--syslog-localhost <string>', 'Hostname of this machine')
+
+// Register the config-tool-managed options from the shared single-source-of-truth list. This
+// keeps the flags the server accepts in sync with what the `config-tool` package generates.
+registerLaunchOptions(program)
 
 program.command('start', { isDefault: true, hidden: true }).action(() => {
 	const options = program.opts()
@@ -99,7 +95,12 @@ program.command('start', { isDefault: true, hidden: true }).action(() => {
 		process.exit(1)
 	}
 
-	let adminIp = options.adminAddress || '::' // default to admin global
+	let adminIp = options.adminAddress || GLOBAL_BIND_ADDRESS // default to admin global
+
+	if (DISABLE_IPv6 && isIPv6(adminIp)) {
+		console.error(`IPv6 has been disabled but has been specified as the admin address`)
+		process.exit(1)
+	}
 
 	if (options.adminInterface) {
 		adminIp = null
@@ -222,16 +223,38 @@ program.command('start', { isDefault: true, hidden: true }).action(() => {
 		}
 	}
 
-	const registry = new Registry(
+	const isEnvTruthy = (value: string | undefined): boolean =>
+		['1', 'true', 'yes'].includes((value ?? '').toLowerCase().trim())
+
+	const registry = new Registry({
 		configDir,
-		{
-			connection: path.join(rootConfigDir, 'modules'), // For backwards compatibility
+		// The launcher writes rotated log files into `logs` alongside the config dirs.
+		// Only populated when running under the launcher, as that is the only case where these files exist.
+		logsDir: isRunningUnderLauncher() ? path.join(rootConfigDir, 'logs') : undefined,
+		modulesDirs: {
+			[ModuleInstanceType.Connection]: path.join(rootConfigDir, 'modules'), // Naming for backwards compatibility
+			[ModuleInstanceType.Surface]: path.join(rootConfigDir, 'surfaces'),
 		},
-		machineId
-	)
+		builtinModuleDirs: {
+			[ModuleInstanceType.Connection]: null,
+			[ModuleInstanceType.Surface]: isPackaged()
+				? path.join(import.meta.dirname, 'builtin-surfaces')
+				: path.join(import.meta.dirname, '../../.cache/builtin-surfaces'),
+		},
+		udevRulesDir: path.join(rootConfigDir, 'udev-rules'),
+		machineId,
+		options: {
+			notifications: options.notifications ?? true, // options magically generates notifications rather than noNotifications (and will make it true if CL flag is omitted)
+			enableShellCommandSupport:
+				!!options.enableShellCommandSupport || isEnvTruthy(process.env.COMPANION_ENABLE_SHELL_COMMAND_SUPPORT),
+			enableRestrictedModules:
+				!!options.enableRestrictedModules || isEnvTruthy(process.env.COMPANION_ENABLE_RESTRICTED_MODULES),
+			trustedProxies: options.trustedProxies ?? process.env.COMPANION_TRUSTED_PROXIES,
+		},
+	})
 
 	registry
-		.ready(options.extraModulePath, adminIp, options.adminPort)
+		.ready(options.extraModulePath, adminIp, Number(options.adminPort))
 		.then(() => {
 			console.log('Started')
 

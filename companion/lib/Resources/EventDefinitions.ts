@@ -1,5 +1,5 @@
+import os from 'node:os'
 import dayjs from 'dayjs'
-import os from 'os'
 import type { EventDefinition } from '@companion-app/shared/Model/Common.js'
 import type { EventInstance } from '@companion-app/shared/Model/EventModel.js'
 import type { InternalVisitor } from '../Internal/Types.js'
@@ -22,7 +22,7 @@ import type { InternalVisitor } from '../Internal/Types.js'
 
 export const EventDefinitions: Record<string, EventDefinition> = {
 	interval: {
-		name: 'Time Interval',
+		name: 'Time Interval: Fixed',
 		options: [
 			{
 				id: 'seconds',
@@ -31,11 +31,38 @@ export const EventDefinitions: Record<string, EventDefinition> = {
 				min: 1,
 				max: Number.MAX_SAFE_INTEGER,
 				default: 10,
+				clampValues: true,
+			},
+		],
+	},
+	intervalRandom: {
+		name: 'Time Interval: Random',
+		options: [
+			{
+				id: 'minimum',
+				type: 'number',
+				label: 'Minimum (seconds)',
+				tooltip: 'The shortest allowed interval, in seconds.',
+				min: 1,
+				max: Number.MAX_SAFE_INTEGER,
+				default: 3,
+				clampValues: true,
+			},
+			{
+				id: 'maximum',
+				type: 'number',
+				label: 'Maximum (seconds)',
+				tooltip: 'The longest allowed interval, in seconds.',
+				min: 1,
+				max: Number.MAX_SAFE_INTEGER,
+				default: 10,
+				clampValues: true,
 			},
 		],
 	},
 	timeofday: {
 		name: 'Time of Day',
+		description: 'This uses the timezone specified in the settings, or your system time if that is unset',
 		options: [
 			{
 				id: 'time',
@@ -46,15 +73,17 @@ export const EventDefinitions: Record<string, EventDefinition> = {
 				id: 'days',
 				label: 'Days',
 				type: 'multidropdown',
-				minChoicesForSearch: 10,
 				minSelection: 1,
-				choices: Array.from(Array(7).keys()).map((i) => {
-					return {
-						id: i,
-						label: dayjs().day(i).format('ddd'),
-					}
-				}),
-				default: Array.from(Array(7).keys()),
+				choices: Array(7)
+					.keys()
+					.toArray()
+					.map((i) => {
+						return {
+							id: i,
+							label: dayjs().day(i).format('ddd'),
+						}
+					}),
+				default: Array(7).keys().toArray(),
 			},
 		],
 	},
@@ -122,6 +151,7 @@ export const EventDefinitions: Record<string, EventDefinition> = {
 				min: 0,
 				max: Number.MAX_SAFE_INTEGER,
 				default: 10000,
+				clampValues: true,
 			},
 		],
 	},
@@ -135,6 +165,7 @@ export const EventDefinitions: Record<string, EventDefinition> = {
 				min: 0,
 				max: Number.MAX_SAFE_INTEGER,
 				default: 0,
+				clampValues: true,
 			},
 		],
 	},
@@ -142,8 +173,8 @@ export const EventDefinitions: Record<string, EventDefinition> = {
 		name: 'On any button press',
 		options: [],
 	},
-	button_depress: {
-		name: 'On any button depress',
+	button_release: {
+		name: 'On any button release',
 		options: [],
 	},
 	condition_true: {

@@ -13,8 +13,25 @@ export interface paths {
 		}
 		get?: never
 		put?: never
-		/** @description Check if updaes are available */
+		/** @description Check if updates are available */
 		post: operations['updates_post']
+		delete?: never
+		options?: never
+		head?: never
+		patch?: never
+		trace?: never
+	}
+	'/updates-old': {
+		parameters: {
+			query?: never
+			header?: never
+			path?: never
+			cookie?: never
+		}
+		get?: never
+		put?: never
+		/** @description Check if updates are available (legacy endpoint) */
+		post: operations['updates-old_post']
 		delete?: never
 		options?: never
 		head?: never
@@ -95,6 +112,99 @@ export interface operations {
 						/** @description OS release version */
 						release: string
 					}
+				}
+			}
+		}
+		responses: {
+			/** @description Default Response */
+			200: {
+				headers: {
+					[name: string]: unknown
+				}
+				content: {
+					'application/json': {
+						/** @description Indicates if the check was successful, or should be retried later */
+						ok: boolean
+						/** @description Update message */
+						message: string
+						/** @description Additional message (Supported since Companion 4.2) */
+						message2?: string
+						/**
+						 * Format: uri
+						 * @description Download URL
+						 */
+						link?: string
+					}
+				}
+			}
+			/** @description Validation error */
+			400: {
+				headers: {
+					[name: string]: unknown
+				}
+				content: {
+					'application/json': {
+						/** @description HTTP status code */
+						statusCode: number
+						/** @description Error code */
+						code?: string
+						/** @description Error name */
+						error: string
+						/** @description Error message */
+						message: string
+					}
+				}
+			}
+			/** @description Internal server error */
+			500: {
+				headers: {
+					[name: string]: unknown
+				}
+				content: {
+					'application/json': {
+						/** @description HTTP status code */
+						statusCode: number
+						/** @description Error code */
+						code?: string
+						/** @description Error name */
+						error: string
+						/** @description Error message */
+						message: string
+					}
+				}
+			}
+		}
+	}
+	'updates-old_post': {
+		parameters: {
+			query?: never
+			header?: never
+			path?: never
+			cookie?: never
+		}
+		requestBody: {
+			content: {
+				'application/json': {
+					/** @description Unique identifier for the installation */
+					id: string
+					/**
+					 * @description Name of the application
+					 * @enum {string}
+					 */
+					app_name: 'companion'
+					/** @description Current version of the application */
+					app_version: string
+					/** @description Full build number or identifier */
+					app_build: string
+					/** @description Operating system platform */
+					platform: string
+					/** @description System architecture */
+					arch: string
+					/** @description OS release version */
+					release: string
+					tz?: unknown
+					cpus?: unknown
+					type?: unknown
 				}
 			}
 		}
@@ -193,6 +303,15 @@ export interface operations {
 						/** @description Human-readable description of the surface (eg Stream Deck XL) */
 						description: string
 					}[]
+					/** @description List of setup surface modules */
+					surfaceModules?: {
+						/** @description Type of surface module used (eg elgato-stream-deck, loupedeck) */
+						moduleId: string
+						/** @description Map of surface module versions to count of instances */
+						counts: {
+							[key: string]: number
+						}
+					}[]
 					/** @description List of setup connections */
 					connections: {
 						/** @description Type of connection module used (eg bmd-atem, studiocoast-vmix) */
@@ -214,6 +333,20 @@ export interface operations {
 						cloudEnabled: boolean
 						/** @description Indicates if HTTPS is enabled */
 						httpsEnabled: boolean
+						/**
+						 * @description The default button decoration style
+						 * @enum {string}
+						 */
+						buttonDecoration?: 'topbar' | 'border' | 'none'
+						/**
+						 * @description Whether surface status icons are shown on buttons
+						 * @enum {string}
+						 */
+						buttonStatusIcons?: 'show' | 'none'
+						/** @description Indicates if the HTTP API is enabled */
+						httpEnabled?: boolean
+						/** @description Indicates if the deprecated HTTP API is enabled */
+						httpDeprecatedEnabled?: boolean
 						/** @description Indicates if TCP protocol is enabled */
 						tcpEnabled: boolean
 						/** @description Indicates if deprecated TCP protocol is enabled */
@@ -232,6 +365,10 @@ export interface operations {
 						emberPlusEnabled: boolean
 						/** @description Indicates if Art-Net protocol is enabled */
 						artnetEnabled: boolean
+						/** @description Indicates if satellite subscriptions are enabled */
+						satelliteSubscriptionsEnabled?: boolean
+						/** @description Indicates if mDNS announcements are enabled */
+						mdnsAnnouncementsEnabled?: boolean
 						/** @description Number of active connections configured */
 						connectionCount: number
 						/** @description Number of pages configured */
@@ -259,6 +396,10 @@ export interface operations {
 						}
 						/** @description Number of connected satellite clients */
 						connectedSatellites: number
+						/** @description Number of images in the image library */
+						imageLibraryCount?: number
+						/** @description Number of enabled backup rules */
+						enabledBackupRuleCount?: number
 					}
 				}
 			}
@@ -321,7 +462,7 @@ export interface operations {
 			path?: never
 			cookie?: never
 		}
-		requestBody?: {
+		requestBody: {
 			content: {
 				'application/json': unknown
 			}

@@ -5,13 +5,25 @@ h4 {
 	font-weight: bold;
 }
 
+blockquote {
+	margin: 0 0 1rem;
+	padding: 0.5rem 1rem;
+	border-left: 4px solid var(--cui-border-color);
+	border-radius: 0 4px 4px 0;
+	background-color: var(--cui-tertiary-bg);
+
+	> :last-child {
+		margin-bottom: 0;
+	}
+}
+
 .action-buttons {
 	text-align: center;
 
 	// make compact
 	width: 1px;
 
-	.btn {
+	.button {
 		text-transform: uppercase;
 
 		padding: 4px;
@@ -21,14 +33,8 @@ h4 {
 		}
 	}
 
-	.btn-primary.disabled {
+	.button-primary.disabled {
 		opacity: 0.5;
-	}
-}
-
-.alert {
-	&.margin-top {
-		margin-top: 1rem;
 	}
 }
 
@@ -39,22 +45,60 @@ h4 {
 h4,
 h5,
 legend {
-	.btn-group {
+	.button-group {
 		float: right;
 	}
-	.btn {
+	.button {
 		float: right;
 	}
 }
 
-.btn-group {
-	overflow: hidden;
+// special case, mainly for context help buttons: add button-inline to the <h4> or <h5> element to prevent buttons from floating right
+h4.button-inline,
+h5.button-inline {
+	display: flex;
+
+	.context-help-button,
+	.button,
+	.button-group {
+		display: inline-flex;
+		align-items: center;
+		padding-left: 0.75em;
+	}
+
+	.context-help-button-btn {
+		box-shadow: 1px 2px 1px 0px rgb(0 0 0 / 25%);
+
+		.svg-inline--fa {
+			width: 1.5em;
+			height: 1.5em;
+		}
+	}
+}
+
+// set the size of context-help-buttons for "settings category rows" and similar circumstances (doesn't actually affect the position)
+.help-button-float,
+.settings-category-row {
+	.context-help-button-btn {
+		width: 1.5em;
+		height: 1.5em;
+		box-shadow: 1px 2px 1px 0px rgb(0 0 0 / 25%);
+
+		.svg-inline--fa {
+			width: 1.5em;
+			height: 1.5em;
+		}
+	}
+}
+
+.button-group {
+	// do not set "overflow: hidden;" globally! if needed put it in an appropriate scope. If set here it prevents dropdown menus!
 	&.margin-bottom {
 		margin-bottom: 1rem;
 	}
 
-	.form-switch {
-		margin-top: 0.2rem;
+	.switch-input {
+		margin-top: 0.3rem;
 	}
 }
 
@@ -105,7 +149,7 @@ th {
 			opacity: 1;
 		}
 
-		&.btn-secondary {
+		&.button-secondary {
 			background-color: white;
 			color: black;
 		}
@@ -128,32 +172,14 @@ code {
 	cursor: pointer;
 }
 
-.btn-danger {
-	background-color: $primary;
+.rounded-start-0 {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
 }
 
-.btn-danger:hover {
-	background-color: color.adjust($primary, $lightness: -5%, $space: hsl);
-	color: #eee;
-	animation: blinker 0.3s linear infinite;
-}
-
-.btn-danger:disabled {
-	color: rgba(255, 255, 255, 0.8);
-}
-
-.btn-success:disabled {
-	color: rgba(255, 255, 255, 0.9);
-}
-
-.btn-info:disabled {
-	color: rgba(255, 255, 255, 0.9);
-}
-
-@keyframes blinker {
-	50% {
-		opacity: 0.8;
-	}
+.rounded-end-0 {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
 }
 
 .c-app {
@@ -167,42 +193,18 @@ code {
 	color: #111;
 }
 
-.modal {
-	max-height: 94vh;
-	margin-top: 6vh;
-
-	.modal-header {
-		h1,
-		h2,
-		h3,
-		h4,
-		h5 {
-			margin: 0;
-		}
+.markdown {
+	video {
+		width: 100%;
+		height: auto;
+		border-radius: 0.5rem;
+		margin: 1rem 0;
 	}
-}
 
-.btn-secondary {
-	background-color: color.adjust($secondary, $lightness: 15%, $space: hsl);
-}
-.btn-danger,
-.btn-success,
-.btn-info {
-	color: #fff;
-}
-
-.btn-success:hover {
-	color: #fff;
-}
-
-.btn.disabled.with-tooltip {
-	cursor: inherit;
-	pointer-events: inherit;
-}
-
-.btn-white.disabled {
-	opacity: 0.4;
-	border-color: transparent;
+	img {
+		max-width: 100%;
+		height: auto;
+	}
 }
 
 .text-right {
@@ -213,12 +215,6 @@ code {
 	color: #777;
 	text-align: center;
 	padding: 30px !important;
-}
-
-.form-check-label,
-.form-label {
-	font-weight: bold;
-	align-content: center;
 }
 
 .flex {
@@ -257,10 +253,6 @@ code {
 	border: none;
 }
 
-.btn-undefined:disabled {
-	border-color: transparent;
-}
-
 .nav-item {
 	&.hidden {
 		display: none;
@@ -275,10 +267,6 @@ code {
 
 .float-right {
 	float: right;
-}
-
-.form-check-label {
-	margin-left: 0.25rem;
 }
 
 table .td-reorder {
@@ -303,16 +291,6 @@ table .td-reorder {
 
 .form-range {
 	align-self: center;
-}
-
-.select-control {
-	// avoid blowout
-	display: grid;
-	grid-template-columns: minmax(0, 1fr);
-}
-
-.searchbox {
-	margin-bottom: 0.5rem;
 }
 
 svg.button-size {
@@ -348,4 +326,33 @@ svg.pad-left {
 
 .text-decoration-none {
 	--cui-link-decoration: none;
+}
+
+.field-with-expression {
+	display: flex;
+	gap: 0.5rem;
+
+	.expression-field {
+		flex-grow: 1;
+		min-width: 0;
+
+		align-self: center;
+	}
+
+	.expression-toggle-button {
+		justify-self: flex-end;
+		align-self: stretch;
+
+		.button {
+			height: 100%;
+			width: 3em;
+		}
+	}
+}
+
+.min-h-0 {
+	min-height: 0;
+}
+.min-w-0 {
+	min-width: 0;
 }

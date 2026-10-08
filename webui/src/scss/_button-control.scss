@@ -18,9 +18,23 @@
 		box-shadow: 0px 0px 0px 1px #d50215 inset;
 	}
 
+	&.copy-source .button-border {
+		border: 1px solid #1b7fc2 !important;
+		box-shadow: 0px 0px 0px 1px #1b7fc2 inset;
+	}
+
+	&.context-menu-open .button-border {
+		filter: brightness(0.55);
+	}
+
 	&.fixed .button-border {
 		width: 72px;
 		height: 72px;
+	}
+
+	&.fixed-100 .button-border {
+		width: 100px;
+		height: 100px;
 	}
 
 	&.drophere {
@@ -33,9 +47,13 @@
 		background-color: #daffab;
 	}
 
-	// &.draggable img {
-	// 	-webkit-user-drag: inherit;
-	// }
+	// dnd-kit: blur the in-pool preset that is currently being dragged (a clone is what follows the
+	// cursor). The `:not([popover])` guard excludes the floating clone, which dnd-kit renders as a
+	// top-layer popover, so only the original in the pool is blurred.
+	&.preset-drag-source:not([popover]) {
+		opacity: 0.8;
+		filter: blur(1px);
+	}
 
 	.button-border {
 		position: relative;

@@ -9,151 +9,100 @@
  * this program.
  */
 
-import { combineRgb, type CompanionVariableValues } from '@companion-module/base'
-import LogController from '../Log/Controller.js'
+import { EventEmitter } from 'node:events'
 import debounceFn from 'debounce-fn'
-import type {
-	ActionForVisitor,
-	FeedbackForVisitor,
-	FeedbackEntityModelExt,
-	InternalModuleFragment,
-	InternalVisitor,
-	InternalActionDefinition,
-	InternalFeedbackDefinition,
-	InternalModuleFragmentEvents,
-} from './Types.js'
-import type { ControlsController } from '../Controls/Controller.js'
+import { FeedbackEntitySubType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
+import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
+import {
+	stringifyVariableValue,
+	type VariableDefinition,
+	type VariableValues,
+} from '@companion-app/shared/Model/Variables.js'
+import type { CompanionOptionValues } from '@companion-module/host'
+import type { IControlStore } from '../Controls/IControlStore.js'
+import type { RunActionExtras } from '../Instance/Connection/ChildHandlerApi.js'
+import LogController from '../Log/Controller.js'
 import type { IPageStore } from '../Page/Store.js'
 import type { SurfaceController } from '../Surface/Controller.js'
-import type { RunActionExtras, VariableDefinitionTmp } from '../Instance/Connection/ChildHandler.js'
-import type { SomeCompanionInputField } from '@companion-app/shared/Model/Options.js'
-import { FeedbackEntitySubType, type ActionEntityModel } from '@companion-app/shared/Model/EntityModel.js'
-import type { ControlEntityInstance } from '../Controls/Entities/EntityInstance.js'
-import type { InternalModuleUtils } from './Util.js'
-import { EventEmitter } from 'events'
+import type {
+	ActionForInternalExecution,
+	ActionForVisitor,
+	FeedbackForInternalExecution,
+	FeedbackForVisitor,
+	InternalActionDefinition,
+	InternalActionResult,
+	InternalFeedbackDefinition,
+	InternalModuleFragment,
+	InternalModuleFragmentEvents,
+	InternalVisitor,
+} from './Types.js'
 
-const CHOICES_SURFACE_GROUP_WITH_VARIABLES: SomeCompanionInputField[] = [
-	{
-		type: 'checkbox',
-		label: 'Use variables for surface',
-		id: 'controller_from_variable',
-		default: false,
-	},
-	{
-		type: 'internal:surface_serial',
-		label: 'Surface / group',
-		id: 'controller',
-		default: 'self',
-		includeSelf: true,
-		isVisibleUi: {
-			type: 'expression',
-			fn: '!$(options:controller_from_variable)',
-		},
-	},
-	{
-		type: 'textinput',
-		label: 'Surface / group',
-		id: 'controller_variable',
-		default: 'self',
-		isVisibleUi: {
-			type: 'expression',
-			fn: '!!$(options:controller_from_variable)',
-		},
-		useVariables: {
-			local: true,
-		},
-	},
-]
+const CHOICES_SURFACE_ID: SomeCompanionInputField = {
+	type: 'internal:surface_serial',
+	label: 'Surface / group',
+	id: 'surfaceId',
+	default: 'self',
+	includeSelf: true,
+	listMode: 'surfaces',
+}
 
-const CHOICES_SURFACE_ID_WITH_VARIABLES: SomeCompanionInputField[] = [
-	{
-		type: 'checkbox',
-		label: 'Use expression for surface',
-		id: 'controller_from_variable',
-		default: false,
-	},
-	{
-		type: 'internal:surface_serial',
-		label: 'Surface / group',
-		id: 'controller',
-		default: 'self',
-		includeSelf: true,
-		useRawSurfaces: true,
-		isVisibleUi: {
-			type: 'expression',
-			fn: '!$(options:controller_from_variable)',
-		},
-	},
-	{
-		type: 'textinput',
-		label: 'Surface / group',
-		id: 'controller_variable',
-		default: 'self',
-		isVisibleUi: {
-			type: 'expression',
-			fn: '!!$(options:controller_from_variable)',
-		},
-		useVariables: {
-			local: true,
-		},
-	},
-]
+const CHOICES_SURFACE_GROUP: SomeCompanionInputField = {
+	type: 'internal:surface_serial',
+	label: 'Surface / group',
+	id: 'surfaceId',
+	default: 'self',
+	includeSelf: true,
+	listMode: 'groups',
+}
 
-const CHOICES_PAGE_WITH_VARIABLES: SomeCompanionInputField[] = [
-	{
-		type: 'checkbox',
-		label: 'Use expression for page',
-		id: 'page_from_variable',
-		default: false,
-	},
-	{
-		type: 'internal:page',
-		label: 'Page',
-		id: 'page',
-		includeStartup: true,
-		includeDirection: true,
-		default: 0,
-		isVisibleUi: {
-			type: 'expression',
-			fn: '!$(options:page_from_variable)',
-		},
-	},
-	{
-		type: 'textinput',
-		label: 'Page (expression)',
-		id: 'page_variable',
-		default: '1',
-		isVisibleUi: {
-			type: 'expression',
-			fn: '!!$(options:page_from_variable)',
-		},
-		useVariables: {
-			local: true,
-		},
-		isExpression: true,
-	},
-]
+// Brightness is a per-surface setting, so offer both groups (applies to every member surface) and
+// individual surfaces (applies to just that surface).
+const CHOICES_SURFACE_GROUP_OR_SURFACE: SomeCompanionInputField = {
+	type: 'internal:surface_serial',
+	label: 'Surface / group',
+	id: 'surfaceId',
+	default: 'self',
+	includeSelf: true,
+	listMode: 'groups-and-surfaces',
+}
+
+const CHOICES_OUTBOUND_SURFACE_ID: SomeCompanionInputField = {
+	type: 'internal:outbound_surface_id',
+	label: 'Remote surface',
+	id: 'surfaceId',
+	disableAutoExpression: true,
+}
+
+const CHOICES_PAGE: SomeCompanionInputField = {
+	type: 'internal:page',
+	label: 'Page',
+	id: 'page',
+	includeStartup: true,
+	includeDirection: true,
+	default: 0,
+}
 
 export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> implements InternalModuleFragment {
 	readonly #logger = LogController.createLogger('Internal/Surface')
 
-	readonly #internalUtils: InternalModuleUtils
-	readonly #controlsController: ControlsController
+	readonly #controlsStore: IControlStore
 	readonly #surfaceController: SurfaceController
 	readonly #pageStore: IPageStore
 
-	constructor(
-		internalUtils: InternalModuleUtils,
-		surfaceController: SurfaceController,
-		controlsController: ControlsController,
-		pageStore: IPageStore
-	) {
+	constructor(surfaceController: SurfaceController, controlsStore: IControlStore, pageStore: IPageStore) {
 		super()
 
-		this.#internalUtils = internalUtils
 		this.#surfaceController = surfaceController
-		this.#controlsController = controlsController
+		this.#controlsStore = controlsStore
 		this.#pageStore = pageStore
+
+		setImmediate(() => {
+			this.emit('setVariables', {
+				't-bar': 0,
+				jog: 0,
+				shuttle: 0,
+			})
+		})
 
 		const debounceUpdateVariableDefinitions = debounceFn(() => this.emit('regenerateVariables'), {
 			maxWait: 100,
@@ -172,6 +121,7 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 		})
 		this.#surfaceController.on('group_page', () => debounceUpdateVariables())
 		this.#surfaceController.on('surface_locked', () => debounceUpdateVariables())
+		this.#surfaceController.on('surface-config', () => debounceUpdateVariables())
 
 		this.#surfaceController.on('group-add', () => {
 			debounceUpdateVariableDefinitions()
@@ -192,20 +142,17 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 		this.#surfaceController.on('surface-in-group', () => debounceUpdateVariables())
 		this.#surfaceController.on('surface_name', () => debounceUpdateVariables())
 		this.#surfaceController.on('group_name', () => debounceUpdateVariables())
+
+		this.#surfaceController.outbound.events.on('clientInfo', () => {
+			this.emit('checkFeedbacks', 'outbound_surface_enabled')
+		})
 	}
 
 	#fetchSurfaceId(
-		options: Record<string, any>,
-		info: RunActionExtras | FeedbackEntityModelExt,
-		useVariableFields: boolean
+		options: CompanionOptionValues,
+		info: RunActionExtras | FeedbackForInternalExecution
 	): string | undefined {
-		let surfaceId: string | undefined = options.controller + ''
-
-		if (useVariableFields && options.controller_from_variable) {
-			surfaceId = this.#internalUtils.parseVariablesForInternalActionOrFeedback(options.controller_variable, info).text
-		}
-
-		surfaceId = surfaceId.trim()
+		let surfaceId: string | undefined = stringifyVariableValue(options.surfaceId)?.trim()
 
 		if (info && surfaceId === 'self' && 'surfaceId' in info) surfaceId = info.surfaceId
 
@@ -213,22 +160,11 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 	}
 
 	#fetchPage(
-		options: Record<string, any>,
-		extras: RunActionExtras | FeedbackEntityModelExt,
-		useVariableFields: boolean,
+		options: CompanionOptionValues,
+		extras: RunActionExtras | FeedbackForInternalExecution,
 		surfaceId: string | undefined
 	): string | 'back' | 'forward' | '+1' | '-1' | undefined {
-		let thePageNumber: number | string | undefined = options.page
-
-		if (useVariableFields && options.page_from_variable) {
-			const expressionResult = this.#internalUtils.executeExpressionForInternalActionOrFeedback(
-				options.page_variable,
-				extras,
-				'number'
-			)
-			if (!expressionResult.ok) throw new Error(expressionResult.error)
-			thePageNumber = Number(expressionResult.value)
-		}
+		let thePageNumber = options.page
 
 		if (extras.location) {
 			if (thePageNumber === 0 || thePageNumber === '0')
@@ -247,8 +183,8 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 		return this.#pageStore.getPageInfo(Number(thePageNumber))?.id
 	}
 
-	getVariableDefinitions(): VariableDefinitionTmp[] {
-		const variables: VariableDefinitionTmp[] = []
+	getVariableDefinitions(): VariableDefinition[] {
+		const variables: VariableDefinition[] = []
 
 		const surfaceInfos = this.#surfaceController.getDevicesList()
 		for (const surfaceGroup of surfaceInfos) {
@@ -256,15 +192,15 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 				const groupId = surfaceGroup.id.startsWith('group:') ? surfaceGroup.id.slice(6) : surfaceGroup.id
 				variables.push(
 					{
-						label: `Surface Group name: ${surfaceGroup.displayName}`,
+						description: `Surface Group name: ${surfaceGroup.displayName}`,
 						name: `surface_group_${groupId}_name`,
 					},
 					{
-						label: `Surface Group member count: ${surfaceGroup.displayName}`,
+						description: `Surface Group member count: ${surfaceGroup.displayName}`,
 						name: `surface_group_${groupId}_surface_count`,
 					},
 					{
-						label: `Surface Group page: ${surfaceGroup.displayName}`,
+						description: `Surface Group page: ${surfaceGroup.displayName}`,
 						name: `surface_group_${groupId}_page`,
 					}
 				)
@@ -277,19 +213,23 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 
 				variables.push(
 					{
-						label: `Surface name: ${surface.displayName}`,
+						description: `Surface name: ${surface.displayName}`,
 						name: `surface_${surfaceId}_name`,
 					},
 					{
-						label: `Surface locked: ${surface.displayName}`,
+						description: `Surface locked: ${surface.displayName}`,
 						name: `surface_${surfaceId}_locked`,
 					},
 					{
-						label: `Surface location: ${surface.displayName}`,
+						description: `Surface brightness: ${surface.displayName}`,
+						name: `surface_${surfaceId}_brightness`,
+					},
+					{
+						description: `Surface location: ${surface.displayName}`,
 						name: `surface_${surfaceId}_location`,
 					},
 					{
-						label: `Surface page: ${surfaceGroup.displayName}`,
+						description: `Surface page: ${surfaceGroup.displayName}`,
 						name: `surface_${surfaceId}_page`,
 					}
 				)
@@ -301,7 +241,7 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 
 	#lastUpdateVariableNames: ReadonlySet<string> = new Set()
 	updateVariables(): void {
-		const values: CompanionVariableValues = {}
+		const values: VariableValues = {}
 
 		const surfaceInfos = this.#surfaceController.getDevicesList()
 		for (const surfaceGroup of surfaceInfos) {
@@ -315,6 +255,7 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 				const surfaceId = surface.id.replaceAll(':', '_') // TODO - more chars
 				values[`surface_${surfaceId}_name`] = surface.name || surface.id
 				values[`surface_${surfaceId}_locked`] = surface.locked
+				values[`surface_${surfaceId}_brightness`] = surface.brightness ?? 100
 				values[`surface_${surfaceId}_location`] = surface.location ?? 'Local'
 
 				const surfacePageId = this.#surfaceController.devicePageGet(surface.id)
@@ -350,23 +291,13 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 		this.emit('setVariables', values)
 	}
 
-	actionUpgrade(action: ActionEntityModel, _controlId: string): void | ActionEntityModel {
-		// Upgrade an action. This check is not the safest, but it should be ok
-		if (action.options.controller === 'emulator') {
-			// Hope that the default emulator still exists
-			action.options.controller = 'emulator:emulator'
-
-			return action
-		}
-	}
-
 	getActionDefinitions(): Record<string, InternalActionDefinition> {
 		return {
 			set_brightness: {
 				label: 'Surface: Set to brightness',
 				description: undefined,
 				options: [
-					...CHOICES_SURFACE_ID_WITH_VARIABLES,
+					CHOICES_SURFACE_GROUP_OR_SURFACE,
 
 					{
 						type: 'number',
@@ -377,102 +308,119 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 						max: 100,
 						step: 1,
 						range: true,
+						clampValues: true,
 					},
 				],
+
+				optionsSupportExpressions: true,
+			},
+
+			adjust_brightness: {
+				label: 'Surface: Adjust brightness',
+				description: undefined,
+				options: [
+					CHOICES_SURFACE_GROUP_OR_SURFACE,
+
+					{
+						type: 'number',
+						label: 'Brightness adjustment',
+						id: 'brightness',
+						default: 0,
+						min: -100,
+						max: 100,
+						step: 1,
+					},
+				],
+
+				optionsSupportExpressions: true,
 			},
 
 			set_page: {
 				label: 'Surface: Set to page',
 				description: undefined,
-				options: [...CHOICES_SURFACE_GROUP_WITH_VARIABLES, ...CHOICES_PAGE_WITH_VARIABLES],
+				options: [CHOICES_SURFACE_GROUP, CHOICES_PAGE],
+
+				optionsSupportExpressions: true,
 			},
 			set_page_byindex: {
 				label: 'Surface: Set by index to page',
 				description: undefined,
 				options: [
 					{
-						type: 'checkbox',
-						label: 'Use variables for surface',
-						id: 'controller_from_variable',
-						default: false,
-					},
-					{
 						type: 'number',
 						label: 'Surface / group index',
-						id: 'controller',
+						id: 'surfaceIndex',
 						tooltip: 'Check the ID column in the surfaces tab',
 						min: 0,
 						max: 100,
 						default: 0,
 						range: false,
-						isVisibleUi: {
-							type: 'expression',
-							fn: '!$(options:controller_from_variable)',
-						},
-					},
-					{
-						type: 'textinput',
-						label: 'Surface / group index',
-						id: 'controller_variable',
-						tooltip: 'Check the ID column in the surfaces tab',
-						default: '0',
-						isVisibleUi: {
-							type: 'expression',
-							fn: '!!$(options:controller_from_variable)',
-						},
-						useVariables: {
-							local: true,
-						},
 					},
 
-					...CHOICES_PAGE_WITH_VARIABLES,
+					CHOICES_PAGE,
 				],
+
+				optionsSupportExpressions: true,
 			},
 
 			inc_page: {
 				label: 'Surface: Increment page number',
 				description: undefined,
-				options: [...CHOICES_SURFACE_GROUP_WITH_VARIABLES],
+				options: [CHOICES_SURFACE_GROUP],
+
+				optionsSupportExpressions: true,
 			},
 			dec_page: {
 				label: 'Surface: Decrement page number',
 				description: undefined,
-				options: [...CHOICES_SURFACE_GROUP_WITH_VARIABLES],
+				options: [CHOICES_SURFACE_GROUP],
+
+				optionsSupportExpressions: true,
 			},
 
 			lockout_device: {
 				label: 'Surface: Lockout specified surface immediately.',
 				description: 'This requires the `PIN Lockout` setting to be enabled and configured',
-				options: [...CHOICES_SURFACE_GROUP_WITH_VARIABLES],
+				options: [CHOICES_SURFACE_GROUP],
+
+				optionsSupportExpressions: true,
 			},
 			unlockout_device: {
 				label: 'Surface: Unlock specified surface immediately.',
 				description: 'This requires the `PIN Lockout` setting to be enabled and configured',
-				options: [...CHOICES_SURFACE_GROUP_WITH_VARIABLES],
+				options: [CHOICES_SURFACE_GROUP],
+
+				optionsSupportExpressions: true,
 			},
 
 			lockout_all: {
 				label: 'Surface: Lockout all immediately.',
 				description: 'This requires the `PIN Lockout` setting to be enabled and configured',
 				options: [],
+
+				optionsSupportExpressions: true,
 			},
 			unlockout_all: {
 				label: 'Surface: Unlock all immediately.',
 				description: 'This requires the `PIN Lockout` setting to be enabled and configured',
 				options: [],
+
+				optionsSupportExpressions: true,
 			},
 
 			rescan: {
 				label: 'Surface: Rescan USB for devices',
 				description: undefined,
 				options: [],
+
+				optionsSupportExpressions: true,
 			},
 
 			surface_set_position: {
 				label: 'Surface: Set offset',
 				description: 'Set the absolute offset of a surface relative to the button grid',
 				options: [
-					...CHOICES_SURFACE_ID_WITH_VARIABLES,
+					CHOICES_SURFACE_ID,
 
 					{
 						type: 'number',
@@ -493,13 +441,15 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 						step: 1,
 					},
 				],
+
+				optionsSupportExpressions: true,
 			},
 
 			surface_adjust_position: {
 				label: 'Surface: Adjust offset',
 				description: 'Adjust the offset of a surface relative to the button grid by a relative amount',
 				options: [
-					...CHOICES_SURFACE_ID_WITH_VARIABLES,
+					CHOICES_SURFACE_ID,
 
 					{
 						type: 'number',
@@ -520,147 +470,215 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 						step: 1,
 					},
 				],
+
+				optionsSupportExpressions: true,
+			},
+
+			outbound_surface_set_enabled: {
+				label: 'Remote surface: Enable/Disable',
+				description: undefined,
+				options: [
+					CHOICES_OUTBOUND_SURFACE_ID,
+					{
+						type: 'dropdown',
+						label: 'Enable',
+						id: 'setType',
+						default: 'toggle',
+						choices: [
+							{ id: 'enable', label: 'Enable' },
+							{ id: 'disable', label: 'Disable' },
+							{ id: 'toggle', label: 'Toggle' },
+						],
+						disableAutoExpression: true,
+					},
+				],
+
+				optionsSupportExpressions: true,
 			},
 		}
 	}
 
-	executeAction(action: ControlEntityInstance, extras: RunActionExtras): boolean {
-		if (action.definitionId === 'set_brightness') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			this.#surfaceController.setDeviceBrightness(surfaceId, action.rawOptions.brightness, true)
-			return true
-		} else if (action.definitionId === 'set_page') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			const thePage = this.#fetchPage(action.rawOptions, extras, true, surfaceId)
-			if (thePage === undefined) return true
-
-			this.#changeSurfacePage(surfaceId, thePage)
-			return true
-		} else if (action.definitionId === 'set_page_byindex') {
-			let surfaceIndex = action.rawOptions.controller
-			if (action.rawOptions.controller_from_variable) {
-				surfaceIndex = this.#internalUtils.parseVariablesForInternalActionOrFeedback(
-					action.rawOptions.controller_variable,
-					extras
-				).text
-			}
-
-			const surfaceIndexNumber = Number(surfaceIndex)
-			if (isNaN(surfaceIndexNumber) || surfaceIndexNumber < 0) {
-				this.#logger.warn(`Trying to set controller #${surfaceIndex} but it isn't a valid index.`)
-				return true
-			}
-
-			const surfaceId = this.#surfaceController.getDeviceIdFromIndex(surfaceIndexNumber)
-			if (surfaceId === undefined || surfaceId === '') {
-				this.#logger.warn(`Trying to set controller #${action.rawOptions.controller} but it isn't available.`)
-				return true
-			}
-
-			const thePage = this.#fetchPage(action.rawOptions, extras, true, surfaceId)
-			if (thePage === undefined) return true
-
-			this.#changeSurfacePage(surfaceId, thePage)
-			return true
-		} else if (action.definitionId === 'inc_page') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			this.#changeSurfacePage(surfaceId, '+1')
-			return true
-		} else if (action.definitionId === 'dec_page') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			this.#changeSurfacePage(surfaceId, '-1')
-			return true
-		} else if (action.definitionId === 'lockout_device') {
-			if (this.#surfaceController.isPinLockEnabled()) {
-				const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-				if (!surfaceId) return true
-
-				if (extras.controlId && extras.surfaceId == surfaceId) {
-					const control = this.#controlsController.getControl(extras.controlId)
-					if (control && control.supportsPushed) {
-						// Make sure the button doesn't show as pressed
-						control.setPushed(false, extras.surfaceId)
-					}
-				}
-
-				setImmediate(() => {
-					this.#surfaceController.setSurfaceOrGroupLocked(surfaceId, true, true)
-				})
-			}
-			return true
-		} else if (action.definitionId === 'unlockout_device') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			setImmediate(() => {
-				this.#surfaceController.setSurfaceOrGroupLocked(surfaceId, false, true)
-			})
-
-			return true
-		} else if (action.definitionId === 'lockout_all') {
-			if (this.#surfaceController.isPinLockEnabled()) {
-				if (extras.controlId) {
-					const control = this.#controlsController.getControl(extras.controlId)
-					if (control && control.supportsPushed) {
-						// Make sure the button doesn't show as pressed
-						control.setPushed(false, extras.surfaceId)
-					}
-				}
-
-				setImmediate(() => {
-					this.#surfaceController.setAllLocked(true)
-				})
-			}
-			return true
-		} else if (action.definitionId === 'unlockout_all') {
-			setImmediate(() => {
-				this.#surfaceController.setAllLocked(false)
-			})
-			return true
-		} else if (action.definitionId === 'rescan') {
-			this.#surfaceController.triggerRefreshDevices().catch(() => {
-				// TODO
-			})
-			return true
-		} else if (action.definitionId === 'surface_set_position') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			const xOffset = Number(action.rawOptions.x_offset)
-			const yOffset = Number(action.rawOptions.y_offset)
-
-			if (isNaN(xOffset) || isNaN(yOffset)) {
-				this.#logger.warn(`Invalid position offsets: x=${xOffset}, y=${yOffset}`)
-				return true
-			}
-
-			this.#surfaceController.setDevicePosition(surfaceId, xOffset, yOffset, true)
-			return true
-		} else if (action.definitionId === 'surface_adjust_position') {
-			const surfaceId = this.#fetchSurfaceId(action.rawOptions, extras, true)
-			if (!surfaceId) return true
-
-			const xAdjustment = Number(action.rawOptions.x_adjustment)
-			const yAdjustment = Number(action.rawOptions.y_adjustment)
-
-			if (isNaN(xAdjustment) || isNaN(yAdjustment)) {
-				this.#logger.warn(`Invalid position adjustments: x=${xAdjustment}, y=${yAdjustment}`)
-				return true
-			}
-
-			this.#surfaceController.adjustDevicePosition(surfaceId, xAdjustment, yAdjustment, true)
-			return true
-		} else {
-			return false
+	actionUpgrade(action: ActionEntityModel, _controlId: string): ActionEntityModel | void {
+		if (
+			action.definitionId === 'set_page' &&
+			action.options.page &&
+			!action.options.page.isExpression &&
+			action.options.page.value === ''
+		) {
+			// Fixup bad upgrade from v4.2, where empty string was used for "this page" instead of "0"
+			action.options.page.value = '0'
+			return action
 		}
+	}
+
+	executeAction(action: ActionForInternalExecution, extras: RunActionExtras): InternalActionResult {
+		switch (action.definitionId) {
+			case 'set_brightness': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (surfaceId) {
+					this.#surfaceController.setDeviceBrightness(surfaceId, Number(action.options.brightness), true)
+				}
+				break
+			}
+			case 'adjust_brightness': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (surfaceId) {
+					this.#surfaceController.adjustDeviceBrightness(surfaceId, Number(action.options.brightness), true)
+				}
+				break
+			}
+			case 'set_page': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (surfaceId) {
+					const thePage = this.#fetchPage(action.options, extras, surfaceId)
+					if (thePage !== undefined) {
+						this.#changeSurfacePage(surfaceId, thePage)
+					}
+				}
+				break
+			}
+			case 'set_page_byindex': {
+				const surfaceIndexNumber = Number(action.options.surfaceIndex)
+				if (isNaN(surfaceIndexNumber) || surfaceIndexNumber < 0) {
+					this.#logger.warn(
+						`Trying to set controller #${stringifyVariableValue(action.options.surfaceIndex)} but it isn't a valid index.`
+					)
+					break
+				}
+
+				const surfaceId = this.#surfaceController.getDeviceIdFromIndex(surfaceIndexNumber)
+				if (surfaceId === undefined || surfaceId === '') {
+					this.#logger.warn(`Trying to set controller #${surfaceIndexNumber} but it isn't available.`)
+					break
+				}
+
+				const thePage = this.#fetchPage(action.options, extras, surfaceId)
+				if (thePage !== undefined) {
+					this.#changeSurfacePage(surfaceId, thePage)
+				}
+				break
+			}
+			case 'inc_page': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (surfaceId) {
+					this.#changeSurfacePage(surfaceId, '+1')
+				}
+				break
+			}
+			case 'dec_page': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (surfaceId) {
+					this.#changeSurfacePage(surfaceId, '-1')
+				}
+				break
+			}
+			case 'lockout_device': {
+				if (this.#surfaceController.isPinLockEnabled()) {
+					const surfaceId = this.#fetchSurfaceId(action.options, extras)
+					if (!surfaceId) break
+
+					if (extras.controlId && extras.surfaceId == surfaceId) {
+						const control = this.#controlsStore.getControl(extras.controlId)
+						if (control && control.supportsPushed) {
+							// Make sure the button doesn't show as pressed
+							control.setPushed(false, extras.surfaceId)
+						}
+					}
+
+					setImmediate(() => {
+						this.#surfaceController.setSurfaceOrGroupLocked(surfaceId, true, true)
+					})
+				}
+				break
+			}
+			case 'unlockout_device': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (surfaceId) {
+					setImmediate(() => {
+						this.#surfaceController.setSurfaceOrGroupLocked(surfaceId, false, true)
+					})
+				}
+
+				break
+			}
+			case 'lockout_all': {
+				if (this.#surfaceController.isPinLockEnabled()) {
+					if (extras.controlId) {
+						const control = this.#controlsStore.getControl(extras.controlId)
+						if (control && control.supportsPushed) {
+							// Make sure the button doesn't show as pressed
+							control.setPushed(false, extras.surfaceId)
+						}
+					}
+
+					setImmediate(() => {
+						this.#surfaceController.setAllLocked(true)
+					})
+				}
+				break
+			}
+			case 'unlockout_all': {
+				setImmediate(() => {
+					this.#surfaceController.setAllLocked(false)
+				})
+				break
+			}
+			case 'rescan': {
+				this.#surfaceController.triggerRefreshDevices().catch(() => {
+					// TODO
+				})
+				break
+			}
+			case 'surface_set_position': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (!surfaceId) break
+
+				const xOffset = Number(action.options.x_offset)
+				const yOffset = Number(action.options.y_offset)
+
+				if (isNaN(xOffset) || isNaN(yOffset)) {
+					this.#logger.warn(`Invalid position offsets: x=${xOffset}, y=${yOffset}`)
+					break
+				}
+
+				this.#surfaceController.setDevicePosition(surfaceId, xOffset, yOffset, true)
+				break
+			}
+			case 'surface_adjust_position': {
+				const surfaceId = this.#fetchSurfaceId(action.options, extras)
+				if (!surfaceId) break
+
+				const xAdjustment = Number(action.options.x_adjustment)
+				const yAdjustment = Number(action.options.y_adjustment)
+
+				if (isNaN(xAdjustment) || isNaN(yAdjustment)) {
+					this.#logger.warn(`Invalid position adjustments: x=${xAdjustment}, y=${yAdjustment}`)
+					break
+				}
+
+				this.#surfaceController.adjustDevicePosition(surfaceId, xAdjustment, yAdjustment, true)
+				break
+			}
+			case 'outbound_surface_set_enabled': {
+				const surfaceId = stringifyVariableValue(action.options.surfaceId)?.trim()
+				if (!surfaceId) break
+
+				const setType = stringifyVariableValue(action.options.setType)
+				let newEnabled: boolean
+				if (setType === 'toggle') {
+					newEnabled = !(this.#surfaceController.outbound.getById(surfaceId)?.enabled ?? false)
+				} else {
+					newEnabled = setType !== 'disable'
+				}
+
+				this.#surfaceController.outbound.setOutboundEnabled(surfaceId, newEnabled)
+				break
+			}
+			default:
+				return null
+		}
+
+		return { result: undefined }
 	}
 
 	/**
@@ -683,17 +701,18 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 				label: 'Surface: When on the selected page',
 				description: 'Change style when a surface is on the selected page',
 				feedbackStyle: {
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(255, 0, 0),
+					color: 0xffffff,
+					bgcolor: 0xff0000,
 				},
 				showInvert: true,
 				options: [
 					{
 						type: 'internal:surface_serial',
 						label: 'Surface / group',
-						id: 'controller',
+						id: 'surfaceId',
 						includeSelf: false,
 						default: '',
+						listMode: 'groups',
 					},
 					{
 						type: 'internal:page',
@@ -704,25 +723,53 @@ export class InternalSurface extends EventEmitter<InternalModuleFragmentEvents> 
 						default: 0,
 					},
 				],
+				optionsSupportExpressions: true,
+			},
+
+			outbound_surface_enabled: {
+				feedbackType: FeedbackEntitySubType.Boolean,
+				label: 'Remote surface: When enabled',
+				description: 'Change style when a remote surface is enabled',
+				feedbackStyle: {
+					color: 0xffffff,
+					bgcolor: 0x00aa00,
+				},
+				showInvert: true,
+				options: [CHOICES_OUTBOUND_SURFACE_ID],
+				optionsSupportExpressions: true,
 			},
 		}
 	}
 
-	executeFeedback(feedback: FeedbackEntityModelExt): boolean | void {
+	executeFeedback(feedback: FeedbackForInternalExecution): boolean | void {
 		if (feedback.definitionId == 'surface_on_page') {
-			const surfaceId = this.#fetchSurfaceId(feedback.options, feedback, false)
+			const surfaceId = this.#fetchSurfaceId(feedback.options, feedback)
 			if (!surfaceId) return false
 
-			const thePage = this.#fetchPage(feedback.options, feedback, false, surfaceId)
+			const thePage = this.#fetchPage(feedback.options, feedback, surfaceId)
 
 			const currentPage = this.#surfaceController.devicePageGet(surfaceId, true)
 
 			return currentPage == thePage
 		}
+		if (feedback.definitionId == 'outbound_surface_enabled') {
+			const surfaceId = stringifyVariableValue(feedback.options.surfaceId)?.trim()
+			if (!surfaceId) return false
+
+			return this.#surfaceController.outbound.getById(surfaceId)?.enabled ?? false
+		}
 	}
 
-	visitReferences(_visitor: InternalVisitor, _actions: ActionForVisitor[], _feedbacks: FeedbackForVisitor[]): void {
-		// actions page_variable handled by generic options visitor
-		// actions controller_variable handled by generic options visitor
+	visitReferences(visitor: InternalVisitor, actions: ActionForVisitor[], feedbacks: FeedbackForVisitor[]): void {
+		for (const action of actions) {
+			if (action.action === 'outbound_surface_set_enabled') {
+				visitor.visitOutboundSurfaceId(action.options, 'surfaceId')
+			}
+		}
+		for (const feedback of feedbacks) {
+			if (feedback.type === 'outbound_surface_enabled') {
+				visitor.visitOutboundSurfaceId(feedback.options, 'surfaceId', feedback.id)
+			}
+		}
 	}
 }

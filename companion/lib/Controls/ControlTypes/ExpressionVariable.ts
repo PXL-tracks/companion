@@ -1,28 +1,30 @@
-import { ControlBase } from '../ControlBase.js'
 import debounceFn from 'debounce-fn'
-import type {
-	ControlWithoutActions,
-	ControlWithoutEvents,
-	ControlWithOptions,
-	ControlWithoutActionSets,
-	ControlWithoutPushed,
-	ControlWithoutStyle,
-	ControlWithEntities,
-} from '../IControlFragments.js'
-import { VisitorReferencesUpdater } from '../../Resources/Visitors/ReferencesUpdater.js'
-import { VisitorReferencesCollector } from '../../Resources/Visitors/ReferencesCollector.js'
-import type { ControlDependencies } from '../ControlDependencies.js'
-import { EntityListPoolExpressionVariable } from '../Entities/EntityListPoolExpressionVariable.js'
+import jsonPatch from 'fast-json-patch'
+import type { JsonValue } from 'type-fest'
+import { BANNED_PROPS } from '@companion-app/shared/Expressions.js'
+import { isLabelValid } from '@companion-app/shared/Label.js'
 import { EntityModelType } from '@companion-app/shared/Model/EntityModel.js'
-import type { DrawStyleModel } from '@companion-app/shared/Model/StyleModel.js'
 import type {
 	ClientExpressionVariableData,
 	ExpressionVariableModel,
 	ExpressionVariableOptions,
 } from '@companion-app/shared/Model/ExpressionVariableModel.js'
-import jsonPatch from 'fast-json-patch'
+import { VisitorReferencesCollector } from '../../Resources/Visitors/ReferencesCollector.js'
+import { VisitorReferencesUpdater } from '../../Resources/Visitors/ReferencesUpdater.js'
+import { ControlBase } from '../ControlBase.js'
+import type { ControlDependencies } from '../ControlDependencies.js'
+import type { ControlEntityListChangeProps } from '../Entities/EntityListPoolBase.js'
+import { EntityListPoolExpressionVariable } from '../Entities/EntityListPoolExpressionVariable.js'
 import type { ExpressionVariableNameMap } from '../ExpressionVariableNameMap.js'
-import { isLabelValid } from '@companion-app/shared/Label.js'
+import type {
+	ControlWithEntities,
+	ControlWithOptions,
+	ControlWithoutActions,
+	ControlWithoutActionSets,
+	ControlWithoutEvents,
+	ControlWithoutLayeredStyle,
+	ControlWithoutPushed,
+} from '../IControlFragments.js'
 
 /**
  * Class for an expression variable.
@@ -42,7 +44,7 @@ export class ControlExpressionVariable
 		ControlWithoutActions,
 		ControlWithoutEvents,
 		ControlWithEntities,
-		ControlWithoutStyle,
+		ControlWithoutLayeredStyle,
 		ControlWithoutActionSets,
 		ControlWithOptions,
 		ControlWithoutPushed
@@ -50,9 +52,9 @@ export class ControlExpressionVariable
 	readonly type = 'expression-variable'
 
 	readonly supportsActions = false
+	readonly supportsConvert = false
 	readonly supportsEvents = false
 	readonly supportsEntities = true
-	readonly supportsStyle = false
 	readonly supportsLayeredStyle = false
 	readonly supportsActionSets = false
 	readonly supportsOptions = true
@@ -67,6 +69,7 @@ export class ControlExpressionVariable
 		variableName: '',
 		description: 'An expression variable',
 		sortOrder: 0,
+		notes: '',
 	}
 
 	/**
@@ -101,12 +104,12 @@ export class ControlExpressionVariable
 
 		this.entities = new EntityListPoolExpressionVariable({
 			controlId,
-			commitChange: this.commitChange.bind(this),
-			invalidateControl: this.triggerRedraw.bind(this),
+			reportChange: this.#entityListReportChange.bind(this),
 			instanceDefinitions: deps.instance.definitions,
 			internalModule: deps.internalModule,
 			processManager: deps.instance.processManager,
-			variableValues: deps.variables.values,
+			variableValues: deps.variableValues,
+			pageStore: deps.pageStore,
 		})
 
 		this.options = structuredClone(ControlExpressionVariable.DefaultOptions)
@@ -127,6 +130,18 @@ export class ControlExpressionVariable
 
 			if (isImport) setImmediate(() => this.#postProcessImport())
 			else this.commitChange()
+		}
+	}
+
+	#entityListReportChange(options: ControlEntityListChangeProps): void {
+		if (!options.noSave) {
+			this.commitChange(false)
+		}
+
+		// Elements are not relevant for expression variables
+
+		if (options.redraw) {
+			this.triggerInvalidation()
 		}
 	}
 
@@ -158,7 +173,8 @@ export class ControlExpressionVariable
 			this.deps.internalModule,
 			foundConnectionIds,
 			foundConnectionLabels,
-			foundVariables
+			foundVariables,
+			undefined
 		).visitEntities(this.entities.getAllEntities(), [])
 	}
 
@@ -202,7 +218,12 @@ export class ControlExpressionVariable
 		const allEntities = this.entities.getAllEntities()
 
 		// Fix up references
-		const changed = new VisitorReferencesUpdater(this.deps.internalModule, { [labelFrom]: labelTo }, undefined)
+		const changed = new VisitorReferencesUpdater(
+			this.deps.internalModule,
+			{ [labelFrom]: labelTo },
+			undefined,
+			undefined
+		)
 			.visitEntities(allEntities, [])
 			.recheckChangedFeedbacks()
 			.hasChanges()
@@ -214,16 +235,17 @@ export class ControlExpressionVariable
 	/**
 	 * Update an option field of this control
 	 */
-	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-	optionsSetField(key: string, value: any, forceSet?: boolean): boolean {
+	optionsSetField(key: string, value: JsonValue | undefined, forceSet?: boolean): boolean {
 		if (!forceSet && (key === 'sortOrder' || key === 'collectionId'))
 			throw new Error('sortOrder cannot be set by the client')
+		if (BANNED_PROPS.has(key)) throw new Error(`Setting option "${key}" is not allowed`)
 
 		// Handle expression variable name changes
 		if (key === 'variableName') {
 			// Make sure the new name is valid
-			if (value != '' && !isLabelValid(value)) {
-				throw new Error(`Invalid variable name "${value}"`)
+			if (value != '' && (typeof value !== 'string' || !isLabelValid(value))) {
+				// throw new Error(`Invalid variable name "${stringifyVariableValue(value)}"`)
+				return false
 			}
 
 			const oldVariableName = this.options.variableName
@@ -306,19 +328,18 @@ export class ControlExpressionVariable
 
 	/**
 	 * Trigger a recheck of the condition, as something has changed and it might be the 'condition'
-	 * @access protected
 	 */
-	triggerRedraw = debounceFn(
+	triggerInvalidation = debounceFn(
 		() => {
 			const name = this.options.variableName
 			if (!name) return
 
 			// Only emit variable value if this control is the active one for this variable name
-			if (this.#expressionVariableNameMap.isExpressionVariableActive(this.controlId)) {
-				this.deps.variables.values.setVariableValues('expression', [
-					{ id: name, value: this.entities.getRootEntity()?.getResolvedFeedbackValue() },
-				])
-			}
+			if (!this.#expressionVariableNameMap.isExpressionVariableActive(this.controlId)) return
+
+			this.deps.variableValues.setVariableValues('expression', [
+				{ id: name, value: this.entities.getRootEntity()?.getResolvedFeedbackValue() },
+			])
 		},
 		{
 			before: false,
@@ -328,8 +349,8 @@ export class ControlExpressionVariable
 		}
 	)
 
-	getLastDrawStyle(): DrawStyleModel | null {
-		return null
+	get drawing(): null {
+		return null // Expression variables don't draw
 	}
 
 	/**
@@ -337,8 +358,5 @@ export class ControlExpressionVariable
 	 */
 	pressControl(_pressed: boolean, _surfaceId: string | undefined): void {
 		// Nothing to do
-	}
-	getBitmapSize(): { width: number; height: number } | null {
-		return null
 	}
 }

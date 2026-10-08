@@ -1,27 +1,30 @@
-import React, { Suspense, useCallback, useContext, useEffect, useState } from 'react'
-import { CContainer, CRow, CCol, CProgress, CFormInput, CForm, CButton } from '@coreui/react'
-import { useMountEffect } from '~/Resources/util.js'
-import { MyErrorBoundary } from './Resources/Error.js'
-import { DndProvider } from 'react-dnd'
-import { HTML5Backend } from 'react-dnd-html5-backend'
-import { TouchBackend } from 'react-dnd-touch-backend'
-import { MySidebar, SidebarStateProvider } from './Layout/Sidebar.js'
-import { MyHeader } from './Layout/Header.js'
-import { ContextData } from './ContextData.js'
-import { WizardModal } from './Wizard/index.js'
-import { WIZARD_CURRENT_VERSION } from './Wizard/Constants.js'
-import { useIdleTimer } from 'react-idle-timer'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { observer } from 'mobx-react-lite'
+import { DragDropProvider } from '@dnd-kit/react'
 import { Outlet } from '@tanstack/react-router'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { trpc } from './Resources/TRPC.js'
-import { TRPCConnectionStatus, useTRPCConnectionStatus } from './Hooks/useTRPCConnectionStatus.js'
-import { MonacoLoader } from './Resources/MonacoLoader.js'
+import { observer } from 'mobx-react-lite'
+import { Suspense, useCallback, useContext, useEffect, useState } from 'react'
+import { useIdleTimer } from 'react-idle-timer'
 import { PuffLoader } from 'react-spinners'
+import { Grid } from '~/Components/Grid'
+import { useEvictDeadCollapseState } from '~/Helpers/useEvictDeadCollapseState.js'
+import { useMountEffect } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { Button } from './Components/Button.js'
+import { Form, InputGroup } from './Components/Form.js'
+import { ProgressBar } from './Components/ProgressBar.js'
+import { SecretTextInputField } from './Components/SecretTextInputField.js'
+import { ContextData } from './ContextData.js'
+import { EntityDragLayer } from './Controls/Components/EntityDragLayer.js'
+import { TRPCConnectionStatus, useTRPCConnectionStatus } from './Hooks/useTRPCConnectionStatus.js'
+import { MyHeader } from './Layout/Header.js'
+import { MySidebar, SidebarStateProvider } from './Layout/Sidebar.js'
 import { PRIMARY_COLOR } from './Resources/Constants.js'
-
-const useTouchBackend = window.localStorage.getItem('test_touch_backend') === '1'
+import { MyErrorBoundary } from './Resources/Error.js'
+import { MonacoLoader } from './Resources/MonacoLoader.js'
+import { SortableHysteresis } from './Resources/SortableHysteresis.js'
+import { trpc } from './Resources/TRPC.js'
+import { shouldAutoOpenWizard } from './Wizard/Constants.js'
+import { WizardModal } from './Wizard/index.js'
 
 export default function App(): React.JSX.Element {
 	const trpcStatus = useTRPCConnectionStatus()
@@ -64,10 +67,10 @@ export default function App(): React.JSX.Element {
 								<div className="clearfix">
 									<h4 className="pt-3">Houston, we have a problem!</h4>
 									<p className="text-muted">It seems that we have lost connection to the companion app.</p>
-									<p className="text-muted">
-										<li className="text-muted">Check that the application is still running</li>
-										<li className="text-muted">If you're using the Admin GUI over a network - check your connection</li>
-									</p>
+									<ul className="text-muted">
+										<li>Check that the application is still running</li>
+										<li>If you're using the Admin GUI over a network - check your connection</li>
+									</ul>
 								</div>
 							</div>
 						</div>
@@ -84,24 +87,30 @@ export default function App(): React.JSX.Element {
 					</div>
 					<Suspense
 						fallback={
-							<CRow className={'loading'}>
+							<Grid.Row className={'loading'}>
 								<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
 									<PuffLoader loading={true} size={80} color={PRIMARY_COLOR} />
 								</div>
-							</CRow>
+							</Grid.Row>
 						}
 					>
 						<MonacoLoader />
-						<DndProvider
-							backend={useTouchBackend ? TouchBackend : HTML5Backend}
-							options={useTouchBackend ? { enableMouseEvents: true } : {}}
-						>
+						{/*
+						 * Single global dnd-kit provider for all drag and drop. Each feature subscribes to its
+						 * own drags via useDragDropMonitor() and filters by drag `type`, so handlers stay scoped
+						 * while dragging between different parts of the UI remains possible (one shared manager).
+						 * Feedback mode is configured per-draggable where needed (e.g. presets drag a clone with
+						 * no drop animation - see PresetIconPreview); everything else uses the defaults.
+						 */}
+						<DragDropProvider>
+							<SortableHysteresis />
+							<EntityDragLayer />
 							<AppMain
 								connected={connected && !shouldReload}
 								loadingComplete={loadingComplete}
 								loadingProgress={loadingProgress}
 							/>
-						</DndProvider>
+						</DragDropProvider>
 					</Suspense>
 				</>
 			)}
@@ -116,7 +125,10 @@ interface AppMainProps {
 }
 
 const AppMain = observer(function AppMain({ connected, loadingComplete, loadingProgress }: AppMainProps) {
-	const { userConfig, showWizard } = useContext(RootAppStoreContext)
+	const { userConfig, wizardOpen } = useContext(RootAppStoreContext)
+
+	// Once everything has loaded, prune collapse-state keys for controls/connections that no longer exist
+	useEvictDeadCollapseState(loadingComplete)
 
 	const [unlocked, setUnlocked] = useState(false)
 
@@ -138,21 +150,21 @@ const AppMain = observer(function AppMain({ connected, loadingComplete, loadingP
 	const setup_wizard = userConfig.properties?.setup_wizard
 	const setUnlockedInner = useCallback(() => {
 		setUnlocked(true)
-		if (setup_wizard !== undefined && setup_wizard < WIZARD_CURRENT_VERSION) {
-			showWizard()
+		if (shouldAutoOpenWizard(setup_wizard)) {
+			wizardOpen.set(true)
 		}
-	}, [setup_wizard, showWizard])
+	}, [setup_wizard, wizardOpen])
 
 	// If lockout is disabled, then we are logged in
 	const admin_lockout = userConfig.properties && !userConfig.properties?.admin_lockout
 	useEffect(() => {
 		if (admin_lockout) {
 			setUnlocked(true)
-			if (setup_wizard !== undefined && setup_wizard < WIZARD_CURRENT_VERSION) {
-				showWizard()
+			if (shouldAutoOpenWizard(setup_wizard)) {
+				wizardOpen.set(true)
 			}
 		}
-	}, [admin_lockout, setup_wizard, showWizard])
+	}, [admin_lockout, setup_wizard, wizardOpen])
 
 	return (
 		<div className="c-app">
@@ -270,21 +282,21 @@ interface AppLoadingProps {
 function AppLoading({ progress, connected }: AppLoadingProps) {
 	const message = connected ? 'Syncing' : 'Connecting'
 	return (
-		<CContainer fluid className="fadeIn loading">
-			<CRow>
-				<CCol xxl={4} md={3} sm={2} xs={1}></CCol>
-				<CCol xxl={4} md={6} sm={8} xs={10}>
+		<Grid.Container fluid className="fadeIn loading">
+			<Grid.Row>
+				<Grid.Col xxl={4} md={3} sm={2} xs={1}></Grid.Col>
+				<Grid.Col xxl={4} md={6} sm={8} xs={10}>
 					<h3>{message}</h3>
 					{connected ? (
-						<CProgress className="mt-4" value={connected ? progress : 0} />
+						<ProgressBar className="mt-4" value={progress} />
 					) : (
 						<div className="mt-4" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 							<PuffLoader loading={true} size={80} color={PRIMARY_COLOR} />
 						</div>
 					)}
-				</CCol>
-			</CRow>
-		</CContainer>
+				</Grid.Col>
+			</Grid.Row>
+		</Grid.Container>
 	)
 }
 
@@ -325,28 +337,28 @@ const AppAuthWrapper = observer(function AppAuthWrapper({ setUnlocked }: AppAuth
 	)
 
 	return (
-		<CContainer fluid className="fadeIn loading">
-			<CRow>
-				<CCol xxl={4} md={3} sm={2} xs={1}></CCol>
-				<CCol xxl={4} md={6} sm={8} xs={10}>
+		<Grid.Container fluid className="fadeIn loading">
+			<Grid.Row>
+				<Grid.Col xxl={4} md={3} sm={2} xs={1}></Grid.Col>
+				<Grid.Col xxl={4} md={6} sm={8} xs={10}>
 					<h3>Companion is locked</h3>
-					<CForm onSubmit={tryLogin}>
-						<div className="login-form">
-							<CFormInput
-								type="password"
+					<Form onSubmit={tryLogin}>
+						<InputGroup>
+							<SecretTextInputField
+								id={undefined}
 								value={password}
-								onChange={(e) => passwordChanged(e.currentTarget.value)}
-								invalid={showError}
-								readOnly={!userConfig.properties}
+								setValue={passwordChanged}
+								checkValid={showError ? false : undefined}
+								immediateValue
 							/>
-							<CButton type="submit" color="primary">
+							<Button type="submit" color="primary">
 								Unlock
-							</CButton>
-						</div>
-					</CForm>
-				</CCol>
-			</CRow>
-		</CContainer>
+							</Button>
+						</InputGroup>
+					</Form>
+				</Grid.Col>
+			</Grid.Row>
+		</Grid.Container>
 	)
 })
 
@@ -396,12 +408,12 @@ const AppContent = observer(function AppContent() {
 	}, [userConfig.properties?.installName])
 
 	return (
-		<CContainer fluid className="fadeIn">
+		<Grid.Container fluid className="fadeIn">
 			<WizardModal />
 
 			<MyErrorBoundary>
 				<Outlet />
 			</MyErrorBoundary>
-		</CContainer>
+		</Grid.Container>
 	)
 })

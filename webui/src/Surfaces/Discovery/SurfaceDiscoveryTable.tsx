@@ -1,22 +1,27 @@
-import type {
-	ClientDiscoveredSurfaceInfoSatellite,
-	ClientDiscoveredSurfaceInfoStreamDeck,
-} from '@companion-app/shared/Model/Surfaces.js'
-import React, { useCallback, useContext, useRef } from 'react'
-import { assertNever } from '~/Resources/util.js'
-import { CButton, CButtonGroup } from '@coreui/react'
-import { faBan, faCheck, faPlus, faSearch } from '@fortawesome/free-solid-svg-icons'
+import { faCheck, faPlus, faSearch } from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { SetupSatelliteModal, type SetupSatelliteModalRef } from './SetupSatelliteModal.js'
-import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
-import { NonIdealState } from '~/Components/NonIdealState.js'
+import { useNavigate } from '@tanstack/react-router'
+import { toJS } from 'mobx'
 import { observer } from 'mobx-react-lite'
+import { useCallback, useContext, useRef } from 'react'
+import { ParseExpression, ResolveExpression } from '@companion-app/shared/Expressions.js'
+import type {
+	ClientDiscoveredSurfaceInfoPlugin,
+	ClientDiscoveredSurfaceInfoSatellite,
+} from '@companion-app/shared/Model/Surfaces.js'
+import { Button, ButtonGroup } from '~/Components/Button'
+import { NonIdealState } from '~/Components/NonIdealState.js'
 import { trpc, useMutationExt } from '~/Resources/TRPC.js'
+import { assertNever, useComputed } from '~/Resources/util.js'
+import { RootAppStoreContext } from '~/Stores/RootAppStore.js'
+import { SetupSatelliteModal, type SetupSatelliteModalRef } from './SetupSatelliteModal.js'
 import { useSurfaceDiscoveryContext } from './SurfaceDiscoveryContext.js'
 
 export const SurfaceDiscoveryTable = observer(function SurfaceDiscoveryTable() {
+	const { notifier } = useContext(RootAppStoreContext)
+	const navigate = useNavigate()
+
 	const { discoveredSurfaces } = useSurfaceDiscoveryContext()
-	const { userConfig } = useContext(RootAppStoreContext)
 
 	const setupSatelliteRef = useRef<SetupSatelliteModalRef>(null)
 
@@ -24,24 +29,27 @@ export const SurfaceDiscoveryTable = observer(function SurfaceDiscoveryTable() {
 		setupSatelliteRef.current?.show(surfaceInfo)
 	}, [])
 
-	const addRemoteStreamDeckMutation = useMutationExt(trpc.surfaces.outbound.add.mutationOptions())
-	const addRemoteStreamDeck = useCallback(
-		(surfaceInfo: ClientDiscoveredSurfaceInfoStreamDeck) => {
-			addRemoteStreamDeckMutation
+	const addRemotePluginSurfaceMutation = useMutationExt(trpc.surfaces.outbound.add.mutationOptions())
+	const addConnection = useCallback(
+		(surfaceInfo: ClientDiscoveredSurfaceInfoPlugin) => {
+			addRemotePluginSurfaceMutation
 				.mutateAsync({
-					type: 'elgato',
-					address: surfaceInfo.address,
-					port: surfaceInfo.port,
-					name: surfaceInfo.name,
+					instanceId: surfaceInfo.instanceId,
+					connectionId: surfaceInfo.id,
 				})
-				.then(() => {
-					console.log('added streamdeck', surfaceInfo)
+				.then((res) => {
+					if (!res.ok) {
+						notifier.show('Failed to setup connection', res.error ?? 'Unknown error')
+					} else {
+						void navigate({ to: '/surfaces/remote/$connectionId', params: { connectionId: res.id } })
+					}
+					console.log('added plugin surface', surfaceInfo)
 				})
 				.catch((e) => {
-					console.error('Failed to add streamdeck: ', e)
+					console.error('Failed to add plugin surface: ', e)
 				})
 		},
-		[addRemoteStreamDeckMutation]
+		[addRemotePluginSurfaceMutation, navigate, notifier]
 	)
 
 	return (
@@ -52,39 +60,28 @@ export const SurfaceDiscoveryTable = observer(function SurfaceDiscoveryTable() {
 				<thead>
 					<tr>
 						<th>Name</th>
-						<th>Type</th>
 						<th>Address</th>
 						<th>&nbsp;</th>
 					</tr>
 				</thead>
 				<tbody>
-					{userConfig.properties?.discoveryEnabled ? (
-						<>
-							{Object.entries(discoveredSurfaces).map(([id, svc]) => {
-								switch (svc?.surfaceType) {
-									case 'satellite':
-										return <SatelliteRow key={id} surfaceInfo={svc} showSetupSatellite={showSetupSatellite} />
-									case 'streamdeck':
-										return <DiscoveredSurfaceRow key={id} surfaceInfo={svc} addRemoteStreamDeck={addRemoteStreamDeck} />
-									case undefined:
-										return null
-									default:
-										assertNever(svc)
-										return null
-								}
-							})}
-							{Object.values(discoveredSurfaces).length === 0 && (
-								<tr>
-									<td colSpan={7}>
-										<NonIdealState icon={faSearch} text="Searching for remote surfaces" />
-									</td>
-								</tr>
-							)}
-						</>
-					) : (
+					{Object.entries(discoveredSurfaces).map(([id, svc]) => {
+						switch (svc?.surfaceType) {
+							case 'satellite':
+								return <SatelliteRow key={id} surfaceInfo={svc} showSetupSatellite={showSetupSatellite} />
+							case 'plugin':
+								return <PluginSurfaceRow key={id} surfaceInfo={svc} addConnection={addConnection} />
+							case undefined:
+								return null
+							default:
+								assertNever(svc)
+								return null
+						}
+					})}
+					{Object.values(discoveredSurfaces).length === 0 && (
 						<tr>
 							<td colSpan={7}>
-								<NonIdealState icon={faBan} text="Discovery of Remote surfaces is disabled" />
+								<NonIdealState icon={faSearch} text="Searching for remote surfaces" />
 							</td>
 						</tr>
 					)}
@@ -112,8 +109,15 @@ function SatelliteRow({ surfaceInfo, showSetupSatellite }: SatelliteRowProps) {
 
 	return (
 		<tr>
-			<td>{surfaceInfo.name}</td>
-			<td>Companion Satellite</td>
+			<td>
+				<div className="flex flex-column">
+					<b>{surfaceInfo.name}</b>
+					<span className="auto-ellipsis" title="Companion Satellite">
+						Companion Satellite
+					</span>
+				</div>
+			</td>
+
 			<td>
 				{addresses.map((address) => {
 					// Ensure ipv6 is formatted correctly for links
@@ -133,48 +137,99 @@ function SatelliteRow({ surfaceInfo, showSetupSatellite }: SatelliteRowProps) {
 				})}
 			</td>
 			<td>
-				<CButtonGroup>
-					<CButton onClick={() => showSetupSatellite(surfaceInfo)} title="Setup">
+				<ButtonGroup>
+					<Button onClick={() => showSetupSatellite(surfaceInfo)} title="Setup">
 						<FontAwesomeIcon icon={faPlus} /> Setup
-					</CButton>
-				</CButtonGroup>
+					</Button>
+				</ButtonGroup>
 			</td>
 		</tr>
 	)
 }
 
-interface StreamDeckRowProps {
-	surfaceInfo: ClientDiscoveredSurfaceInfoStreamDeck
-	addRemoteStreamDeck: (surfaceInfo: ClientDiscoveredSurfaceInfoStreamDeck) => void
+interface PluginSurfaceRowProps {
+	surfaceInfo: ClientDiscoveredSurfaceInfoPlugin
+	addConnection: (surfaceInfo: ClientDiscoveredSurfaceInfoPlugin) => void
 }
 
-const DiscoveredSurfaceRow = observer(function DiscoveredSurfaceRow({
-	surfaceInfo,
-	addRemoteStreamDeck,
-}: StreamDeckRowProps) {
-	const { surfaces } = useContext(RootAppStoreContext)
+const PluginSurfaceRow = observer(function PluginSurfaceRow({ surfaceInfo, addConnection }: PluginSurfaceRowProps) {
+	const { surfaceInstances, surfaces } = useContext(RootAppStoreContext)
 
-	const isAlreadyAdded = !!surfaces.getOutboundStreamDeckSurface(surfaceInfo.address, surfaceInfo.port)
+	const instanceInfo = surfaceInstances.instances.get(surfaceInfo.instanceId)
+
+	const isAlreadyAdded = useComputed(() => {
+		// If no expression, can't match
+		if (!instanceInfo?.remoteConfigMatches) return false
+
+		try {
+			const expression = ParseExpression(instanceInfo.remoteConfigMatches)
+			const doesMatch = (otherConfig: Record<string, any>) => {
+				try {
+					const val = ResolveExpression(expression, {
+						// Config-match expressions should be trivial - keep the budget tight
+						maxOperations: 1000,
+						maxCallDepth: 16,
+
+						getVariableValue: (props) => {
+							if (props.label === 'objA') {
+								return toJS(surfaceInfo.config[props.name])
+							} else if (props.label === 'objB') {
+								return toJS(otherConfig[props.name])
+							} else {
+								throw new Error(`Unknown variable "${props.variableId}"`)
+							}
+						},
+						parseVariables: null, // Not supported here
+						blink: undefined, // Not supported here
+
+						defaultTimezone: undefined, // no timezone context
+					})
+					return !!val && val !== 'false' && val !== '0'
+				} catch (e) {
+					console.error('Failed to resolve expression', e)
+					return false
+				}
+			}
+
+			// Find a surface which matches
+			for (const surface of surfaces.outboundSurfaces.values()) {
+				if (surface.type === 'plugin' && surface.instanceId === surfaceInfo.instanceId && doesMatch(surface.config)) {
+					return true
+				}
+			}
+
+			return false
+		} catch (e) {
+			console.error('Failed to process remoteConfigMatches expression', e)
+			return false
+		}
+	}, [instanceInfo, surfaceInfo, surfaces])
 
 	return (
 		<tr>
-			<td>{surfaceInfo.name}</td>
-			<td>{surfaceInfo.modelName}</td>
 			<td>
-				<p className="p-no-margin">{surfaceInfo.address}</p>
+				<div className="flex flex-column">
+					<b>{surfaceInfo.name}</b>
+					<span className="auto-ellipsis" title={surfaceInfo.description}>
+						{surfaceInfo.description}
+					</span>
+				</div>
 			</td>
 			<td>
-				<CButtonGroup>
+				<p className="p-no-margin">{surfaceInfo.address ?? '-'}</p>
+			</td>
+			<td>
+				<ButtonGroup>
 					{isAlreadyAdded ? (
-						<CButton title={'Already added'} className="btn-undefined" disabled>
+						<Button title={'Already added'} disabled>
 							<FontAwesomeIcon icon={faCheck} /> Already added
-						</CButton>
+						</Button>
 					) : (
-						<CButton onClick={() => addRemoteStreamDeck(surfaceInfo)} title="Add Stream Deck" className="btn-undefined">
-							<FontAwesomeIcon icon={faPlus} /> Add Stream Deck
-						</CButton>
+						<Button onClick={() => addConnection(surfaceInfo)} title="Add Connection">
+							<FontAwesomeIcon icon={faPlus} /> Add Connection
+						</Button>
 					)}
-				</CButtonGroup>
+				</ButtonGroup>
 			</td>
 		</tr>
 	)
