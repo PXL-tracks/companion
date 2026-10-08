@@ -421,6 +421,51 @@ export function createControlsTrpcRouter(
 				return results
 			}),
 
+		// Current values of actions that support learn (e.g. ATEM DVE position), read from the state of their module:
+		// the timeline learning mode records what is done by hand on the device
+		pxlLearn: publicProcedure
+			.input(
+				z.object({
+					queries: z.array(
+						z.object({
+							connectionId: z.string(),
+							actionId: z.string(),
+							options: z.record(z.string(), z.any()).optional(),
+						})
+					),
+				})
+			)
+			.query(async ({ input }) => {
+				logger.silly(`pxlLearn: ${input.queries.length} queries`)
+
+				return Promise.all(
+					input.queries.map(async (query) => {
+						const instance = processManager.getConnectionChild(query.connectionId)
+						if (!instance) return { success: false, error: `Connection "${query.connectionId}" not found` }
+
+						const actionEntity: ActionEntityModel = {
+							type: EntityModelType.Action,
+							id: nanoid(),
+							connectionId: query.connectionId,
+							definitionId: query.actionId,
+							options: optionsObjectToExpressionOptions(query.options || {}, false),
+							disabled: false,
+							upgradeIndex: undefined,
+						}
+
+						try {
+							const learnedOptions = await instance.entityLearnValues(actionEntity, 'timeline-learn')
+							return {
+								success: true,
+								value: learnedOptions ? convertExpressionOptionsWithoutParsing(learnedOptions) : learnedOptions,
+							}
+						} catch (error: any) {
+							return { success: false, error: error.message }
+						}
+					})
+				)
+			}),
+
 		pxlPeek: publicProcedure
 			.input(
 				z.object({
