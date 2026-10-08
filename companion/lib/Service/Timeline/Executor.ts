@@ -4,15 +4,6 @@ import { optionsObjectToExpressionOptions } from '@companion-app/shared/Model/Op
 import type { InstanceController } from '../../Instance/Controller.js'
 import type { Logger } from '../../Log/Controller.js'
 
-/**
- * PXL Timeline Sequencer - Direct Executor
- * Ultra-fast direct access to processManager for frame-accurate control
- *
- * @author Eliott Paris / DeeJayMX
- * @since 3.5.0
- * @copyright 2025 PixelMasters
- */
-
 export interface TimelineAction {
 	connectionId: string
 	actionId: string
@@ -34,17 +25,13 @@ export class TimelineExecutor {
 	constructor(logger: Logger, instanceController: InstanceController) {
 		this.#logger = logger
 		this.#instanceController = instanceController
-
-		// Register global executor for IPC access
 		;(global as any).pxlCore = {
 			executeActions: this.executeActions.bind(this),
 		}
 
-		// Cleanup on exit
 		const cleanup = () => {
 			if ((global as any).pxlCore) {
 				delete (global as any).pxlCore
-				this.#logger.info('🧹 PXL Timeline Direct Executor - Cleaned up')
 			}
 		}
 
@@ -53,11 +40,6 @@ export class TimelineExecutor {
 		process.on('SIGTERM', cleanup)
 	}
 
-	/**
-	 * Execute multiple actions in parallel (batch from one tick)
-	 * NOTE: Internal actions (custom variables) are NOT handled here
-	 * They continue using the existing optimized path
-	 */
 	async executeActions(actions: TimelineAction[]): Promise<ExecuteResult> {
 		if (!actions || actions.length === 0) {
 			return { success: true, count: 0 }
@@ -65,23 +47,19 @@ export class TimelineExecutor {
 
 		const startTime = Date.now()
 
-		// Execute all actions in parallel
 		const results = await Promise.allSettled(
 			actions.map(async (action) => {
 				const { connectionId, actionId, options } = action
 
-				// Build action entity
 				const actionEntity: ActionEntityModel = {
 					type: EntityModelType.Action,
 					id: nanoid(),
 					connectionId: connectionId,
 					definitionId: actionId,
-					// The module sends raw values, entities expect { value, isExpression } since Companion 4.3
 					options: optionsObjectToExpressionOptions(options || {}, false),
 					upgradeIndex: undefined,
 				}
 
-				// Build extras
 				const extras = {
 					controlId: 'pxl-timeline',
 					surfaceId: undefined,
@@ -90,7 +68,6 @@ export class TimelineExecutor {
 					executionMode: 'concurrent' as const,
 				}
 
-				// Execute via processManager DIRECT
 				const child = this.#instanceController.processManager.getConnectionChild(connectionId)
 				if (!child) {
 					throw new Error(`Connection ${connectionId} not found`)
@@ -105,7 +82,7 @@ export class TimelineExecutor {
 		const succeeded = results.filter((r) => r.status === 'fulfilled').length
 		const failed = results.filter((r) => r.status === 'rejected').length
 
-		this.#logger.debug(`⚡ Executed ${actions.length} actions in ${elapsed}ms (${succeeded} ok, ${failed} fail)`)
+		this.#logger.debug(`Executed ${actions.length} actions in ${elapsed}ms (${succeeded} ok, ${failed} fail)`)
 
 		return {
 			success: true,
@@ -116,9 +93,6 @@ export class TimelineExecutor {
 		}
 	}
 
-	/**
-	 * Get executor status
-	 */
 	getStatus(): { ready: boolean; registered: boolean; method: string } {
 		return {
 			ready: true,

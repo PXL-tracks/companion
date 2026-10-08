@@ -232,11 +232,10 @@ export class DataUsageStatistics {
 
 	/**
 	 * Run reporting cycle
-	 * DISABLED in PXL fork - no telemetry sent to Bitfocus
 	 */
 	#cycle() {
-		this.#logger.silly('cycle - DISABLED in PXL fork')
-		return // PXL: Telemetry disabled
+		this.#logger.silly('cycle')
+		return
 
 		try {
 			const payload = this.#buildPayload()

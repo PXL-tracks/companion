@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          submodules: false # PXL: private timeline-sequencer submodule, not needed to build
+          submodules: false
           ref: ${{ env.COMPANION_BRANCH }}
           token: ${{ secrets.SYNC_MODULES_PAT }}
 

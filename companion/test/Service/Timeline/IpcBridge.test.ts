@@ -4,9 +4,6 @@ import { ConnectionChildHandlerLegacy } from '../../../lib/Instance/Connection/C
 import { TimelineExecutor } from '../../../lib/Service/Timeline/Executor.js'
 import { handlePxlIpcMessage } from '../../../lib/Service/Timeline/IpcBridge.js'
 
-// PXL-tracks: the timeline sequencer relies on these to drive other connections at frame rate.
-// An upstream merge already lost the IPC interception once without any conflict, these tests guard against that.
-
 function createLogger(): any {
 	return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), silly: vi.fn() }
 }
@@ -67,7 +64,7 @@ describe('TimelineExecutor', () => {
 })
 
 describe('handlePxlIpcMessage', () => {
-	test('ignores messages which are not for PXL', () => {
+	test('ignores other messages', () => {
 		const reply = vi.fn()
 		expect(handlePxlIpcMessage({ direction: 'call', name: 'log-message' }, reply, createLogger())).toBe(false)
 		expect(handlePxlIpcMessage(undefined, reply, createLogger())).toBe(false)
@@ -103,7 +100,7 @@ describe('handlePxlIpcMessage', () => {
 		expect(reply).toHaveBeenCalledWith({
 			_replyTo: 'tl_2',
 			success: false,
-			error: 'PXL Timeline Executor not registered',
+			error: 'Executor not registered',
 		})
 	})
 
@@ -140,7 +137,6 @@ describe('ConnectionChildHandlerLegacy', () => {
 		const monitor: any = new EventEmitter()
 		monitor.child = { send: childSend }
 
-		// The timeline sequencer module is built against module-base 1.13
 		new ConnectionChildHandlerLegacy({ controls: {} } as any, monitor, 'pxl-timeline', '1.13.4', async () => {})
 
 		monitor.emit('message', {

@@ -195,7 +195,6 @@ export class ConnectionChildHandlerLegacy implements ChildProcessHandlerBase, Co
 			: null
 
 		const messageHandler = (msg: any) => {
-			// PXL-tracks: Timeline Sequencer IPC fast path
 			if (handlePxlIpcMessage(msg, (reply) => monitor.child?.send(reply as any), this.logger)) return
 
 			this.#ipcWrapper.receivedMessage(msg)

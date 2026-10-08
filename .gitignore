@@ -113,6 +113,4 @@ typings/
 .claude/
 /AGENTS.md
 
-# PXL Dev - ignore runtime data but keep templates
 /companion-data/
-!config-template/

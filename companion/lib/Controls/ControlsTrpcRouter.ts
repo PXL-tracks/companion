@@ -345,7 +345,6 @@ export function createControlsTrpcRouter(
 						id: nanoid(),
 						connectionId: actionInput.connectionId,
 						definitionId: actionInput.actionId,
-						// The module sends raw values, entities expect { value, isExpression } since Companion 4.3
 						options: optionsObjectToExpressionOptions(actionInput.options, false),
 						disabled: false,
 						upgradeIndex: undefined,
@@ -408,7 +407,6 @@ export function createControlsTrpcRouter(
 
 					try {
 						const learnedOptions = await instance.entityLearnValues(feedbackEntity, 'timeline-learn')
-						// Keep returning raw values to the module, as before Companion 4.3
 						results.push({
 							success: true,
 							value: learnedOptions ? convertExpressionOptionsWithoutParsing(learnedOptions) : learnedOptions,
@@ -421,8 +419,6 @@ export function createControlsTrpcRouter(
 				return results
 			}),
 
-		// Current values of actions that support learn (e.g. ATEM DVE position), read from the state of their module:
-		// the timeline learning mode records what is done by hand on the device
 		pxlLearn: publicProcedure
 			.input(
 				z.object({
