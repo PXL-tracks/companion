@@ -44,6 +44,7 @@ Timeline Sequencer module (module-base 1.13, node18 runtime)
   └─ tRPC over WebSocket ws://127.0.0.1:<Companion Port>/trpc
        controls.pxlFire   run actions (fallback when IPC is not available)
        controls.pxlSniff  read the current value of a connection through a feedback "learn"
+       controls.pxlLearn  read the current options of actions through their "learn" (LEARN mode of the module)
        controls.pxlPeek   action metadata (options, min/max, choices...)
        + stock routes: instances.connections.watch, instances.statuses.watch,
          instances.definitions.actions, customVariables.create/delete/setCurrent, appInfo.version
@@ -51,7 +52,7 @@ Timeline Sequencer module (module-base 1.13, node18 runtime)
 
 - **Playback has no tRPC fallback**: if the IPC hook is missing, every batch times out after 5 s and nothing reaches the target connections. tRPC is about twice as slow (measured on v5.0.7: 0.64 ms per 4-action batch over IPC, 1.20 ms with `pxlFire`). The bridge only runs `actions` batches: it rejects method calls (`method: 'pxlFire'`...), which older module versions sent for single actions before falling back to tRPC.
 - **Latency is the device, not the bridge**: `result.elapsed` is the time inside Companion. On an ATEM in 1080p50 (October 2026) the IPC part of the round-trip is 0.2–0.6 ms and the rest (about 13 ms) is the ATEM, which acknowledges each command on its next video frame. The module logs this split every 5 s during playback (see its README, "Where the time goes").
-- **Option format**: since Companion 4.3, entity options are `{ value, isExpression }` objects. The module sends raw values, so the Executor, `pxlFire` and `pxlSniff` wrap them with `optionsObjectToExpressionOptions(options, false)`, and `pxlSniff` unwraps the learned values with `convertExpressionOptionsWithoutParsing` so the module still receives raw values.
+- **Option format**: since Companion 4.3, entity options are `{ value, isExpression }` objects. The module sends raw values, so the Executor, `pxlFire`, `pxlSniff` and `pxlLearn` wrap them with `optionsObjectToExpressionOptions(options, false)`, and `pxlSniff` / `pxlLearn` unwrap the learned values with `convertExpressionOptionsWithoutParsing` so the module still receives raw values.
 - **Option validation**: Companion 4.3+ validates the options of every action against its definition (module-base 1.13+ modules) and **rejects the whole action** for one invalid value, logging `Failed to parse action options ... The following selected values are not valid: ...`. Companion 4.2 passed them through. Example fixed in the module: the rebuilt `properties` of ATEM DVE / flying key groups listed `mixeffect` and `key`. The IPC reply still says `success: true` with `failed: n`, so look at the Companion log (or the module execution stats) when a connection does not react.
 - **Companion Port**: the module connects tRPC to `127.0.0.1` on its `Companion Port` config field (default 8000). With several Companions on one machine, set it to the port of the Companion running the module, otherwise it talks to the other one.
 - **Telemetry** to Bitfocus is disabled (`companion/lib/Data/UsageStatistics.ts`, `#cycle` returns early).
@@ -64,7 +65,7 @@ Everything else is upstream Companion.
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `companion/lib/Service/Timeline/Controller.ts`, `Executor.ts`, `IpcBridge.ts` | Fast path: executor registered as `global.pxlCore`, IPC message handling                  |
 | `companion/lib/Instance/Connection/ChildHandlerLegacy.ts`                     | One-line hook calling `handlePxlIpcMessage` in the module message handler                 |
-| `companion/lib/Controls/ControlsTrpcRouter.ts`                                | `pxlFire`, `pxlSniff`, `pxlPeek` procedures, extra `processManager` parameter             |
+| `companion/lib/Controls/ControlsTrpcRouter.ts`                                | `pxlFire`, `pxlSniff`, `pxlLearn`, `pxlPeek` procedures, extra `processManager` parameter |
 | `companion/lib/Controls/Controller.ts`                                        | Passes `processManager` to the router                                                     |
 | `companion/lib/Service/Controller.ts`                                         | Creates `ServiceTimeline`                                                                 |
 | `companion/lib/Data/UsageStatistics.ts`                                       | Telemetry disabled                                                                        |
@@ -238,6 +239,7 @@ The sequencer uses `@companion-module/base` 1.13 (handled by `ChildHandlerLegacy
 
 - `tracks-v5`: Companion 5.0.7 + PXL fast path restored, all CI checks green including `Build binaries` on every platform. Tested in a real Companion 5.0.7 with the probe and with the real module (playback, custom variables).
 - Module on `tracks-v5`, tested on a real ATEM in a second Companion (port 8100): frame-accurate playback (50.0 fps clock aligned on the ATEM video frames, round-trip ~9-13 ms, IPC 0.2-0.6 ms), pause keyframes, Pause TL, AUTO RE-CUE, playheads to the end of the timeline, PREV/NEXT KF, and a Companion API (actions, feedbacks, variables, button presets). Details in the module README ("Smooth playback", "Companion API").
+- LEARN (October 2026, needs `controls.pxlLearn`): REC tracks record what is done by hand on their device (ATEM panel...) while the timeline plays, or update the keyframe at the playhead when it is stopped; REC tracks never act. Track - Learning Mode creates the tracks from what moves on the device; RELINK moves the tracks of a missing connection to another one. Validated on the real ATEM (DVE and program cuts); RELINK only tested offline. Details in the module README ("Learning and relink").
 - Open PRs, merge in this order: [timeline-sequencer#1](https://github.com/PXL-tracks/timeline-sequencer/pull/1) **without squash** (the submodule pointer of `tracks-v5` points to its commits), [pxl-launcher#1](https://github.com/PXL-tracks/pxl-launcher/pull/1), [companion#1](https://github.com/PXL-tracks/companion/pull/1).
 - Then switch a machine to v5: `git checkout tracks-v5` (or `pxl-stable` once merged) in the launcher's `companion/` folder, `git submodule update --init`, run the launcher. It downloads Node.js 26.9.0, rebuilds and Companion imports the 4.2 config.
 - Not tested yet: `pxl-start.sh` on a real macOS / Linux machine.
